@@ -27,9 +27,12 @@ def create_app():
         origins=[
             "http://localhost:3000",
             "https://python-graph-project.onrender.com",
-            "https://python-graph-project-fall.vercel.app"
+            "https://python-graph-project-fall.vercel.app",
+            "https://python-graph-project-fall-ss1cuw632.vercel.app"
         ],
-        supports_credentials=True
+        supports_credentials=True,
+        allow_headers=["Content-Type", "Authorization"],
+        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
 
     mongo.init_app(app) # Initialize the global mongo instance with the app instance
