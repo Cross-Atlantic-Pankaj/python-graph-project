@@ -22,7 +22,15 @@ def create_app():
     # Load MONGO_URI from environment variable
     app.config["MONGO_URI"] = os.environ["MONGO_URI"]
     app.config['SECRET_KEY'] = 'your-secret-key-here'
-    CORS(app, origins=["http://localhost:3000","https://python-graph-project.onrender.com"], supports_credentials=True)
+    CORS(
+        app,
+        origins=[
+            "http://localhost:3000",
+            "https://python-graph-project.onrender.com",
+            "https://python-graph-project-fall.vercel.app"
+        ],
+        supports_credentials=True
+    )
 
     mongo.init_app(app) # Initialize the global mongo instance with the app instance
     app.mongo = mongo # Explicitly attach the mongo instance to the app object
