@@ -11,6 +11,7 @@ from flask_cors import CORS
 import os
 from bson.objectid import ObjectId
 from dotenv import load_dotenv
+import socket
 
 load_dotenv()
 
@@ -22,13 +23,20 @@ def create_app():
     # Load MONGO_URI from environment variable
     app.config["MONGO_URI"] = os.environ["MONGO_URI"]
     app.config['SECRET_KEY'] = 'your-secret-key-here'
+    app.config['SESSION_COOKIE_SAMESITE'] = 'None'
+    # Set SESSION_COOKIE_SECURE to False for local development, True for production
+    if 'localhost' in os.environ.get('MONGO_URI', '') or socket.gethostname() == 'localhost':
+        app.config['SESSION_COOKIE_SECURE'] = False
+    else:
+        app.config['SESSION_COOKIE_SECURE'] = True
     CORS(
         app,
         origins=[
-            "http://localhost:3000",
-            "https://python-graph-project.onrender.com",
+            "https://python-graph-project-fall-ss1cuw632.vercel.app",
             "https://python-graph-project-fall.vercel.app",
-            "https://python-graph-project-fall-ss1cuw632.vercel.app"
+            "https://python-graph-project.onrender.com",
+            "http://localhost:3000",
+            "http://localhost:3001"
         ],
         supports_credentials=True,
         allow_headers=["Content-Type", "Authorization"],
