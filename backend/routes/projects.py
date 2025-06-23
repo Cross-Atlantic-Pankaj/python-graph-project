@@ -185,7 +185,13 @@ def _generate_report(project_id, template_path, data_file_path):
 
                 fig.update_layout(**layout_updates)
 
-                if chart_meta.get("show_gridlines") is False:
+                # Only show grid lines if 'show_gridlines' is present in chart_meta
+                if "show_gridlines" in chart_meta:
+                    show_grid = bool(chart_meta["show_gridlines"])
+                    fig.update_xaxes(showgrid=show_grid)
+                    fig.update_yaxes(showgrid=show_grid)
+                # If not present, do not show grid lines (default: False)
+                else:
                     fig.update_xaxes(showgrid=False)
                     fig.update_yaxes(showgrid=False)
 
@@ -218,7 +224,12 @@ def _generate_report(project_id, template_path, data_file_path):
                     ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=11)
 
                 ax1.tick_params(axis='x', rotation=45)
-                ax1.grid(True, linestyle='--', alpha=0.6)
+                # Only show grid lines if 'show_gridlines' is present in chart_meta
+                if "show_gridlines" in chart_meta:
+                    show_grid = bool(chart_meta["show_gridlines"])
+                    ax1.grid(show_grid, linestyle='--', alpha=0.6)
+                else:
+                    ax1.grid(False)
                 fig_mpl.suptitle(title, fontsize=14, weight='bold')
                 fig_mpl.tight_layout()
 
