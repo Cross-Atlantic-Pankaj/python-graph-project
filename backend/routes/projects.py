@@ -66,7 +66,7 @@ def _generate_report(project_id, template_path, data_file_path):
         flat_data_map = {}
         for _, row in df.iterrows():
             chart_tag = row.get("Chart_Tag")
-            if not chart_tag:
+            if not isinstance(chart_tag, str) or not chart_tag:
                 continue
             section_prefix = chart_tag.replace('_chart', '').lower()
 
@@ -118,12 +118,89 @@ def _generate_report(project_id, template_path, data_file_path):
                 chart_tag_lower = chart_tag.lower()
                 raw_chart_attr = chart_attr_map.get(chart_tag_lower, "{}")
                 chart_config = json.loads(re.sub(r'//.*?\n|/\*.*?\*/', '', raw_chart_attr, flags=re.DOTALL))
+
                 chart_meta = chart_config.get("chart_meta", {})
                 series_meta = chart_config.get("series", {})
                 chart_type = chart_type_map.get(chart_tag_lower, "").lower().strip()
                 title = chart_meta.get("chart_title", chart_tag)
 
-                # Plotly interactive chart generation
+                # --- Extract custom fields from chart_config ---
+                bar_colors = chart_config.get("bar_colors")
+                bar_width = chart_config.get("bar_width")
+                orientation = chart_config.get("orientation")
+                bar_border_color = chart_config.get("bar_border_color")
+                bar_border_width = chart_config.get("bar_border_width")
+                font_family = chart_config.get("font_family") or chart_meta.get("font_family")
+                font_size = chart_config.get("font_size") or chart_meta.get("font_size")
+                font_color = chart_config.get("font_color") or chart_meta.get("font_color")
+                legend_position = chart_config.get("legend_position")
+                legend_font_size = chart_config.get("legend_font_size")
+                show_gridlines = chart_config.get("show_gridlines") if "show_gridlines" in chart_config else chart_meta.get("show_gridlines")
+                gridline_color = chart_config.get("gridline_color")
+                gridline_style = chart_config.get("gridline_style")
+                chart_background = chart_config.get("chart_background")
+                plot_background = chart_config.get("plot_background")
+                data_label_format = chart_config.get("data_label_format")
+                data_label_font_size = chart_config.get("data_label_font_size")
+                data_label_color = chart_config.get("data_label_color")
+                axis_tick_format = chart_config.get("axis_tick_format")
+                y_axis_min_max = chart_config.get("y_axis_min_max")
+                sort_order = chart_config.get("sort_order")
+                data_grouping = chart_config.get("data_grouping")
+                annotations = chart_config.get("annotations", [])
+
+                # --- Excel range extraction helpers ---
+                def extract_excel_range(sheet, cell_range):
+                    # cell_range: e.g., 'E23:E29' or 'AA20:AA23'
+                    from openpyxl.utils import range_boundaries
+                    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
+                    values = []
+                    for row in sheet.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col):
+                        for cell in row:
+                            values.append(cell.value)
+                    return values
+
+                # If chart_meta specifies source_sheet and ranges, extract data from Excel
+                extracted_x_axis = None
+                extracted_series_data = None
+                if "source_sheet" in chart_meta:
+                    wb = openpyxl.load_workbook(data_file_path, data_only=True)
+                    sheet = wb[chart_meta["source_sheet"]]
+                    # Pie chart extraction
+                    if chart_meta.get("chart_type", "").lower() == "pie":
+                        labels = extract_excel_range(sheet, chart_meta["category_range"]) if "category_range" in chart_meta else None
+                        values = extract_excel_range(sheet, chart_meta["value_range"]) if "value_range" in chart_meta else None
+                        extracted_series_data = [{
+                            "name": chart_meta.get("chart_title", "Pie"),
+                            "type": "pie",
+                            "labels": labels,
+                            "values": values,
+                            "marker": {"color": series_meta.get("colors")}
+                        }]
+                    # Stacked column extraction
+                    elif chart_meta.get("chart_type", "").lower() == "stacked_column":
+                        x_axis = extract_excel_range(sheet, chart_meta["category_range"]) if "category_range" in chart_meta else None
+                        series_labels = series_meta.get("labels", [])
+                        series_colors = series_meta.get("colors", [])
+                        value_ranges = chart_meta.get("value_range", [])
+                        extracted_series_data = []
+                        for idx, rng in enumerate(value_ranges):
+                            values = extract_excel_range(sheet, rng)
+                            extracted_series_data.append({
+                                "name": series_labels[idx] if idx < len(series_labels) else f"Series {idx+1}",
+                                "type": "bar",
+                                "values": values,
+                                "marker": {"color": series_colors[idx] if idx < len(series_colors) else None}
+                            })
+                        extracted_x_axis = x_axis
+
+                # Use extracted data if present
+                if extracted_series_data is not None:
+                    series_data = extracted_series_data
+                if extracted_x_axis is not None:
+                    x_values = extracted_x_axis
+
+                # --- Plotly interactive chart generation ---
                 fig = go.Figure()
                 x_values = series_meta.get("x_axis", [])
                 series_data = series_meta.get("data", [])
@@ -144,69 +221,201 @@ def _generate_report(project_id, template_path, data_file_path):
                     else:
                         return df.iloc[start_row_idx:end_row_idx + 1, start_col_idx:end_col_idx + 1].values.flatten().tolist()
 
+                # --- Data grouping and sorting logic ---
+                # If data_grouping is present, filter x/y values to only those groups
+                def group_and_sort(x_vals, y_vals, group_names=None, sort_order=None):
+                    # Grouping: only keep x/y where x in group_names (if group_names provided)
+                    if group_names:
+                        filtered = [(x, y) for x, y in zip(x_vals, y_vals) if x in group_names]
+                        if filtered:
+                            x_vals, y_vals = zip(*filtered)
+                        else:
+                            x_vals, y_vals = [], []
+                    # Sorting: sort by y-value
+                    if sort_order == "ascending":
+                        sorted_pairs = sorted(zip(x_vals, y_vals), key=lambda pair: pair[1])
+                        if sorted_pairs:
+                            x_vals, y_vals = zip(*sorted_pairs)
+                    elif sort_order == "descending":
+                        sorted_pairs = sorted(zip(x_vals, y_vals), key=lambda pair: pair[1], reverse=True)
+                        if sorted_pairs:
+                            x_vals, y_vals = zip(*sorted_pairs)
+                    return list(x_vals), list(y_vals)
+
                 for i, series in enumerate(series_data):
                     label = series.get("name", f"Series {i+1}")
                     series_type = series.get("type", "bar").lower()
-                    color = colors[i] if i < len(colors) else None
+                    color = None
+                    if "marker" in series and isinstance(series["marker"], dict) and "color" in series["marker"]:
+                        color = series["marker"]["color"]
+                    elif bar_colors:
+                        color = bar_colors
+                    elif i < len(colors):
+                        color = colors[i]
 
                     y_vals = series.get("values")
                     value_range = series.get("value_range")
                     if value_range:
                         y_vals = extract_values_from_range(value_range)
 
+                    # --- Apply grouping and sorting ---
+                    x_vals = x_values
+                    if y_vals is not None and x_vals is not None:
+                        x_vals, y_vals = group_and_sort(x_vals, y_vals, data_grouping, sort_order)
+
+                    trace_kwargs = {
+                        "x": x_vals,
+                        "y": y_vals,
+                        "name": label,
+                    }
+                    if color:
+                        if isinstance(color, list) and series_type == "bar":
+                            trace_kwargs["marker"] = dict(color=color)
+                        elif isinstance(color, str):
+                            trace_kwargs["marker_color"] = color
+                    if bar_width and series_type == "bar":
+                        trace_kwargs["width"] = bar_width
+                    if orientation and series_type == "bar":
+                        trace_kwargs["orientation"] = orientation[0].lower() if isinstance(orientation, str) else orientation
+                    if bar_border_color and series_type == "bar":
+                        trace_kwargs["marker_line_color"] = bar_border_color
+                    if bar_border_width and series_type == "bar":
+                        trace_kwargs["marker_line_width"] = bar_border_width
+
                     if series_type == "bar":
-                        fig.add_trace(go.Bar(
-                            x=x_values, y=y_vals, name=label, marker_color=color,
+                        fig.add_trace(go.Bar(**trace_kwargs,
                             hovertemplate=f"<b>{label}</b><br>Year: %{{x}}<br>Value: %{{y}}<extra></extra>"
                         ))
                     elif series_type == "line":
-                        fig.add_trace(go.Scatter(
-                            x=x_values, y=y_vals, name=label, mode='lines+markers', marker=dict(color=color),
+                        fig.add_trace(go.Scatter(**trace_kwargs,
+                            mode='lines+markers',
                             hovertemplate=f"<b>{label}</b><br>Year: %{{x}}<br>Value: %{{y}}<extra></extra>"
                         ))
+                    elif series_type == "area":
+                        # Area chart: use Scatter with fill='tozeroy'
+                        fig.add_trace(go.Scatter(**trace_kwargs,
+                            mode='lines',
+                            fill='tozeroy',
+                            hovertemplate=f"<b>{label}</b><br>Year: %{{x}}<br>Value: %{{y}}<extra></extra>"
+                        ))
+                    elif series_type == "pie":
+                        # Pie chart: use go.Pie, x_vals as labels, y_vals as values
+                        pie_kwargs = {
+                            "labels": x_vals,
+                            "values": y_vals,
+                            "name": label
+                        }
+                        # Pie colors
+                        if color:
+                            pie_kwargs["marker"] = dict(colors=color) if isinstance(color, list) else dict(colors=[color])
+                        fig.add_trace(go.Pie(**pie_kwargs,
+                            hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}<extra></extra>"
+                        ))
 
-                layout_updates = {
-                    "title": title,
-                    "xaxis_title": chart_meta.get("x_label", "X"),
-                    "yaxis_title": chart_meta.get("primary_y_label", "Y"),
-                    "template": "plotly_white",
-                    "legend": dict(x=0.01, y=1.1)
-                }
-
-                # Apply extra info if available
-                for key in ["font_family", "font_size", "font_color", "legend_position"]:
-                    if key in chart_meta:
-                        layout_updates.setdefault("font", {})[key.replace("font_", "")] = chart_meta[key]
-
-                if "chart_background" in chart_meta:
-                    layout_updates["paper_bgcolor"] = chart_meta["chart_background"]
-                if "plot_background" in chart_meta:
-                    layout_updates["plot_bgcolor"] = chart_meta["plot_background"]
+                # --- Layout updates ---
+                layout_updates = {}
+                # Title and axis labels
+                layout_updates["title"] = title
+                layout_updates["xaxis_title"] = chart_meta.get("x_label", chart_config.get("x_axis_title", "X"))
+                layout_updates["yaxis_title"] = chart_meta.get("primary_y_label", chart_config.get("y_axis_title", "Y"))
+                # Font
+                if font_family or font_size or font_color:
+                    layout_updates["font"] = {}
+                    if font_family:
+                        layout_updates["font"]["family"] = font_family
+                    if font_size:
+                        layout_updates["font"]["size"] = font_size
+                    if font_color:
+                        layout_updates["font"]["color"] = font_color
+                # Backgrounds
+                if chart_background:
+                    layout_updates["paper_bgcolor"] = chart_background
+                if plot_background:
+                    layout_updates["plot_bgcolor"] = plot_background
+                # Legend
+                if legend_position:
+                    # Map 'top', 'bottom', 'left', 'right' to valid Plotly legend positions
+                    pos_map = {
+                        "top":    dict(x=0.5, y=1.1, xanchor="center", yanchor="top"),
+                        "bottom": dict(x=0.5, y=-0.2, xanchor="center", yanchor="bottom"),
+                        "left":   dict(x=-0.2, y=0.5, xanchor="left", yanchor="middle"),
+                        "right":  dict(x=1.1, y=0.5, xanchor="right", yanchor="middle"),
+                    }
+                    if legend_position in pos_map:
+                        layout_updates["legend"] = pos_map[legend_position]
+                if legend_font_size:
+                    layout_updates.setdefault("legend", {})["font"] = {"size": legend_font_size}
+                # Axis min/max and tick format
+                if y_axis_min_max:
+                    layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                    layout_updates["yaxis"]["range"] = y_axis_min_max
+                if axis_tick_format:
+                    layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                    layout_updates["yaxis"]["tickformat"] = axis_tick_format
+                # Gridlines
+                if show_gridlines is not None:
+                    layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                    layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                    layout_updates["xaxis"]["showgrid"] = bool(show_gridlines)
+                    layout_updates["yaxis"]["showgrid"] = bool(show_gridlines)
+                if gridline_color:
+                    layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                    layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                    layout_updates["xaxis"]["gridcolor"] = gridline_color
+                    layout_updates["yaxis"]["gridcolor"] = gridline_color
+                if gridline_style:
+                    dash_map = {"solid": "solid", "dot": "dot", "dash": "dash"}
+                    dash_style = dash_map.get(gridline_style, "solid")
+                    layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                    layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                    layout_updates["xaxis"]["griddash"] = dash_style
+                    layout_updates["yaxis"]["griddash"] = dash_style
+                # Data labels (for bar/line traces)
+                if data_label_format or data_label_font_size or data_label_color:
+                    for trace in fig.data:
+                        if data_label_format:
+                            if trace.type == 'bar':
+                                trace.update(texttemplate=f"%{{y:{data_label_format}}}", textposition="auto")
+                            elif trace.type == 'scatter':
+                                trace.update(texttemplate=f"%{{y:{data_label_format}}}", textposition="top center")
+                        if data_label_font_size or data_label_color:
+                            trace.update(textfont={})
+                            if data_label_font_size:
+                                trace.textfont["size"] = data_label_font_size
+                            if data_label_color:
+                                trace.textfont["color"] = data_label_color
+                # Annotations
+                if annotations:
+                    layout_updates["annotations"] = []
+                    for ann in annotations:
+                        ann_dict = {
+                            "text": ann.get("text", ""),
+                            "x": ann.get("x_value", ann.get("x")),
+                            "y": ann.get("y_value", ann.get("y")),
+                            "showarrow": True
+                        }
+                        layout_updates["annotations"].append(ann_dict)
 
                 fig.update_layout(**layout_updates)
-
-                # Only show grid lines if 'show_gridlines' is present in chart_meta
-                if "show_gridlines" in chart_meta:
-                    show_grid = bool(chart_meta["show_gridlines"])
-                    fig.update_xaxes(showgrid=show_grid)
-                    fig.update_yaxes(showgrid=show_grid)
-                # If not present, do not show grid lines (default: False)
-                else:
-                    fig.update_xaxes(showgrid=False)
-                    fig.update_yaxes(showgrid=False)
 
                 interactive_path = os.path.join(UPLOAD_FOLDER, 'reports', f'interactive_{chart_tag_lower}.html')
                 fig.write_html(interactive_path)
                 current_app.logger.debug(f"\U0001F310 Interactive chart saved to: {interactive_path}")
 
-                # Matplotlib static chart for DOCX
+                # --- Matplotlib static chart for DOCX (basic mapping) ---
                 fig_mpl, ax1 = plt.subplots(figsize=(10, 6), dpi=200)
                 ax2 = ax1.twinx()
 
                 for i, series in enumerate(series_data):
                     label = series.get("name", f"Series {i+1}")
                     series_type = series.get("type", "bar").lower()
-                    color = colors[i] if i < len(colors) else None
+                    color = None
+                    if "marker" in series and isinstance(series["marker"], dict) and "color" in series["marker"]:
+                        color = series["marker"]["color"]
+                    elif bar_colors:
+                        color = bar_colors
+                    elif i < len(colors):
+                        color = colors[i]
 
                     y_vals = series.get("values")
                     value_range = series.get("value_range")
@@ -214,23 +423,28 @@ def _generate_report(project_id, template_path, data_file_path):
                         y_vals = extract_values_from_range(value_range)
 
                     if series_type == "bar":
-                        ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7)
+                        if isinstance(color, list):
+                            for j, val in enumerate(y_vals):
+                                bar_color = color[j % len(color)]
+                                ax1.bar(x_values[j], val, color=bar_color, alpha=0.7)
+                        else:
+                            ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7)
                     elif series_type == "line":
                         ax2.plot(x_values, y_vals, label=label, color=color, marker='o', linewidth=2)
 
-                ax1.set_xlabel(chart_meta.get("x_label", "X"), fontsize=11)
-                ax1.set_ylabel(chart_meta.get("primary_y_label", "Primary Y"), fontsize=11)
-                if "secondary_y_label" in chart_meta:
-                    ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=11)
+                ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), fontsize=font_size or 11)
+                ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("y_axis_title", "Primary Y")), fontsize=font_size or 11)
+                if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
+                    ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), fontsize=font_size or 11)
 
                 ax1.tick_params(axis='x', rotation=45)
-                # Only show grid lines if 'show_gridlines' is present in chart_meta
-                if "show_gridlines" in chart_meta:
-                    show_grid = bool(chart_meta["show_gridlines"])
-                    ax1.grid(show_grid, linestyle='--', alpha=0.6)
+                if show_gridlines is not None:
+                    ax1.grid(bool(show_gridlines), linestyle=gridline_style or '--', color=gridline_color or '#ccc', alpha=0.6)
+                    ax2.grid(bool(show_gridlines), linestyle=gridline_style or '--', color=gridline_color or '#ccc', alpha=0.6)
                 else:
                     ax1.grid(False)
-                fig_mpl.suptitle(title, fontsize=14, weight='bold')
+                    ax2.grid(False)
+                fig_mpl.suptitle(title, fontsize=font_size or 14, weight='bold')
                 fig_mpl.tight_layout()
 
                 tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
@@ -285,95 +499,6 @@ def _generate_report(project_id, template_path, data_file_path):
         import traceback
         current_app.logger.error(traceback.format_exc())
         return None
-
-# def process_paragraph(paragraph, text_data_sheet, project_id, section_key):
-#     """Process a paragraph and replace placeholders with data from Excel."""
-#     try:
-#         current_app.logger.debug(f"Processing paragraph: {paragraph.text}")
-        
-#         # Get all text replacements from the Excel sheet
-#         replacements = {}
-#         for row in text_data_sheet.iter_rows(min_row=2):  # Skip header row
-#             if row[0].value and row[1].value:  # If both key and value exist
-#                 key = str(row[0].value).strip()
-#                 value = str(row[1].value).strip()
-#                 # Handle both ${key} and key formats
-#                 replacements[f"${{{key}}}"] = value
-#                 replacements[key] = value
-#                 # Special handling for <country> tag
-#                 if key == "country":
-#                     replacements["<country>"] = value
-#                 # Handle Table_Tag _VAL format
-#                 if "_VAL" in key:
-#                     base_key = key.replace(" _VAL", "")
-#                     replacements[f"${{{base_key}}}"] = value
-#                     replacements[base_key] = value
-        
-#         current_app.logger.debug(f"Constructed replacements dictionary: {replacements}")
-        
-#         # Replace text placeholders
-#         text = paragraph.text
-#         for key, value in replacements.items():
-#             if key in text:
-#                 text = text.replace(key, value)
-#                 current_app.logger.debug(f"Replaced {key} with {value}")
-        
-#         # Check for dynamic chart placeholders like ${sectionX_chart}
-#         chart_placeholder_match = re.search(r'\${(section\d+_chart)}', text)
-#         if chart_placeholder_match:
-#             chart_placeholder_name = chart_placeholder_match.group(1) # e.g., "section1_chart"
-#             excel_chart_key = f"Chart Attributes_{chart_placeholder_name.replace('_chart', '')}" # e.g., "Chart Attributes_section1"
-#             current_app.logger.debug(f"Found dynamic chart placeholder: {chart_placeholder_name}. Looking for Excel key: {excel_chart_key}")
-
-#             chart_attrs = None
-#             for row in text_data_sheet.iter_rows(min_row=2):
-#                 if row[0].value and str(row[0].value).strip() == excel_chart_key:
-#                     chart_attrs = row[1].value
-#                     break
-
-#             if chart_attrs:
-#                 current_app.logger.debug(f"Found chart attributes in Excel for {excel_chart_key}")
-#                 # Clean the JSON string
-#                 chart_attrs = re.sub(r'//.*$', '', chart_attrs, flags=re.MULTILINE)  # Remove single-line comments
-#                 chart_attrs = re.sub(r'/\*.*?\*/', '', chart_attrs, flags=re.DOTALL)  # Remove multi-line comments
-#                 chart_attrs = chart_attrs.strip()
-                
-#                 try:
-#                     # Generate chart
-#                     chart_path = _generate_chart_image(chart_attrs, text_data_sheet, project_id, chart_placeholder_name)
-#                     if chart_path:
-#                         current_app.logger.debug(f"Chart generated successfully at {chart_path}")
-#                         # Replace chart placeholder with image
-#                         text = text.replace(f"${{{chart_placeholder_name}}}", "")
-#                         paragraph.clear()
-#                         paragraph.add_run(text)
-#                         paragraph.add_run().add_picture(chart_path, width=Inches(6))
-#                         current_app.logger.debug("Chart inserted into document")
-#                     else:
-#                         current_app.logger.error("Failed to generate chart")
-#                         text = text.replace(f"${{{chart_placeholder_name}}}", "[Chart generation failed]")
-#                         paragraph.text = text
-#                 except Exception as e:
-#                     current_app.logger.error(f"Error processing chart for {chart_placeholder_name}: {str(e)}")
-#                     text = text.replace(f"${{{chart_placeholder_name}}}", "[Chart generation failed]")
-#                     paragraph.text = text
-#             else:
-#                 current_app.logger.error(f"No chart attributes found in Excel for {excel_chart_key}")
-#                 text = text.replace(f"${{{chart_placeholder_name}}}", "[No chart data found]")
-#                 paragraph.text = text
-#         else:
-#             # If no chart placeholder, just update the text
-#             paragraph.text = text
-        
-#         current_app.logger.debug(f"Final paragraph text: {paragraph.text}")
-#         return paragraph
-        
-#     except Exception as e:
-#         current_app.logger.error(f"Error processing paragraph: {str(e)}")
-#         import traceback
-#         current_app.logger.error(traceback.format_exc())
-#         return paragraph
-
 
 @projects_bp.route('/api/projects', methods=['GET'])
 @login_required
