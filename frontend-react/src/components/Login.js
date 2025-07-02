@@ -79,8 +79,8 @@ function Login() {
               <LockOutlinedIcon sx={{ color: '#fff', fontSize: 36 }} />
             </Box>
             <Typography variant="h4" component="h1" fontWeight={700} gutterBottom align="center" color="primary">
-              Welcome Back
-            </Typography>
+            Welcome Back
+          </Typography>
           </Box>
           {error && (
             <Alert severity="error" sx={{ mb: 2, width: '100%' }}>

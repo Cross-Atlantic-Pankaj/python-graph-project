@@ -81,8 +81,8 @@ function Register() {
               <PersonAddAlt1Icon sx={{ color: '#fff', fontSize: 36 }} />
             </Box>
             <Typography variant="h4" component="h1" fontWeight={700} gutterBottom align="center" color="primary">
-              Create Account
-            </Typography>
+            Create Account
+          </Typography>
           </Box>
           {error && (
             <Alert severity="error" sx={{ mb: 2, width: '100%' }}>
