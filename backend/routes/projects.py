@@ -216,47 +216,71 @@ def _generate_report(project_id, template_path, data_file_path):
                     wb = openpyxl.load_workbook(data_file_path, data_only=True)
                     sheet = wb[chart_meta["source_sheet"]]
                     
-                    # Pie chart extraction
-                    if chart_type_from_meta == "pie":
+                    # Generic chart type extraction
+                    chart_extraction_mapping = {
+                        # Single series charts
+                        "pie": "single_series",
+                        "donut": "single_series", 
+                        "histogram": "single_series",
+                        "box": "single_series",
+                        "violin": "single_series",
+                        "waterfall": "single_series",
+                        "funnel": "single_series",
+                        "sunburst": "single_series",
+                        "treemap": "single_series",
+                        "icicle": "single_series",
+                        "sankey": "single_series",
+                        "indicator": "single_series",
+                        
+                        # Multi-series charts
+                        "bar": "multi_series",
+                        "column": "multi_series",
+                        "stacked_column": "multi_series", 
+                        "horizontal_bar": "multi_series",
+                        "line": "multi_series",
+                        "scatter": "multi_series",
+                        "scatter_line": "multi_series",
+                        "area": "multi_series",
+                        "filled_area": "multi_series",
+                        "bubble": "multi_series",
+                        "heatmap": "multi_series",
+                        "contour": "multi_series",
+                        "scatter3d": "multi_series",
+                        "surface": "multi_series",
+                        "mesh3d": "multi_series",
+                        "candlestick": "multi_series",
+                        "ohlc": "multi_series",
+                        "scattergeo": "multi_series",
+                        "choropleth": "multi_series"
+                    }
+                    
+                    extraction_type = chart_extraction_mapping.get(chart_type_from_meta, "multi_series")
+                    
+                    if extraction_type == "single_series":
+                        # Single series chart extraction (pie, histogram, etc.)
                         labels = extract_excel_range(sheet, chart_meta["category_range"]) if "category_range" in chart_meta else None
                         values = extract_excel_range(sheet, chart_meta["value_range"]) if "value_range" in chart_meta else None
                         extracted_series_data = [{
-                            "name": chart_meta.get("chart_title", "Pie"),
-                            "type": "pie",
+                            "name": chart_meta.get("chart_title", chart_type_from_meta.title()),
+                            "type": chart_type_from_meta,
                             "labels": labels,
                             "values": values,
                             "marker": {"color": series_meta.get("colors")}
                         }]
-                    
-                    # Stacked column extraction
-                    elif chart_type_from_meta == "stacked_column":
+                        
+                    elif extraction_type == "multi_series":
+                        # Multi-series chart extraction (bar, line, area, etc.)
                         x_axis = extract_excel_range(sheet, chart_meta["category_range"]) if "category_range" in chart_meta else None
                         series_labels = series_meta.get("labels", [])
                         series_colors = series_meta.get("colors", [])
                         value_ranges = chart_meta.get("value_range", [])
                         extracted_series_data = []
+                        
                         for idx, rng in enumerate(value_ranges):
                             values = extract_excel_range(sheet, rng)
                             extracted_series_data.append({
                                 "name": series_labels[idx] if idx < len(series_labels) else f"Series {idx+1}",
-                                "type": "bar",
-                                "values": values,
-                                "marker": {"color": series_colors[idx] if idx < len(series_colors) else None}
-                            })
-                        extracted_x_axis = x_axis
-                    
-                    # Area chart extraction
-                    elif chart_type_from_meta == "area":
-                        x_axis = extract_excel_range(sheet, chart_meta["category_range"]) if "category_range" in chart_meta else None
-                        series_labels = series_meta.get("labels", [])
-                        series_colors = series_meta.get("colors", [])
-                        value_ranges = chart_meta.get("value_range", [])
-                        extracted_series_data = []
-                        for idx, rng in enumerate(value_ranges):
-                            values = extract_excel_range(sheet, rng)
-                            extracted_series_data.append({
-                                "name": series_labels[idx] if idx < len(series_labels) else f"Series {idx+1}",
-                                "type": "area",
+                                "type": chart_type_from_meta,
                                 "values": values,
                                 "marker": {"color": series_colors[idx] if idx < len(series_colors) else None}
                             })
@@ -418,24 +442,160 @@ def _generate_report(project_id, template_path, data_file_path):
                         if bar_border_width and series_type == "bar":
                             trace_kwargs["marker_line_width"] = bar_border_width
 
-                        # Add traces based on chart type
-                        if series_type == "bar":
-                            # For stacked column, ensure proper stacking
-                            if chart_type == "stacked_column":
-                                trace_kwargs["barmode"] = "stack"
-                            fig.add_trace(go.Bar(**trace_kwargs,
-                                hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
-                            ))
-                        elif series_type == "line":
+                        # Add traces based on chart type - REPLACE THE RESTRICTIVE IF/ELIF BLOCKS
+                        # Generic chart type handling for Plotly
+                        chart_type_mapping = {
+                            # Bar charts
+                            "bar": go.Bar,
+                            "column": go.Bar,
+                            "stacked_column": go.Bar,
+                            "horizontal_bar": go.Bar,
+                            
+                            # Line charts
+                            "line": go.Scatter,
+                            "scatter": go.Scatter,
+                            "scatter_line": go.Scatter,
+                            
+                            # Area charts
+                            "area": go.Scatter,
+                            "filled_area": go.Scatter,
+                            
+                            # Pie charts
+                            "pie": go.Pie,
+                            "donut": go.Pie,
+                            
+                            # 3D charts
+                            "scatter3d": go.Scatter3d,
+                            "surface": go.Surface,
+                            "mesh3d": go.Mesh3d,
+                            
+                            # Statistical charts
+                            "histogram": go.Histogram,
+                            "box": go.Box,
+                            "violin": go.Violin,
+                            
+                            # Financial charts
+                            "candlestick": go.Candlestick,
+                            "ohlc": go.Ohlc,
+                            
+                            # Geographic charts
+                            "scattergeo": go.Scattergeo,
+                            "choropleth": go.Choropleth,
+                            
+                            # Other charts
+                            "bubble": go.Scatter,
+                            "heatmap": go.Heatmap,
+                            "contour": go.Contour,
+                            "waterfall": go.Waterfall,
+                            "funnel": go.Funnel,
+                            "sunburst": go.Sunburst,
+                            "treemap": go.Treemap,
+                            "icicle": go.Icicle,
+                            "sankey": go.Sankey,
+                            "table": go.Table,
+                            "indicator": go.Indicator
+                        }
+                        
+                        # Get the appropriate Plotly chart class
+                        plotly_chart_class = chart_type_mapping.get(series_type)
+                        
+                        if plotly_chart_class:
+                            # Prepare trace arguments based on chart type
+                            if series_type in ["bar", "column", "stacked_column", "horizontal_bar"]:
+                                # Bar chart specific settings
+                                if chart_type == "stacked_column":
+                                    trace_kwargs["barmode"] = "stack"
+                                if orientation and orientation.lower() == "horizontal":
+                                    trace_kwargs["orientation"] = "h"
+                                    # Swap x and y for horizontal bars
+                                    trace_kwargs["x"], trace_kwargs["y"] = trace_kwargs["y"], trace_kwargs["x"]
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["line", "scatter", "scatter_line"]:
+                                # Line/Scatter chart specific settings
+                                mode = "lines+markers" if series_type == "scatter_line" else "markers" if series_type == "scatter" else "lines"
+                                trace_kwargs["mode"] = mode
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["area", "filled_area"]:
+                                # Area chart specific settings
+                                trace_kwargs["mode"] = "lines"
+                                trace_kwargs["fill"] = "tozeroy"
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
+                                ))
+                                
+                            elif series_type == "pie":
+                                # Pie chart specific settings
+                                pie_kwargs = {
+                                    "labels": x_vals,
+                                    "values": y_vals,
+                                    "name": label,
+                                    "textinfo": "label+percent+value" if chart_meta.get("data_labels", True) else "none",
+                                    "textposition": "outside",
+                                    "hole": 0.4 if series_type == "donut" else 0.0
+                                }
+                                
+                                if color:
+                                    pie_kwargs["marker"] = dict(colors=color) if isinstance(color, list) else dict(colors=[color])
+                                
+                                fig.add_trace(plotly_chart_class(**pie_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["scatter3d", "surface", "mesh3d"]:
+                                # 3D chart specific settings
+                                if "z" not in trace_kwargs and len(y_vals) > 0:
+                                    # Create a simple z-axis if not provided
+                                    trace_kwargs["z"] = [i for i in range(len(y_vals))]
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Z: %{{z}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["histogram", "box", "violin"]:
+                                # Statistical chart specific settings
+                                if series_type == "histogram":
+                                    trace_kwargs["x"] = y_vals  # Histogram uses x for values
+                                    del trace_kwargs["y"]
+                                elif series_type in ["box", "violin"]:
+                                    trace_kwargs["y"] = y_vals
+                                    trace_kwargs["x"] = [label] * len(y_vals) if len(y_vals) > 0 else [label]
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Value: %{{y if series_type in ['box', 'violin'] else 'x'}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["bubble"]:
+                                # Bubble chart specific settings
+                                if "size" not in trace_kwargs and len(y_vals) > 0:
+                                    # Create size based on values if not provided
+                                    max_val = max(y_vals) if y_vals else 1
+                                    trace_kwargs["size"] = [abs(v/max_val) * 20 for v in y_vals]
+                                
+                                trace_kwargs["mode"] = "markers"
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Size: %{{marker.size}}<extra></extra>"
+                                ))
+                                
+                            else:
+                                # Generic handling for other chart types
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Value: %{{y}}<extra></extra>"
+                                ))
+                        else:
+                            # Fallback to scatter if chart type not recognized
+                            current_app.logger.warning(f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
                             fig.add_trace(go.Scatter(**trace_kwargs,
-                                mode='lines+markers',
-                                hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
-                            ))
-                        elif series_type == "area":
-                            # Area chart: use Scatter with fill='tozeroy'
-                            fig.add_trace(go.Scatter(**trace_kwargs,
-                                mode='lines',
-                                fill='tozeroy',
+                                mode='markers',
                                 hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
                             ))
 
@@ -640,7 +800,45 @@ def _generate_report(project_id, template_path, data_file_path):
                         if value_range:
                             y_vals = extract_values_from_range(value_range)
 
-                        if series_type == "bar":
+                        # Generic chart type handling for Matplotlib
+                        chart_type_mapping_mpl = {
+                            # Bar charts
+                            "bar": "bar",
+                            "column": "bar", 
+                            "stacked_column": "bar",
+                            "horizontal_bar": "barh",
+                            
+                            # Line charts
+                            "line": "plot",
+                            "scatter": "scatter",
+                            "scatter_line": "plot",
+                            
+                            # Area charts
+                            "area": "fill_between",
+                            "filled_area": "fill_between",
+                            
+                            # Statistical charts
+                            "histogram": "hist",
+                            "box": "boxplot",
+                            "violin": "violinplot",
+                            
+                            # Other charts
+                            "bubble": "scatter",
+                            "heatmap": "imshow",
+                            "contour": "contour",
+                            "waterfall": "bar",
+                            "funnel": "bar",
+                            "sunburst": "pie",
+                            "treemap": "bar",
+                            "icicle": "bar",
+                            "sankey": "bar",
+                            "table": "table",
+                            "indicator": "bar"
+                        }
+                        
+                        mpl_chart_type = chart_type_mapping_mpl.get(series_type, "scatter")
+                        
+                        if mpl_chart_type == "bar":
                             if chart_type == "stacked_column":
                                 # For stacked column, use bottom parameter
                                 if i == 0:
@@ -656,11 +854,66 @@ def _generate_report(project_id, template_path, data_file_path):
                                         ax1.bar(x_values[j], val, color=bar_color, alpha=0.7)
                                 else:
                                     ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7)
-                        elif series_type == "line":
-                            ax2.plot(x_values, y_vals, label=label, color=color, marker='o', linewidth=2)
-                        elif series_type == "area":
+                                    
+                        elif mpl_chart_type == "barh":
+                            # Horizontal bar chart
+                            if isinstance(color, list):
+                                for j, val in enumerate(y_vals):
+                                    bar_color = color[j % len(color)]
+                                    ax1.barh(x_values[j], val, color=bar_color, alpha=0.7)
+                            else:
+                                ax1.barh(x_values, y_vals, label=label, color=color, alpha=0.7)
+                                
+                        elif mpl_chart_type == "plot":
+                            # Line chart
+                            marker = 'o' if series_type == "scatter_line" else None
+                            ax2.plot(x_values, y_vals, label=label, color=color, marker=marker, linewidth=2)
+                            
+                        elif mpl_chart_type == "scatter":
+                            # Scatter plot
+                            if series_type == "bubble" and "size" in series:
+                                sizes = series.get("size", [20] * len(y_vals))
+                                ax1.scatter(x_values, y_vals, s=sizes, label=label, color=color, alpha=0.7)
+                            else:
+                                ax1.scatter(x_values, y_vals, label=label, color=color, alpha=0.7)
+                                
+                        elif mpl_chart_type == "fill_between":
+                            # Area chart
                             ax1.fill_between(x_values, y_vals, alpha=0.6, label=label, color=color)
                             ax1.plot(x_values, y_vals, color=color, linewidth=2)
+                            
+                        elif mpl_chart_type == "hist":
+                            # Histogram
+                            ax1.hist(y_vals, bins=10, label=label, color=color, alpha=0.7)
+                            
+                        elif mpl_chart_type == "boxplot":
+                            # Box plot
+                            ax1.boxplot(y_vals, labels=[label], patch_artist=True)
+                            if color:
+                                ax1.findobj(plt.matplotlib.patches.Patch)[-1].set_facecolor(color)
+                                
+                        elif mpl_chart_type == "violinplot":
+                            # Violin plot
+                            ax1.violinplot(y_vals, positions=[i])
+                            
+                        elif mpl_chart_type == "imshow":
+                            # Heatmap (simplified)
+                            if len(y_vals) > 0:
+                                # Create a simple 2D array for heatmap
+                                heatmap_data = [y_vals] if len(y_vals) > 0 else [[0]]
+                                ax1.imshow(heatmap_data, cmap='viridis', aspect='auto')
+                                
+                        elif mpl_chart_type == "contour":
+                            # Contour plot (simplified)
+                            if len(y_vals) > 0:
+                                # Create a simple 2D array for contour
+                                contour_data = [y_vals] if len(y_vals) > 0 else [[0]]
+                                ax1.contour(contour_data)
+                                
+                        else:
+                            # Fallback to scatter for unknown types
+                            current_app.logger.warning(f"⚠️ Unknown matplotlib chart type '{series_type}', falling back to scatter")
+                            ax1.scatter(x_values, y_vals, label=label, color=color, alpha=0.7)
 
                     # Set labels and styling
                     if chart_type != "pie":
