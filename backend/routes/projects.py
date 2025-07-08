@@ -83,6 +83,43 @@ def create_expanded_pie_chart(labels, values, colors, expanded_segment, title, v
     
     return fig
 
+def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, other_colors, title, value_format=""):
+    """
+    Create a 'bar of pie' chart using Plotly: pie chart with one segment broken down as a bar chart.
+    """
+    fig = make_subplots(
+        rows=1, cols=2,
+        specs=[[{"type": "pie"}, {"type": "bar"}]],
+        column_widths=[0.5, 0.5],
+        subplot_titles=(title, "Breakdown of 'Other'")
+    )
+    # Main pie chart
+    fig.add_trace(go.Pie(
+        labels=labels,
+        values=values,
+        marker=dict(colors=colors),
+        textinfo="percent",
+        hoverinfo="label+percent+value",
+        pull=[0.1 if l == "Other" else 0 for l in labels],
+        name="Main Pie"
+    ), row=1, col=1)
+    # Bar chart for breakdown
+    fig.add_trace(go.Bar(
+        x=other_labels,
+        y=other_values,
+        marker_color=other_colors,
+        text=[f"{v}{value_format}" for v in other_values],
+        textposition="auto",
+        name="Breakdown of 'Other'"
+    ), row=1, col=2)
+    fig.update_layout(
+        title_text=title,
+        showlegend=False,
+        height=500,
+        width=900
+    )
+    return fig
+
 def _generate_report(project_id, template_path, data_file_path):
     import pandas as pd
     import json
@@ -99,7 +136,7 @@ def _generate_report(project_id, template_path, data_file_path):
     try:
         current_app.logger.debug(f"Generating report for project: {project_id}")
 
-        df = pd.read_excel(data_file_path, sheet_name='sample')
+        df = pd.read_excel(data_file_path, sheet_name=0)  # Use first sheet
         df.columns = df.columns.str.strip().str.replace(" ", "_").str.replace("__", "_")
 
         text_map = {str(k).strip().lower(): str(v).strip() for k, v in zip(df["Text_Tag"], df["Text"]) if pd.notna(k) and pd.notna(v)}
@@ -304,6 +341,43 @@ def _generate_report(project_id, template_path, data_file_path):
                 # --- Plotly interactive chart generation ---
                 fig = go.Figure()
 
+                # --- Bar of Pie chart special handling ---
+                if chart_type in ["bar of pie", "bar_of_pie"]:
+                    # Expect: labels, values, and breakdown for 'Other'
+                    # Find the 'Other' segment and its breakdown from config
+                    labels = series_meta.get("labels", x_values)
+                    values = series_meta.get("values", [])
+                    colors = series_meta.get("colors", [])
+                    other_labels = chart_meta.get("other_labels", [])
+                    other_values = chart_meta.get("other_values", [])
+                    other_colors = chart_meta.get("other_colors", [])
+                    value_format = chart_meta.get("value_format", "")
+                    # Fallback: try to extract from Excel ranges if not in config
+                    if not (other_labels and other_values):
+                        if "other_label_range" in chart_meta and "other_value_range" in chart_meta and "source_sheet" in chart_meta:
+                            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+                            sheet = wb[chart_meta["source_sheet"]]
+                            other_labels = extract_excel_range(sheet, chart_meta["other_label_range"])
+                            other_values = extract_excel_range(sheet, chart_meta["other_value_range"])
+                    # Debug prints
+                    print("[DEBUG] labels:", labels)
+                    print("[DEBUG] values:", values)
+                    print("[DEBUG] colors:", colors)
+                    print("[DEBUG] other_labels:", other_labels)
+                    print("[DEBUG] other_values:", other_values)
+                    print("[DEBUG] other_colors:", other_colors)
+                    print("[DEBUG] value_format:", value_format)
+                    fig = create_bar_of_pie_chart(
+                        labels=labels,
+                        values=values,
+                        other_labels=other_labels,
+                        other_values=other_values,
+                        colors=colors,
+                        other_colors=other_colors if other_colors else colors,
+                        title=title,
+                        value_format=value_format
+                    )
+                
                 def extract_values_from_range(cell_range):
                     start_cell, end_cell = cell_range.split(":")
                     start_col, start_row = re.match(r"([A-Z]+)(\d+)", start_cell).groups()
@@ -503,8 +577,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             # Prepare trace arguments based on chart type
                             if series_type in ["bar", "column", "stacked_column", "horizontal_bar"]:
                                 # Bar chart specific settings
-                                if chart_type == "stacked_column":
-                                    trace_kwargs["barmode"] = "stack"
+                                # REMOVE: if chart_type == "stacked_column": trace_kwargs["barmode"] = "stack"
                                 if orientation and orientation.lower() == "horizontal":
                                     trace_kwargs["orientation"] = "h"
                                     # Swap x and y for horizontal bars
@@ -575,13 +648,11 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                             elif series_type in ["bubble"]:
                                 # Bubble chart specific settings
-                                if "size" not in trace_kwargs and len(y_vals) > 0:
-                                    # Create size based on values if not provided
-                                    max_val = max(y_vals) if y_vals else 1
-                                    trace_kwargs["size"] = [abs(v/max_val) * 20 for v in y_vals]
-                                
+                                sizes = series.get("size", [20] * len(y_vals))
                                 trace_kwargs["mode"] = "markers"
-                                
+                                trace_kwargs["marker"] = {"size": sizes}
+                                if color:
+                                    trace_kwargs["marker"]["color"] = color
                                 fig.add_trace(plotly_chart_class(**trace_kwargs,
                                     hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Size: %{{marker.size}}<extra></extra>"
                                 ))
@@ -716,10 +787,6 @@ def _generate_report(project_id, template_path, data_file_path):
 
                 fig.update_layout(**layout_updates)
 
-                interactive_path = os.path.join(UPLOAD_FOLDER, 'reports', f'interactive_{chart_tag_lower}.html')
-                fig.write_html(interactive_path)
-                current_app.logger.debug(f"\U0001F310 Interactive chart saved to: {interactive_path}")
-
                 # --- Matplotlib static chart for DOCX ---
                 if chart_type == "pie":
                     # Check if this is an expanded pie chart
@@ -779,6 +846,40 @@ def _generate_report(project_id, template_path, data_file_path):
                             
                             ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
                         
+                elif chart_type in ["bar of pie", "bar_of_pie"]:
+                    # Matplotlib version of bar of pie
+                    fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 8), dpi=200)
+                    labels = series_meta.get("labels", x_values)
+                    values = series_meta.get("values", [])
+                    colors = series_meta.get("colors", [])
+                    other_labels = chart_meta.get("other_labels", [])
+                    other_values = chart_meta.get("other_values", [])
+                    other_colors = chart_meta.get("other_colors", [])
+                    if not (other_labels and other_values):
+                        if "other_label_range" in chart_meta and "other_value_range" in chart_meta and "source_sheet" in chart_meta:
+                            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+                            sheet = wb[chart_meta["source_sheet"]]
+                            other_labels = extract_excel_range(sheet, chart_meta["other_label_range"])
+                            other_values = extract_excel_range(sheet, chart_meta["other_value_range"])
+                    # Pie chart
+                    if colors:
+                        wedges, texts, autotexts = ax1.pie(values, labels=labels, autopct='%1.1f%%', colors=colors, startangle=90)
+                    else:
+                        wedges, texts, autotexts = ax1.pie(values, labels=labels, autopct='%1.1f%%', startangle=90)
+                    for autotext in autotexts:
+                        autotext.set_color('white')
+                        autotext.set_fontweight('bold')
+                    ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                    # Bar chart
+                    if other_colors:
+                        ax2.bar(other_labels, other_values, color=other_colors, alpha=0.7)
+                    else:
+                        ax2.bar(other_labels, other_values, color=colors if colors else None, alpha=0.7)
+                    ax2.set_title("Breakdown of 'Other'", fontsize=font_size or 12, weight='bold')
+                    ax2.set_ylabel("Value")
+                    for i, v in enumerate(other_values):
+                        ax2.text(i, v, f"{v}", ha='center', va='bottom', fontweight='bold')
+                
                 else:
                     # Bar, line, area charts
                     fig_mpl, ax1 = plt.subplots(figsize=(10, 6), dpi=200)
@@ -898,9 +999,8 @@ def _generate_report(project_id, template_path, data_file_path):
                             
                         elif mpl_chart_type == "imshow":
                             # Heatmap (simplified)
-                            if len(y_vals) > 0:
-                                # Create a simple 2D array for heatmap
-                                heatmap_data = [y_vals] if len(y_vals) > 0 else [[0]]
+                            heatmap_data = series.get("values", [])
+                            if len(heatmap_data) > 0:
                                 ax1.imshow(heatmap_data, cmap='viridis', aspect='auto')
                                 
                         elif mpl_chart_type == "contour":
@@ -954,6 +1054,9 @@ def _generate_report(project_id, template_path, data_file_path):
 
             except Exception as e:
                 current_app.logger.error(f"❌ Chart generation failed for {chart_tag}: {e}")
+                import traceback
+                print("[DEBUG] Exception:", e)
+                print(traceback.format_exc())
                 return None
 
         # Insert charts into paragraphs
