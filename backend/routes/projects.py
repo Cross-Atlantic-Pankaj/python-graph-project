@@ -244,97 +244,46 @@ def _generate_report(project_id, template_path, data_file_path):
                             values.append(cell.value)
                     return values
 
-                # If chart_meta specifies source_sheet and ranges, extract data from Excel
-                extracted_x_axis = None
-                extracted_series_data = None
-                chart_type_from_meta = chart_meta.get("chart_type", "").lower()
-                
+                # --- Robust recursive Excel cell range extraction for all chart types and fields ---
+                def extract_cell_ranges(obj, sheet):
+                    """Recursively walk through nested dicts/lists and extract cell ranges from strings"""
+                    if isinstance(obj, dict):
+                        for k, v in obj.items():
+                            if isinstance(v, str) and re.match(r"^[A-Z]+\d+:[A-Z]+\d+$", v):
+                                try:
+                                    extracted = extract_excel_range(sheet, v)
+                                    obj[k] = extracted
+                                    print(f"[DEBUG] Extracted {k}: {extracted} (from {v})")
+                                except Exception as e:
+                                    print(f"[DEBUG] Failed to extract {k} from {v}: {e}")
+                            else:
+                                extract_cell_ranges(v, sheet)
+                    elif isinstance(obj, list):
+                        for i, v in enumerate(obj):
+                            extract_cell_ranges(v, sheet)
+
+                # Debug: Check if source_sheet is present and what the initial values are
+                print(f"[DEBUG] source_sheet in chart_meta: {'source_sheet' in chart_meta}")
+                if 'source_sheet' in chart_meta:
+                    print(f"[DEBUG] source_sheet value: {chart_meta['source_sheet']}")
+                print(f"[DEBUG] Initial other_labels: {chart_meta.get('other_labels', 'NOT_FOUND')}")
+                print(f"[DEBUG] Initial other_values: {chart_meta.get('other_values', 'NOT_FOUND')}")
+
                 if "source_sheet" in chart_meta:
                     wb = openpyxl.load_workbook(data_file_path, data_only=True)
                     sheet = wb[chart_meta["source_sheet"]]
-                    
-                    # Generic chart type extraction
-                    chart_extraction_mapping = {
-                        # Single series charts
-                        "pie": "single_series",
-                        "donut": "single_series", 
-                        "histogram": "single_series",
-                        "box": "single_series",
-                        "violin": "single_series",
-                        "waterfall": "single_series",
-                        "funnel": "single_series",
-                        "sunburst": "single_series",
-                        "treemap": "single_series",
-                        "icicle": "single_series",
-                        "sankey": "single_series",
-                        "indicator": "single_series",
-                        
-                        # Multi-series charts
-                        "bar": "multi_series",
-                        "column": "multi_series",
-                        "stacked_column": "multi_series", 
-                        "horizontal_bar": "multi_series",
-                        "line": "multi_series",
-                        "scatter": "multi_series",
-                        "scatter_line": "multi_series",
-                        "area": "multi_series",
-                        "filled_area": "multi_series",
-                        "bubble": "multi_series",
-                        "heatmap": "multi_series",
-                        "contour": "multi_series",
-                        "scatter3d": "multi_series",
-                        "surface": "multi_series",
-                        "mesh3d": "multi_series",
-                        "candlestick": "multi_series",
-                        "ohlc": "multi_series",
-                        "scattergeo": "multi_series",
-                        "choropleth": "multi_series"
-                    }
-                    
-                    extraction_type = chart_extraction_mapping.get(chart_type_from_meta, "multi_series")
-                    
-                    if extraction_type == "single_series":
-                        # Single series chart extraction (pie, histogram, etc.)
-                        labels = extract_excel_range(sheet, chart_meta["category_range"]) if "category_range" in chart_meta else None
-                        values = extract_excel_range(sheet, chart_meta["value_range"]) if "value_range" in chart_meta else None
-                        extracted_series_data = [{
-                            "name": chart_meta.get("chart_title", chart_type_from_meta.title()),
-                            "type": chart_type_from_meta,
-                            "labels": labels,
-                            "values": values,
-                            "marker": {"color": series_meta.get("colors")}
-                        }]
-                        
-                    elif extraction_type == "multi_series":
-                        # Multi-series chart extraction (bar, line, area, etc.)
-                        x_axis = extract_excel_range(sheet, chart_meta["category_range"]) if "category_range" in chart_meta else None
-                        series_labels = series_meta.get("labels", [])
-                        series_colors = series_meta.get("colors", [])
-                        value_ranges = chart_meta.get("value_range", [])
-                        extracted_series_data = []
-                        
-                        for idx, rng in enumerate(value_ranges):
-                            values = extract_excel_range(sheet, rng)
-                            extracted_series_data.append({
-                                "name": series_labels[idx] if idx < len(series_labels) else f"Series {idx+1}",
-                                "type": chart_type_from_meta,
-                                "values": values,
-                                "marker": {"color": series_colors[idx] if idx < len(series_colors) else None}
-                            })
-                        extracted_x_axis = x_axis
+                    # Extract cell ranges from both chart_meta and series_meta
+                    extract_cell_ranges(chart_meta, sheet)
+                    extract_cell_ranges(series_meta, sheet)
+                    wb.close()
+                    print(f"[DEBUG] After extraction - other_labels: {chart_meta.get('other_labels', 'NOT_FOUND')}")
+                    print(f"[DEBUG] After extraction - other_values: {chart_meta.get('other_values', 'NOT_FOUND')}")
+                else:
+                    print("[DEBUG] No source_sheet found in chart_meta - skipping extraction")
 
-                # Use extracted data if present, otherwise fall back to series_meta
-                if extracted_series_data is not None:
-                    series_data = extracted_series_data
-                    chart_type = chart_type_from_meta  # Use chart type from meta
-                else:
-                    series_data = series_meta.get("data", [])
-                    chart_type = chart_type_map.get(chart_tag_lower, "").lower().strip()
-                
-                if extracted_x_axis is not None:
-                    x_values = extracted_x_axis
-                else:
-                    x_values = series_meta.get("x_axis", [])
+                # Use updated values from series_meta after extraction
+                series_data = series_meta.get("data", [])
+                x_values = series_meta.get("x_axis", [])
                 
                 colors = series_meta.get("colors", [])
 
@@ -343,22 +292,14 @@ def _generate_report(project_id, template_path, data_file_path):
 
                 # --- Bar of Pie chart special handling ---
                 if chart_type in ["bar of pie", "bar_of_pie"]:
-                    # Expect: labels, values, and breakdown for 'Other'
-                    # Find the 'Other' segment and its breakdown from config
-                    labels = series_meta.get("labels", x_values)
-                    values = series_meta.get("values", [])
-                    colors = series_meta.get("colors", [])
+                    # Re-fetch after extraction to ensure we have the extracted lists
                     other_labels = chart_meta.get("other_labels", [])
                     other_values = chart_meta.get("other_values", [])
                     other_colors = chart_meta.get("other_colors", [])
                     value_format = chart_meta.get("value_format", "")
-                    # Fallback: try to extract from Excel ranges if not in config
-                    if not (other_labels and other_values):
-                        if "other_label_range" in chart_meta and "other_value_range" in chart_meta and "source_sheet" in chart_meta:
-                            wb = openpyxl.load_workbook(data_file_path, data_only=True)
-                            sheet = wb[chart_meta["source_sheet"]]
-                            other_labels = extract_excel_range(sheet, chart_meta["other_label_range"])
-                            other_values = extract_excel_range(sheet, chart_meta["other_value_range"])
+                    labels = series_meta.get("labels", x_values)
+                    values = series_meta.get("values", [])
+                    colors = series_meta.get("colors", [])
                     # Debug prints
                     print("[DEBUG] labels:", labels)
                     print("[DEBUG] values:", values)
@@ -486,7 +427,11 @@ def _generate_report(project_id, template_path, data_file_path):
                         y_vals = series.get("values")
                         value_range = series.get("value_range")
                         if value_range:
-                            y_vals = extract_values_from_range(value_range)
+                            # Check if value_range is already extracted (list) or still a string
+                            if isinstance(value_range, list):
+                                y_vals = value_range
+                            else:
+                                y_vals = extract_values_from_range(value_range)
 
                         # --- Apply grouping and sorting ---
                         x_vals = x_values
@@ -899,7 +844,11 @@ def _generate_report(project_id, template_path, data_file_path):
                         y_vals = series.get("values")
                         value_range = series.get("value_range")
                         if value_range:
-                            y_vals = extract_values_from_range(value_range)
+                            # Check if value_range is already extracted (list) or still a string
+                            if isinstance(value_range, list):
+                                y_vals = value_range
+                            else:
+                                y_vals = extract_values_from_range(value_range)
 
                         # Generic chart type handling for Matplotlib
                         chart_type_mapping_mpl = {
