@@ -21,8 +21,31 @@ import {
   CircularProgress,
   Tabs,
   Tab,
+  Alert,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  Chip,
+  Divider,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  LinearProgress,
+  Snackbar,
 } from '@mui/material';
-import { Add as AddIcon, Logout as LogoutIcon, Description as DescriptionIcon } from '@mui/icons-material';
+import { 
+  Add as AddIcon, 
+  Logout as LogoutIcon, 
+  Description as DescriptionIcon,
+  Error as ErrorIcon,
+  Warning as WarningIcon,
+  Info as InfoIcon,
+  ExpandMore as ExpandMoreIcon,
+  BugReport as BugReportIcon,
+  Code as CodeIcon,
+  Settings as SettingsIcon
+} from '@mui/icons-material';
 import axios from 'axios';
 
 axios.defaults.withCredentials = true;
@@ -39,8 +62,18 @@ function Dashboard() {
   const [user, setUser] = useState(null);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
-  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, message: '' });
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0, message: '', percentage: 0 });
+  const [singleProgress, setSingleProgress] = useState({ message: '', percentage: 0 });
   const [uploadMode, setUploadMode] = useState('single'); // 'single' or 'batch'
+  const [chartErrors, setChartErrors] = useState({});
+  const [showErrorDialog, setShowErrorDialog] = useState(false);
+  const [selectedProjectForErrors, setSelectedProjectForErrors] = useState(null);
+  const [customAlert, setCustomAlert] = useState({
+    open: false,
+    message: '',
+    severity: 'success', // 'success', 'warning', 'error'
+    title: ''
+  });
 
   useEffect(() => {
     loadUser();
@@ -98,6 +131,51 @@ function Dashboard() {
     setSelectedProjectForReport(null);
     setReportFile(null);
     setZipFile(null);
+    setBatchProgress({ current: 0, total: 0, message: '', percentage: 0 });
+    setSingleProgress({ message: '', percentage: 0 });
+    // Clear any existing chart errors when closing dialog
+    setChartErrors({});
+  };
+
+  const handleShowChartErrors = async (project) => {
+    setSelectedProjectForErrors(project);
+    try {
+      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/projects/${project.id}/chart_errors`);
+      setChartErrors(response.data);
+      setShowErrorDialog(true);
+    } catch (error) {
+      console.error('Error fetching chart errors:', error);
+      setChartErrors({ error: 'Failed to fetch chart errors' });
+      setShowErrorDialog(true);
+    }
+  };
+
+  const clearProjectErrors = async (projectId) => {
+    try {
+      // Clear errors by making a request to reset them
+      await axios.post(`${process.env.REACT_APP_API_URL}/api/projects/${projectId}/clear_errors`);
+    } catch (error) {
+      console.error('Error clearing project errors:', error);
+    }
+  };
+
+  const handleCloseErrorDialog = () => {
+    setShowErrorDialog(false);
+    setSelectedProjectForErrors(null);
+    setChartErrors({});
+  };
+
+  const showCustomAlert = (title, message, severity = 'success') => {
+    setCustomAlert({
+      open: true,
+      title,
+      message,
+      severity
+    });
+  };
+
+  const handleCloseCustomAlert = () => {
+    setCustomAlert(prev => ({ ...prev, open: false }));
   };
 
   const handleReportFileUpload = async () => {
@@ -109,13 +187,15 @@ function Dashboard() {
     if (zipFile) {
       // Batch processing
       setIsBatchGenerating(true);
-      setBatchProgress({ current: 0, total: 0, message: 'Uploading ZIP...' });
+      setBatchProgress({ current: 0, total: 0, message: 'Uploading ZIP file...', percentage: 10 });
 
       try {
         const formData = new FormData();
         formData.append('zip_file', zipFile);
 
         // Step 1: Upload ZIP and trigger batch report generation
+        setBatchProgress({ current: 0, total: 0, message: 'Processing ZIP file...', percentage: 20 });
+        
         const response = await axios.post(
           `${process.env.REACT_APP_API_URL}/api/projects/${selectedProjectForReport.id}/upload_zip`,
           formData,
@@ -124,9 +204,25 @@ function Dashboard() {
           }
         );
 
-        setBatchProgress({ current: 1, total: 1, message: 'Batch report generation complete. Downloading ZIP...' });
+        // Extract progress info from response
+        const { total_files, processed_files } = response.data;
+        const percentage = Math.round((processed_files / total_files) * 100);
+        
+        setBatchProgress({ 
+          current: processed_files, 
+          total: total_files, 
+          message: `Generated ${processed_files} of ${total_files} reports. Downloading ZIP...`, 
+          percentage: Math.min(percentage, 90) 
+        });
 
         // Step 2: Download the resulting ZIP
+        setBatchProgress({ 
+          current: processed_files, 
+          total: total_files, 
+          message: 'Downloading generated reports...', 
+          percentage: 95 
+        });
+        
         const downloadResponse = await axios.get(
           `${process.env.REACT_APP_API_URL}/api/reports/batch_reports_${selectedProjectForReport.id}.zip`,
           { responseType: 'blob' }
@@ -139,25 +235,46 @@ function Dashboard() {
         link.click();
         URL.revokeObjectURL(link.href);
 
-        alert('Batch reports downloaded successfully!');
-        handleCloseReportUploadDialog();
+        setBatchProgress({ 
+          current: processed_files, 
+          total: total_files, 
+          message: 'Batch reports downloaded successfully!', 
+          percentage: 100 
+        });
+        
+        setTimeout(() => {
+          showCustomAlert(
+            'Batch Processing Complete! 🎉',
+            `Successfully generated and downloaded ${processed_files} out of ${total_files} reports.`,
+            'success'
+          );
+          handleCloseReportUploadDialog();
+        }, 1000);
+        
       } catch (error) {
         console.error('Batch report error:', error.response?.data || error.message);
-        alert('Batch report generation failed.');
+        showCustomAlert(
+          'Batch Processing Failed! ❌',
+          'Failed to process ZIP file. Please check your file and try again.',
+          'error'
+        );
       } finally {
         setIsBatchGenerating(false);
-        setBatchProgress({ current: 0, total: 0, message: '' });
+        setBatchProgress({ current: 0, total: 0, message: '', percentage: 0 });
       }
       return;
     }
 
     // Single file processing (existing logic)
     setIsGeneratingReport(true);
+    setSingleProgress({ message: 'Uploading Excel file...', percentage: 20 });
 
     try {
       const formData = new FormData();
       formData.append('report_file', reportFile);
 
+      setSingleProgress({ message: 'Processing Excel data...', percentage: 40 });
+      
       await axios.post(
         `${process.env.REACT_APP_API_URL}/api/projects/${selectedProjectForReport.id}/upload_report`,
         formData,
@@ -165,8 +282,50 @@ function Dashboard() {
           headers: { 'Content-Type': 'multipart/form-data' },
         }
       );
-      alert('Report generation initiated successfully!');
+      
+      setSingleProgress({ message: 'Generating charts and report...', percentage: 70 });
+      // Check for chart errors after generation
+      try {
+        const errorResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/projects/${selectedProjectForReport.id}/chart_errors`);
+        const errors = errorResponse.data;
+        
+        const chartErrorCount = Object.keys(errors.chart_generation_errors || {}).length;
+        const reportErrorCount = (errors.report_generation_errors || []).length;
+        const totalErrors = chartErrorCount + reportErrorCount;
+        
+        if (totalErrors === 0) {
+          // All charts generated successfully - Green alert
+          showCustomAlert(
+            'Report Generated Successfully! 🎉',
+            'All charts were generated without any errors.',
+            'success'
+          );
+        } else if (totalErrors < 5) { // Assuming reasonable threshold for "some" errors
+          // Some charts failed - Yellow warning alert
+          showCustomAlert(
+            'Report Generated with Warnings ⚠️',
+            `${totalErrors} chart(s) failed to generate. The report was created but some charts may be missing. Click "View Errors" for details.`,
+            'warning'
+          );
+        } else {
+          // Many charts failed - Red error alert
+          showCustomAlert(
+            'Report Generation Issues ❌',
+            `${totalErrors} charts failed to generate. The report may be incomplete. Click "View Errors" to see what went wrong.`,
+            'error'
+          );
+        }
+      } catch (errorCheckError) {
+        console.error('Error checking for chart errors:', errorCheckError);
+        showCustomAlert(
+          'Report Generated! 📄',
+          'Report was created successfully, but error checking failed.',
+          'warning'
+        );
+      }
 
+      setSingleProgress({ message: 'Downloading generated report...', percentage: 90 });
+      
       // Download the generated report
       try {
         const downloadResponse = await axios.get(
@@ -192,18 +351,30 @@ function Dashboard() {
         link.download = filename;
         link.click();
         URL.revokeObjectURL(link.href);
-        alert('Report downloaded successfully!');
+        
+        setSingleProgress({ message: 'Report downloaded successfully!', percentage: 100 });
       } catch (downloadError) {
         console.error('Error downloading report:', downloadError.response?.data || downloadError.message);
-        alert('Failed to download report after generation. Please check backend logs for details.');
+        showCustomAlert(
+          'Download Failed! ⚠️',
+          'Report was generated but failed to download. Please try again.',
+          'warning'
+        );
       }
 
-      handleCloseReportUploadDialog();
+      setTimeout(() => {
+        handleCloseReportUploadDialog();
+      }, 1000);
     } catch (uploadError) {
       console.error('Error uploading report:', uploadError.response?.data || uploadError.message);
-      alert('Failed to upload report to server. Please try again.');
+      showCustomAlert(
+        'Upload Failed! ❌',
+        'Failed to upload report to server. Please check your file and try again.',
+        'error'
+      );
     } finally {
       setIsGeneratingReport(false);
+      setSingleProgress({ message: '', percentage: 0 });
     }
   };
 
@@ -267,13 +438,23 @@ function Dashboard() {
                   <TableCell>{project.description}</TableCell>
                   <TableCell>{new Date(project.created_at).toLocaleDateString()}</TableCell>
                   <TableCell align="right">
-                    <Button
-                      variant="outlined"
-                      startIcon={<DescriptionIcon />}
-                      onClick={() => handleOpenReportUploadDialog(project)}
-                    >
-                      Generate Report
-                    </Button>
+                    <Box sx={{ display: 'flex', gap: 1 }}>
+                      <Button
+                        variant="outlined"
+                        startIcon={<DescriptionIcon />}
+                        onClick={() => handleOpenReportUploadDialog(project)}
+                      >
+                        Generate Report
+                      </Button>
+                      <Button
+                        variant="outlined"
+                        color="warning"
+                        startIcon={<BugReportIcon />}
+                        onClick={() => handleShowChartErrors(project)}
+                      >
+                        View Errors
+                      </Button>
+                    </Box>
                   </TableCell>
                 </TableRow>
               ))
@@ -362,10 +543,44 @@ function Dashboard() {
           )}
           {isBatchGenerating && (
             <Box sx={{ mt: 2 }}>
-              <CircularProgress size={24} />
-              <Typography variant="body2" sx={{ ml: 2, display: 'inline' }}>
-                {batchProgress.message}
-              </Typography>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <CircularProgress size={20} sx={{ mr: 1 }} />
+                <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                  {batchProgress.message}
+                </Typography>
+                <Typography variant="body2" color="primary" fontWeight="bold">
+                  {batchProgress.percentage}%
+                </Typography>
+              </Box>
+              <LinearProgress 
+                variant="determinate" 
+                value={batchProgress.percentage} 
+                sx={{ height: 8, borderRadius: 4 }}
+              />
+              {batchProgress.total > 0 && (
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 0.5, display: 'block' }}>
+                  Progress: {batchProgress.current} of {batchProgress.total} files
+                </Typography>
+              )}
+            </Box>
+          )}
+          
+          {isGeneratingReport && uploadMode === 'single' && (
+            <Box sx={{ mt: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                <CircularProgress size={20} sx={{ mr: 1 }} />
+                <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                  {singleProgress.message}
+                </Typography>
+                <Typography variant="body2" color="primary" fontWeight="bold">
+                  {singleProgress.percentage}%
+                </Typography>
+              </Box>
+              <LinearProgress 
+                variant="determinate" 
+                value={singleProgress.percentage} 
+                sx={{ height: 8, borderRadius: 4 }}
+              />
             </Box>
           )}
         </DialogContent>
@@ -381,6 +596,163 @@ function Dashboard() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Chart Errors Dialog */}
+      <Dialog 
+        open={showErrorDialog} 
+        onClose={handleCloseErrorDialog}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <ErrorIcon color="error" />
+          Chart Issues - {selectedProjectForErrors?.name}
+        </DialogTitle>
+        <DialogContent>
+          {chartErrors.error ? (
+            <Alert severity="error" sx={{ mb: 2 }}>
+              {chartErrors.error}
+            </Alert>
+          ) : (
+            <Box>
+              {/* Chart Generation Errors */}
+              {chartErrors.chart_generation_errors && Object.keys(chartErrors.chart_generation_errors).length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    <ErrorIcon color="error" />
+                    Chart Problems ({Object.keys(chartErrors.chart_generation_errors).length})
+                  </Typography>
+                  <List>
+                    {Object.entries(chartErrors.chart_generation_errors).map(([tag, error], index) => (
+                      <ListItem key={index} sx={{ flexDirection: 'column', alignItems: 'flex-start', p: 0, mb: 2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                          <ErrorIcon color="error" fontSize="small" />
+                          <Typography variant="subtitle1" fontWeight="bold">
+                            {tag}
+                          </Typography>
+                          <Chip 
+                            label={error.chart_type} 
+                            color="primary" 
+                            size="small" 
+                            variant="outlined"
+                          />
+                        </Box>
+                        <Alert severity="error" sx={{ width: '100%', mb: 1 }}>
+                          {error.user_message}
+                        </Alert>
+                        <Box sx={{ display: 'flex', gap: 1, fontSize: '0.8rem', color: 'text.secondary' }}>
+                          <span>Type: {error.error_type}</span>
+                          <span>•</span>
+                          <span>Data points: {error.data_points}</span>
+                        </Box>
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
+
+                            {/* Report Generation Errors */}
+              {chartErrors.report_generation_errors && chartErrors.report_generation_errors.length > 0 && (
+                <Box sx={{ mb: 3 }}>
+                  <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
+                    <WarningIcon color="warning" />
+                    Report Issues ({chartErrors.report_generation_errors.length})
+                  </Typography>
+                  <List>
+                    {chartErrors.report_generation_errors.map((error, index) => (
+                      <ListItem key={index} sx={{ flexDirection: 'column', alignItems: 'flex-start', p: 0, mb: 2 }}>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                          <WarningIcon color="warning" fontSize="small" />
+                          <Typography variant="subtitle1" fontWeight="bold">
+                            {error.tag}
+                          </Typography>
+                          {chartErrors.report_generation_errors_detailed && 
+                           chartErrors.report_generation_errors_detailed[error.tag] && (
+                            <Chip 
+                              label={chartErrors.report_generation_errors_detailed[error.tag].chart_type} 
+                              color="primary" 
+                              size="small" 
+                              variant="outlined"
+                            />
+                          )}
+                        </Box>
+                        <Alert severity="warning" sx={{ width: '100%', mb: 1 }}>
+                          {error.error}
+                        </Alert>
+                        <Typography variant="caption" color="text.secondary">
+                          This chart could not be inserted into the report document.
+                        </Typography>
+                      </ListItem>
+                    ))}
+                  </List>
+                </Box>
+              )}
+
+              {/* No Errors */}
+              {(!chartErrors.chart_generation_errors || Object.keys(chartErrors.chart_generation_errors).length === 0) &&
+               (!chartErrors.report_generation_errors || chartErrors.report_generation_errors.length === 0) && (
+                <Alert severity="success" sx={{ mt: 2 }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <InfoIcon />
+                    <Typography>All charts generated successfully! 🎉</Typography>
+                  </Box>
+                </Alert>
+              )}
+
+              {/* Report Generation Info */}
+              {chartErrors.report_generated_at && (
+                <Alert severity="info" sx={{ mt: 2 }}>
+                  <Typography variant="body2">
+                    Last report: {new Date(chartErrors.report_generated_at).toLocaleString()}
+                  </Typography>
+                </Alert>
+              )}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button 
+            onClick={() => {
+              clearProjectErrors(selectedProjectForErrors?.id);
+              handleCloseErrorDialog();
+            }}
+            color="warning"
+          >
+            Clear Errors
+          </Button>
+          <Button onClick={handleCloseErrorDialog}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Custom Alert Snackbar */}
+      <Snackbar
+        open={customAlert.open}
+        autoHideDuration={6000}
+        onClose={handleCloseCustomAlert}
+        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={handleCloseCustomAlert}
+          severity={customAlert.severity}
+          variant="filled"
+          sx={{
+            width: '100%',
+            maxWidth: '500px',
+            '& .MuiAlert-message': {
+              width: '100%'
+            }
+          }}
+        >
+          <Box>
+            <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 0.5 }}>
+              {customAlert.title}
+            </Typography>
+            <Typography variant="body2">
+              {customAlert.message}
+            </Typography>
+          </Box>
+        </Alert>
+      </Snackbar>
     </Container>
   );
 }

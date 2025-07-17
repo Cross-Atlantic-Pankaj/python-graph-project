@@ -26,10 +26,8 @@ import re
 
 # Define a custom UPLOAD_FOLDER for this blueprint or ensure it's globally configured
 UPLOAD_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'uploads')
-# Ensure the upload and reports directories exist
-os.makedirs(os.path.join(UPLOAD_FOLDER, 'reports'), exist_ok=True)
-os.makedirs(os.path.join(UPLOAD_FOLDER, 'temp_reports'), exist_ok=True)
-os.makedirs(os.path.join(UPLOAD_FOLDER, 'charts'), exist_ok=True)
+# Ensure the upload directory exists
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'xlsx', 'docx'}
 ALLOWED_REPORT_EXTENSIONS = {'csv', 'xlsx'}
@@ -139,9 +137,20 @@ def _generate_report(project_id, template_path, data_file_path):
         df = pd.read_excel(data_file_path, sheet_name=0)  # Use first sheet
         df.columns = df.columns.str.strip().str.replace(" ", "_").str.replace("__", "_")
 
+        # Excel structure loaded silently
+        
+        # Validate required columns exist
+        required_columns = ["Text_Tag", "Text", "Chart_Tag", "Chart_Attributes", "Chart_Type"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            current_app.logger.error(f"❌ Missing required columns: {missing_columns}")
+            raise ValueError(f"Excel file missing required columns: {missing_columns}")
+
         text_map = {str(k).strip().lower(): str(v).strip() for k, v in zip(df["Text_Tag"], df["Text"]) if pd.notna(k) and pd.notna(v)}
         chart_attr_map = {str(k).strip().lower(): str(v).strip() for k, v in zip(df["Chart_Tag"], df["Chart_Attributes"]) if pd.notna(k) and pd.notna(v)}
         chart_type_map = {str(k).strip().lower(): str(v).strip() for k, v in zip(df["Chart_Tag"], df["Chart_Type"]) if pd.notna(k) and pd.notna(v)}
+        
+        # Data maps created silently
 
         flat_data_map = {}
         for _, row in df.iterrows():
@@ -150,39 +159,94 @@ def _generate_report(project_id, template_path, data_file_path):
                 continue
             section_prefix = chart_tag.replace('_chart', '').lower()
 
+            # Process all columns systematically
             for col in df.columns:
-                if col.startswith("Chart_Data_Y"):
-                    year = col.replace("Chart_Data_", "")
-                    flat_data_map[f"{section_prefix}_{year.lower()}"] = str(row[col])
-                elif col.startswith("Growth_Y"):
-                    year = col.replace("Growth_", "")
-                    flat_data_map[f"{section_prefix}_{year.lower()}_kpi2"] = str(row[col])
+                col_lower = col.lower().strip()
+                
+                # Handle Chart Data columns (for values)
+                if col_lower.startswith("chart_data_y"):
+                    year = col.replace("Chart_Data_", "").replace("chart_data_", "")
+                    key = f"{section_prefix}_{year.lower()}"
+                    value = row[col]
+                    if pd.notna(value) and str(value).strip():
+                        flat_data_map[key] = str(value).strip()
+                    else:
+                        current_app.logger.warning(f"⚠️ Empty value for {col} -> {key}")
+                
+                # Handle Growth columns (for growth rates)
+                elif col_lower.startswith("growth_y"):
+                    year = col.replace("Growth_", "").replace("growth_", "")
+                    key = f"{section_prefix}_{year.lower()}_kpi2"
+                    value = row[col]
+                    if pd.notna(value) and str(value).strip():
+                        flat_data_map[key] = str(value).strip()
+                    else:
+                        current_app.logger.warning(f"⚠️ Empty value for {col} -> {key}")
 
+            # Handle CAGR
             if pd.notna(row.get("Chart_Data_CAGR")):
-                flat_data_map[f"{section_prefix}_cgrp"] = str(row["Chart_Data_CAGR"])
+                key = f"{section_prefix}_cgrp"
+                value = row["Chart_Data_CAGR"]
+                if str(value).strip():
+                    flat_data_map[key] = str(value).strip()
+                else:
+                    current_app.logger.warning(f"⚠️ Empty value for Chart_Data_CAGR -> {key}")
 
+        # Ensure all keys are lowercase
         flat_data_map = {k.lower(): v for k, v in flat_data_map.items()}
+        
+        # Data mapping completed silently
 
         doc = Document(template_path)
 
         def replace_text_in_paragraph(paragraph):
+            # First, try to replace placeholders that are contained within single runs
             for run in paragraph.runs:
                 original_text = run.text
                 matches = re.findall(r"\$\{(.*?)\}", run.text)
                 for match in matches:
-                    key_lower = match.lower()
+                    key_lower = match.lower().strip()
                     val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     if val:
                         pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
                         run.text = pattern.sub(val, run.text)
-                        current_app.logger.debug(f"✅ Replaced ${{{match}}} with '{val}' in run: {original_text}")
-
+                    else:
+                        current_app.logger.warning(f"⚠️ No value found for placeholder ${{{match}}} (key: {key_lower})")
+            
+            # Then, handle placeholders that might be split across multiple runs
+            # Get the full paragraph text to find all placeholders
+            full_text = paragraph.text
+            all_matches = re.findall(r"\$\{(.*?)\}", full_text)
+            
+            for match in all_matches:
+                key_lower = match.lower().strip()
+                val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                if val:
+                    placeholder = f"${{{match}}}"
+                    if placeholder in full_text:
+                        # Clear all runs and recreate with replacement
+                        for run in paragraph.runs:
+                            run.text = ""
+                        # Set the first run to the replaced text
+                        if paragraph.runs:
+                            paragraph.runs[0].text = full_text.replace(placeholder, str(val))
+                        else:
+                            # If no runs exist, create one
+                            paragraph.add_run(full_text.replace(placeholder, str(val)))
+                        break  # Only process one placeholder at a time to avoid conflicts
+                        
         def replace_text_in_tables():
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for para in cell.paragraphs:
                             replace_text_in_paragraph(para)
+            
+            # Table processing completed silently
+
+
+                            
+        # Data mapping completed silently
 
         def generate_chart(data_dict, chart_tag):
             import plotly.graph_objects as go
@@ -193,6 +257,10 @@ def _generate_report(project_id, template_path, data_file_path):
             import tempfile
             import json
             import re
+            import warnings
+            
+            # Suppress Matplotlib warnings
+            warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
 
             try:
                 chart_tag_lower = chart_tag.lower()
@@ -232,6 +300,12 @@ def _generate_report(project_id, template_path, data_file_path):
                 data_grouping = chart_config.get("data_grouping")
                 annotations = chart_config.get("annotations", [])
                 axis_tick_font_size = chart_config.get("axis_tick_font_size")
+                
+                # --- Extract margin settings ---
+                margin = chart_config.get("margin") or chart_meta.get("margin")
+                x_axis_label_distance = chart_config.get("x_axis_label_distance") or chart_meta.get("x_axis_label_distance")
+                y_axis_label_distance = chart_config.get("y_axis_label_distance") or chart_meta.get("y_axis_label_distance")
+                axis_tick_distance = chart_config.get("axis_tick_distance") or chart_meta.get("axis_tick_distance")
 
                 # --- Excel range extraction helpers ---
                 def extract_excel_range(sheet, cell_range):
@@ -253,22 +327,14 @@ def _generate_report(project_id, template_path, data_file_path):
                                 try:
                                     extracted = extract_excel_range(sheet, v)
                                     obj[k] = extracted
-                                    print(f"[DEBUG] Extracted {k}: {extracted} (from {v})")
                                 except Exception as e:
-                                    print(f"[DEBUG] Failed to extract {k} from {v}: {e}")
+                                    current_app.logger.warning(f"⚠️ Failed to extract {k} from {v}: {e}")
                             else:
                                 extract_cell_ranges(v, sheet)
                     elif isinstance(obj, list):
                         for i, v in enumerate(obj):
                             extract_cell_ranges(v, sheet)
-
-                # Debug: Check if source_sheet is present and what the initial values are
-                print(f"[DEBUG] source_sheet in chart_meta: {'source_sheet' in chart_meta}")
-                if 'source_sheet' in chart_meta:
-                    print(f"[DEBUG] source_sheet value: {chart_meta['source_sheet']}")
-                print(f"[DEBUG] Initial other_labels: {chart_meta.get('other_labels', 'NOT_FOUND')}")
-                print(f"[DEBUG] Initial other_values: {chart_meta.get('other_values', 'NOT_FOUND')}")
-
+                
                 if "source_sheet" in chart_meta:
                     wb = openpyxl.load_workbook(data_file_path, data_only=True)
                     sheet = wb[chart_meta["source_sheet"]]
@@ -276,11 +342,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     extract_cell_ranges(chart_meta, sheet)
                     extract_cell_ranges(series_meta, sheet)
                     wb.close()
-                    print(f"[DEBUG] After extraction - other_labels: {chart_meta.get('other_labels', 'NOT_FOUND')}")
-                    print(f"[DEBUG] After extraction - other_values: {chart_meta.get('other_values', 'NOT_FOUND')}")
-                else:
-                    print("[DEBUG] No source_sheet found in chart_meta - skipping extraction")
-
+                
                 # Use updated values from series_meta after extraction
                 series_data = series_meta.get("data", [])
                 x_values = series_meta.get("x_axis", [])
@@ -300,14 +362,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     labels = series_meta.get("labels", x_values)
                     values = series_meta.get("values", [])
                     colors = series_meta.get("colors", [])
-                    # Debug prints
-                    print("[DEBUG] labels:", labels)
-                    print("[DEBUG] values:", values)
-                    print("[DEBUG] colors:", colors)
-                    print("[DEBUG] other_labels:", other_labels)
-                    print("[DEBUG] other_values:", other_values)
-                    print("[DEBUG] other_colors:", other_colors)
-                    print("[DEBUG] value_format:", value_format)
+                    # Chart data prepared
                     fig = create_bar_of_pie_chart(
                         labels=labels,
                         values=values,
@@ -624,7 +679,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 # Handle axis labels based on chart type
                 if chart_type != "pie":
                     layout_updates["xaxis_title"] = chart_meta.get("x_label", chart_config.get("x_axis_title", "X"))
-                    layout_updates["yaxis_title"] = chart_meta.get("primary_y_label", chart_config.get("y_axis_title", "Y"))
+                    layout_updates["yaxis_title"] = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Y"))
                 
                 # Font
                 if font_family or font_size or font_color:
@@ -729,6 +784,28 @@ def _generate_report(project_id, template_path, data_file_path):
                             "showarrow": True
                         }
                         layout_updates["annotations"].append(ann_dict)
+                
+                # --- Apply margin settings ---
+                if margin:
+                    layout_updates["margin"] = margin
+                
+                # Apply axis label distances
+                if chart_type != "pie":
+                    if x_axis_label_distance or y_axis_label_distance or axis_tick_distance:
+                        layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                        layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                        
+                        if x_axis_label_distance:
+                            layout_updates["xaxis"]["title"] = layout_updates["xaxis"].get("title", {})
+                            layout_updates["xaxis"]["title"]["standoff"] = x_axis_label_distance
+                        
+                        if y_axis_label_distance:
+                            layout_updates["yaxis"]["title"] = layout_updates["yaxis"].get("title", {})
+                            layout_updates["yaxis"]["title"]["standoff"] = y_axis_label_distance
+                        
+                        if axis_tick_distance:
+                            layout_updates["xaxis"]["ticklen"] = axis_tick_distance
+                            layout_updates["yaxis"]["ticklen"] = axis_tick_distance
 
                 fig.update_layout(**layout_updates)
 
@@ -967,7 +1044,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Set labels and styling
                     if chart_type != "pie":
                         ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), fontsize=font_size or 11)
-                        ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("y_axis_title", "Primary Y")), fontsize=font_size or 11)
+                        ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Primary Y")), fontsize=font_size or 11)
                         if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
                             ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), fontsize=font_size or 11)
 
@@ -1002,15 +1079,74 @@ def _generate_report(project_id, template_path, data_file_path):
                 return tmpfile.name
 
             except Exception as e:
-                current_app.logger.error(f"❌ Chart generation failed for {chart_tag}: {e}")
                 import traceback
-                print("[DEBUG] Exception:", e)
-                print(traceback.format_exc())
+                
+                # Create user-friendly error message
+                error_type = type(e).__name__
+                error_msg = str(e)
+                
+                # Simplify common error messages
+                if "JSONDecodeError" in error_type:
+                    user_message = "Invalid JSON format in chart configuration"
+                elif "KeyError" in error_type:
+                    user_message = f"Missing required field: {error_msg}"
+                elif "ValueError" in error_type:
+                    user_message = f"Invalid value: {error_msg}"
+                elif "IndexError" in error_type:
+                    user_message = "Data array is empty or has wrong dimensions"
+                elif "TypeError" in error_type:
+                    user_message = f"Wrong data type: {error_msg}"
+                elif "FileNotFoundError" in error_type:
+                    user_message = "Excel file or sheet not found"
+                elif "openpyxl" in error_msg.lower():
+                    user_message = "Excel file format error - check if file is corrupted"
+                elif "pandas" in error_msg.lower():
+                    user_message = "Data reading error - check Excel file format"
+                else:
+                    user_message = error_msg
+                
+                error_details = {
+                    "chart_tag": chart_tag,
+                    "error_type": error_type,
+                    "user_message": user_message,
+                    "technical_message": error_msg,
+                    "chart_type": chart_type if 'chart_type' in locals() else "unknown",
+                    "data_points": len(series_data) if 'series_data' in locals() else 0,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+                # Simple console logging
+                current_app.logger.error(f"❌ Chart '{chart_tag}' failed: {user_message}")
+                
+                # Store error details for frontend (project-specific)
+                if not hasattr(current_app, 'chart_errors'):
+                    current_app.chart_errors = {}
+                if project_id not in current_app.chart_errors:
+                    current_app.chart_errors[project_id] = {}
+                current_app.chart_errors[project_id][chart_tag] = error_details
+                
+                # Also store a simplified version for report generation errors
+                if not hasattr(current_app, 'report_generation_errors'):
+                    current_app.report_generation_errors = {}
+                if project_id not in current_app.report_generation_errors:
+                    current_app.report_generation_errors[project_id] = {}
+                current_app.report_generation_errors[project_id][chart_tag] = {
+                    "error": user_message,
+                    "chart_type": chart_type if 'chart_type' in locals() else "unknown",
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
                 return None
 
         # Insert charts into paragraphs
-        for para in doc.paragraphs:
+        chart_errors = []
+        for para_idx, para in enumerate(doc.paragraphs):
             replace_text_in_paragraph(para)
+        
+        # Paragraph processing completed silently
+        
+        # Process charts in paragraphs
+        for para_idx, para in enumerate(doc.paragraphs):
             full_text = ''.join(run.text for run in para.runs)
             chart_placeholders = re.findall(r"\$\{(section\d+_chart)\}", full_text, flags=re.IGNORECASE)
             for tag in chart_placeholders:
@@ -1020,8 +1156,32 @@ def _generate_report(project_id, template_path, data_file_path):
                         if chart_img:
                             para.text = re.sub(rf"\$\{{{tag}\}}", "", para.text, flags=re.IGNORECASE)
                             para.add_run().add_picture(chart_img, width=Inches(5.5))
+                        else:
+                            # Chart generation failed, add error placeholder
+                            error_msg = f"[Chart failed: {tag}]"
+                            para.text = re.sub(rf"\$\{{{tag}\}}", error_msg, para.text, flags=re.IGNORECASE)
+                            
+                            # Get the specific error from chart_errors if available
+                            specific_error = "Chart could not be generated"
+                            if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
+                                if tag in current_app.chart_errors[project_id]:
+                                    specific_error = current_app.chart_errors[project_id][tag].get('user_message', specific_error)
+                            elif hasattr(current_app, 'report_generation_errors') and project_id in current_app.report_generation_errors:
+                                if tag in current_app.report_generation_errors[project_id]:
+                                    specific_error = current_app.report_generation_errors[project_id][tag].get('error', specific_error)
+                            
+                            chart_errors.append({
+                                "tag": tag,
+                                "error": specific_error
+                            })
                     except Exception as e:
                         current_app.logger.error(f"⚠️ Failed to insert chart for tag {tag}: {e}")
+                        error_msg = f"[Chart failed: {tag}]"
+                        para.text = re.sub(rf"\$\{{{tag}\}}", error_msg, para.text, flags=re.IGNORECASE)
+                        chart_errors.append({
+                            "tag": tag,
+                            "error": f"Chart insertion failed: {str(e)}"
+                        })
 
         replace_text_in_tables()
 
@@ -1039,12 +1199,52 @@ def _generate_report(project_id, template_path, data_file_path):
                                     if chart_img:
                                         para.text = re.sub(rf"\$\{{{tag}\}}", "", para.text, flags=re.IGNORECASE)
                                         para.add_run().add_picture(chart_img, width=Inches(5.5))
+                                    else:
+                                        # Chart generation failed, add error placeholder
+                                        error_msg = f"[Chart failed: {tag}]"
+                                        para.text = re.sub(rf"\$\{{{tag}\}}", error_msg, para.text, flags=re.IGNORECASE)
+                                        
+                                        # Get the specific error from chart_errors if available
+                                        specific_error = "Chart could not be generated"
+                                        if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
+                                            if tag in current_app.chart_errors[project_id]:
+                                                specific_error = current_app.chart_errors[project_id][tag].get('user_message', specific_error)
+                                        elif hasattr(current_app, 'report_generation_errors') and project_id in current_app.report_generation_errors:
+                                            if tag in current_app.report_generation_errors[project_id]:
+                                                specific_error = current_app.report_generation_errors[project_id][tag].get('error', specific_error)
+                                        
+                                        chart_errors.append({
+                                            "tag": tag,
+                                            "error": specific_error
+                                        })
                                 except Exception as e:
                                     current_app.logger.error(f"⚠️ Failed to insert chart in table for tag {tag}: {e}")
+                                    error_msg = f"[Chart failed: {tag}]"
+                                    para.text = re.sub(rf"\$\{{{tag}\}}", error_msg, para.text, flags=re.IGNORECASE)
+                                    chart_errors.append({
+                                        "tag": tag,
+                                        "error": f"Chart insertion failed: {str(e)}"
+                                    })
 
-        output_path = os.path.join(UPLOAD_FOLDER, 'reports', f'output_report_{project_id}.docx')
+        # Save report to temporary location
+        import tempfile
+        temp_dir = tempfile.mkdtemp()
+        output_path = os.path.join(temp_dir, f'output_report_{project_id}.docx')
         doc.save(output_path)
-        current_app.logger.debug(f"✅ Report saved to: {output_path}")
+        current_app.logger.info(f"✅ Report generated successfully")
+        
+        # Store chart errors for this report generation
+        if not hasattr(current_app, 'report_errors'):
+            current_app.report_errors = {}
+        current_app.report_errors[project_id] = {
+            "chart_errors": chart_errors,
+            "generated_at": datetime.utcnow().isoformat()
+        }
+        
+        # Clear old chart errors for this project when new report is generated
+        if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
+            current_app.chart_errors[project_id] = {}
+        
         return output_path
 
     except Exception as e:
@@ -1110,45 +1310,67 @@ def create_project():
 @projects_bp.route('/api/projects/<project_id>/upload_report', methods=['POST'])
 @login_required
 def upload_report(project_id):
+    current_app.logger.info(f"📤 Upload request received for project: {project_id}")
+    
     if 'report_file' not in request.files:
+        current_app.logger.error(f"❌ No report_file in request.files: {list(request.files.keys())}")
         return jsonify({'error': 'No report file provided'}), 400
 
     report_file = request.files['report_file']
+    current_app.logger.info(f"📁 File received: {report_file.filename}")
 
     if report_file.filename == '':
+        current_app.logger.error(f"❌ Empty filename")
         return jsonify({'error': 'No selected report file'}), 400
 
     if not allowed_report_file(report_file.filename):
+        current_app.logger.error(f"❌ File type not allowed: {report_file.filename}")
         return jsonify({'error': 'Report file type not allowed. Only .xlsx or .csv are accepted.'}), 400
 
     try:
         project_id_obj = ObjectId(project_id)
-    except:
+        current_app.logger.info(f"✅ Valid project ID: {project_id}")
+    except Exception as e:
+        current_app.logger.error(f"❌ Invalid project ID: {project_id}, error: {e}")
         return jsonify({'error': 'Invalid project ID'}), 400
 
     project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
     if not project:
+        current_app.logger.error(f"❌ Project not found or unauthorized: {project_id}")
         return jsonify({'error': 'Project not found or unauthorized'}), 404
+
+    current_app.logger.info(f"✅ Project found: {project.get('name', 'Unknown')}")
 
     template_file_path = project.get('file_path')
     abs_template_file_path = get_abs_path_from_db_path(template_file_path)
+    current_app.logger.info(f"📄 Template path: {template_file_path}")
+    current_app.logger.info(f"📄 Absolute template path: {abs_template_file_path}")
+    
     if not template_file_path or not os.path.exists(abs_template_file_path):
+        current_app.logger.error(f"❌ Template file not found: {abs_template_file_path}")
         return jsonify({'error': 'Word template file not found for this project. Please upload it during project creation.'}), 400
     
     # Save the uploaded report data file temporarily
     report_data_filename = secure_filename(report_file.filename)
-    temp_upload_folder = os.path.join(current_app.root_path, UPLOAD_FOLDER, 'temp_reports')
-    os.makedirs(temp_upload_folder, exist_ok=True)
-    temp_report_data_path = os.path.join(temp_upload_folder, report_data_filename)
+    temp_dir = tempfile.mkdtemp()
+    temp_report_data_path = os.path.join(temp_dir, report_data_filename)
     report_file.save(temp_report_data_path)
 
+    # Clear any existing errors for this project before starting new generation
+    if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
+        current_app.chart_errors[project_id] = {}
+    
     # Generate the report
+    current_app.logger.info(f"🔄 Starting report generation...")
     generated_report_path = _generate_report(project_id, abs_template_file_path, temp_report_data_path)
     
-    # Clean up the temporary uploaded report data file
-    os.remove(temp_report_data_path)
+    # Clean up the temporary uploaded report data file and directory
+    import shutil
+    shutil.rmtree(temp_dir)
+    current_app.logger.info(f"🧹 Temporary files cleaned up")
 
     if generated_report_path:
+        current_app.logger.info(f"✅ Report generated successfully: {generated_report_path}")
         # Update project with generated report path
         current_app.mongo.db.projects.update_one(
             {'_id': project_id_obj},
@@ -1156,6 +1378,7 @@ def upload_report(project_id):
         )
         return jsonify({'message': 'Report generated successfully', 'report_path': generated_report_path}), 200
     else:
+        current_app.logger.error(f"❌ Report generation failed")
         return jsonify({'error': 'Failed to generate report'}), 500
 
 @projects_bp.route('/api/reports/<project_id>/download', methods=['GET'])
@@ -1171,19 +1394,95 @@ def download_report(project_id):
         return jsonify({'error': 'Project not found or unauthorized'}), 404
 
     generated_report_path = project.get('generated_report_path')
-    abs_generated_report_path = get_abs_path_from_db_path(generated_report_path)
-    if not generated_report_path or not os.path.exists(abs_generated_report_path):
+    if not generated_report_path or not os.path.exists(generated_report_path):
         return jsonify({'error': 'Generated report not found for this project'}), 404
 
-    return send_file(abs_generated_report_path, as_attachment=True)
+    # Send file and clean up after download
+    try:
+        response = send_file(generated_report_path, as_attachment=True)
+        
+        # Clean up the temporary file after sending
+        def cleanup_after_response(response):
+            try:
+                if os.path.exists(generated_report_path):
+                    os.remove(generated_report_path)
+                    # Also remove the temp directory if it's empty
+                    temp_dir = os.path.dirname(generated_report_path)
+                    if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+                        os.rmdir(temp_dir)
+            except Exception as e:
+                current_app.logger.warning(f"⚠️ Failed to cleanup temporary report file: {e}")
+            return response
+        
+        response.call_on_close(lambda: cleanup_after_response(response))
+        return response
+        
+    except Exception as e:
+        # Clean up on error too
+        try:
+            if os.path.exists(generated_report_path):
+                os.remove(generated_report_path)
+                temp_dir = os.path.dirname(generated_report_path)
+                if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+                    os.rmdir(temp_dir)
+        except:
+            pass
+        raise e
 
 @projects_bp.route('/api/reports/<chart_filename>/download_html', methods=['GET'])
 @login_required
 def download_chart_html(chart_filename):
-    chart_path = os.path.join(UPLOAD_FOLDER, 'reports', chart_filename)
-    if not os.path.exists(chart_path):
-        return jsonify({'error': 'Chart HTML file not found'}), 404
-    return send_file(chart_path, as_attachment=True)
+    # Charts are embedded in Word documents, no separate HTML files needed
+    return jsonify({'error': 'Chart HTML files are not available - charts are embedded in Word documents'}), 404
+
+@projects_bp.route('/api/projects/<project_id>/chart_errors', methods=['GET'])
+@login_required
+def get_chart_errors(project_id):
+    try:
+        project_id_obj = ObjectId(project_id)
+    except:
+        return jsonify({'error': 'Invalid project ID'}), 400
+
+    project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
+    if not project:
+        return jsonify({'error': 'Project not found or unauthorized'}), 404
+
+    # Get chart errors for this project
+    chart_errors = getattr(current_app, 'chart_errors', {}).get(project_id, {})
+    report_errors = getattr(current_app, 'report_errors', {}).get(project_id, {})
+    report_generation_errors = getattr(current_app, 'report_generation_errors', {}).get(project_id, {})
+    
+    # Combine both types of errors
+    all_errors = {
+        "chart_generation_errors": chart_errors,
+        "report_generation_errors": report_errors.get("chart_errors", []),
+        "report_generation_errors_detailed": report_generation_errors,
+        "report_generated_at": report_errors.get("generated_at")
+    }
+    
+    return jsonify(all_errors)
+
+@projects_bp.route('/api/projects/<project_id>/clear_errors', methods=['POST'])
+@login_required
+def clear_project_errors(project_id):
+    try:
+        project_id_obj = ObjectId(project_id)
+    except:
+        return jsonify({'error': 'Invalid project ID'}), 400
+
+    project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
+    if not project:
+        return jsonify({'error': 'Project not found or unauthorized'}), 404
+
+    # Clear chart errors for this project
+    if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
+        current_app.chart_errors[project_id] = {}
+    
+    # Clear report errors for this project
+    if hasattr(current_app, 'report_errors') and project_id in current_app.report_errors:
+        current_app.report_errors[project_id] = {}
+    
+    return jsonify({'message': 'Project errors cleared successfully'})
 
 @projects_bp.route('/api/projects/<project_id>/upload_zip', methods=['POST'])
 @login_required
@@ -1195,6 +1494,10 @@ def upload_zip_and_generate_reports(project_id):
     if not zip_file.filename.endswith('.zip'):
         return jsonify({'error': 'Only .zip files are allowed'}), 400
 
+    # Clear any existing errors for this project before starting new generation
+    if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
+        current_app.chart_errors[project_id] = {}
+    
     # Prepare temp directories
     temp_dir = tempfile.mkdtemp()
     extracted_dir = os.path.join(temp_dir, 'extracted')
@@ -1209,17 +1512,22 @@ def upload_zip_and_generate_reports(project_id):
     # Find all Excel files
     excel_files = [os.path.join(extracted_dir, f) for f in os.listdir(extracted_dir) if f.endswith('.xlsx') or f.endswith('.xls')]
 
-    # Prepare output folders
-    output_folder_name = os.path.join(UPLOAD_FOLDER, 'reports_by_name')
-    output_folder_code = os.path.join(UPLOAD_FOLDER, 'reports_by_code')
+    # Prepare temporary output folders
+    output_folder_name = os.path.join(temp_dir, 'reports_by_name')
+    output_folder_code = os.path.join(temp_dir, 'reports_by_code')
     os.makedirs(output_folder_name, exist_ok=True)
     os.makedirs(output_folder_code, exist_ok=True)
 
     generated_files = []
+    total_files = len(excel_files)
+    current_app.logger.info(f"Starting batch processing of {total_files} Excel files")
+    
     for idx, excel_path in enumerate(excel_files, 1):
         # You may want to extract report name/code from the Excel file or filename
         report_name = os.path.splitext(os.path.basename(excel_path))[0]
         report_code = f"{project_id}_{idx}"
+
+        current_app.logger.info(f"Processing file {idx}/{total_files}: {report_name}")
 
         # Generate report
         template_file_path = current_app.mongo.db.projects.find_one({'_id': ObjectId(project_id)})['file_path']
@@ -1230,21 +1538,34 @@ def upload_zip_and_generate_reports(project_id):
             shutil.copy(output_path, os.path.join(output_folder_name, f"{report_name}.docx"))
             shutil.copy(output_path, os.path.join(output_folder_code, f"{report_code}.docx"))
             generated_files.append({'name': report_name, 'code': report_code})
+            current_app.logger.info(f"✅ Successfully generated report {idx}/{total_files}: {report_name}")
+        else:
+            current_app.logger.error(f"❌ Failed to generate report {idx}/{total_files}: {report_name}")
+        
         # Log progress
-        current_app.logger.info(f"Generated {idx} of {len(excel_files)} reports")
+        current_app.logger.info(f"Progress: {idx}/{total_files} reports processed")
 
-    # Optionally, zip all generated reports for download
-    zip_output_path = os.path.join(UPLOAD_FOLDER, 'reports', f'batch_reports_{project_id}.zip')
+    # Create zip file in temporary location
+    zip_output_path = os.path.join(temp_dir, f'batch_reports_{project_id}.zip')
     with zipfile.ZipFile(zip_output_path, 'w') as zipf:
         for file_info in generated_files:
             file_path = os.path.join(output_folder_name, f"{file_info['name']}.docx")
             zipf.write(file_path, arcname=f"{file_info['name']}.docx")
 
-    # Clean up temp
+    # Move zip to a temporary location that will be cleaned up after download
+    final_zip_path = os.path.join(tempfile.gettempdir(), f'batch_reports_{project_id}.zip')
+    shutil.move(zip_output_path, final_zip_path)
+    
+    # Clean up temp directory
     shutil.rmtree(temp_dir)
 
+    current_app.logger.info(f"Batch processing complete. Generated {len(generated_files)} out of {total_files} reports")
+    
     return jsonify({
-        'message': f'Generated {len(generated_files)} reports.',
-        'download_zip': zip_output_path,
-        'reports': generated_files
+        'message': f'Generated {len(generated_files)} out of {total_files} reports.',
+        'download_zip': final_zip_path,
+        'reports': generated_files,
+        'total_files': total_files,
+        'processed_files': len(generated_files),
+        'success_rate': f"{len(generated_files)}/{total_files}"
     })
