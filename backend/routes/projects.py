@@ -234,7 +234,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             # If no runs exist, create one
                             paragraph.add_run(full_text.replace(placeholder, str(val)))
                         break  # Only process one placeholder at a time to avoid conflicts
-                        
+
         def replace_text_in_tables():
             for table in doc.tables:
                 for row in table.rows:
@@ -287,6 +287,8 @@ def _generate_report(project_id, template_path, data_file_path):
                 # Ensure show_gridlines is a boolean
                 if isinstance(show_gridlines, str):
                     show_gridlines = show_gridlines.strip().lower() == "true"
+                elif show_gridlines is None:
+                    show_gridlines = True  # Default to showing gridlines if not specified
                 gridline_color = chart_config.get("gridline_color")
                 gridline_style = chart_config.get("gridline_style")
                 chart_background = chart_config.get("chart_background")
@@ -296,6 +298,8 @@ def _generate_report(project_id, template_path, data_file_path):
                 data_label_color = chart_config.get("data_label_color")
                 axis_tick_format = chart_config.get("axis_tick_format")
                 y_axis_min_max = chart_config.get("y_axis_min_max")
+                secondary_y_axis_format = chart_config.get("secondary_y_axis_format") or chart_meta.get("secondary_y_axis_format")
+                secondary_y_axis_min_max = chart_config.get("secondary_y_axis_min_max") or chart_meta.get("secondary_y_axis_min_max")
                 sort_order = chart_config.get("sort_order")
                 data_grouping = chart_config.get("data_grouping")
                 annotations = chart_config.get("annotations", [])
@@ -344,8 +348,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     wb.close()
                 
                 # Use updated values from series_meta after extraction
-                series_data = series_meta.get("data", [])
-                x_values = series_meta.get("x_axis", [])
+                    series_data = series_meta.get("data", [])
+                    x_values = series_meta.get("x_axis", [])
                 
                 colors = series_meta.get("colors", [])
 
@@ -698,7 +702,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     layout_updates["plot_bgcolor"] = plot_background
                 
                 # Legend configuration
-                show_legend = chart_meta.get("legend", True)
+                show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
                 if show_legend:
                     if legend_position:
                         # Map 'top', 'bottom', 'left', 'right' to valid Plotly legend positions
@@ -724,9 +728,24 @@ def _generate_report(project_id, template_path, data_file_path):
                     if y_axis_min_max:
                         layout_updates["yaxis"] = layout_updates.get("yaxis", {})
                         layout_updates["yaxis"]["range"] = y_axis_min_max
+                        # Also set autorange to false to ensure the range is respected
+                        layout_updates["yaxis"]["autorange"] = False
                     if axis_tick_format:
                         layout_updates["yaxis"] = layout_updates.get("yaxis", {})
                         layout_updates["yaxis"]["tickformat"] = axis_tick_format
+                        # Also apply to secondary y-axis if it's a currency format
+                        if "$" in axis_tick_format:
+                            layout_updates["yaxis2"] = layout_updates.get("yaxis2", {})
+                            layout_updates["yaxis2"]["tickformat"] = axis_tick_format
+                    
+                    # Secondary y-axis formatting
+                    if secondary_y_axis_format:
+                        layout_updates["yaxis2"] = layout_updates.get("yaxis2", {})
+                        layout_updates["yaxis2"]["tickformat"] = secondary_y_axis_format
+                    if secondary_y_axis_min_max:
+                        layout_updates["yaxis2"] = layout_updates.get("yaxis2", {})
+                        layout_updates["yaxis2"]["range"] = secondary_y_axis_min_max
+                    
                     # Axis tick font size
                     if axis_tick_font_size:
                         layout_updates["xaxis"] = layout_updates.get("xaxis", {})
@@ -755,6 +774,10 @@ def _generate_report(project_id, template_path, data_file_path):
                 # Data labels (for bar/line traces)
                 show_data_labels = chart_meta.get("data_labels", True)
                 value_format = chart_meta.get("value_format", "")
+                
+                # Enable data labels if any data label settings are provided
+                if data_label_format or data_label_font_size or data_label_color:
+                    show_data_labels = True
                 
                 if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color):
                     for trace in fig.data:
@@ -818,6 +841,13 @@ def _generate_report(project_id, template_path, data_file_path):
                         # Create subplot for expanded pie chart
                         fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 8), dpi=200)
                         
+                        # Apply background colors to Matplotlib figure
+                        if chart_background:
+                            fig_mpl.patch.set_facecolor(chart_background)
+                        if plot_background:
+                            ax1.set_facecolor(plot_background)
+                            ax2.set_facecolor(plot_background)
+                        
                         series = series_data[0]
                         labels = series.get("labels", x_values)
                         values = series.get("values", [])
@@ -851,6 +881,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         # Regular pie chart
                         fig_mpl, ax = plt.subplots(figsize=(10, 8), dpi=200)
                         
+                        # Apply background colors to Matplotlib figure
+                        if chart_background:
+                            fig_mpl.patch.set_facecolor(chart_background)
+                        if plot_background:
+                            ax.set_facecolor(plot_background)
+                        
                         if len(series_data) == 1:
                             series = series_data[0]
                             labels = series.get("labels", x_values)
@@ -871,6 +907,13 @@ def _generate_report(project_id, template_path, data_file_path):
                 elif chart_type in ["bar of pie", "bar_of_pie"]:
                     # Matplotlib version of bar of pie
                     fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 8), dpi=200)
+                    
+                    # Apply background colors to Matplotlib figure
+                    if chart_background:
+                        fig_mpl.patch.set_facecolor(chart_background)
+                    if plot_background:
+                        ax1.set_facecolor(plot_background)
+                        ax2.set_facecolor(plot_background)
                     labels = series_meta.get("labels", x_values)
                     values = series_meta.get("values", [])
                     colors = series_meta.get("colors", [])
@@ -906,6 +949,13 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Bar, line, area charts
                     fig_mpl, ax1 = plt.subplots(figsize=(10, 6), dpi=200)
                     ax2 = ax1.twinx()
+                    
+                    # Apply background colors to Matplotlib figure
+                    if chart_background:
+                        fig_mpl.patch.set_facecolor(chart_background)
+                    if plot_background:
+                        ax1.set_facecolor(plot_background)
+                        ax2.set_facecolor(plot_background)
 
                     for i, series in enumerate(series_data):
                         label = series.get("name", f"Series {i+1}")
@@ -1056,6 +1106,15 @@ def _generate_report(project_id, template_path, data_file_path):
                         else:
                             ax1.tick_params(axis='x', rotation=45)
                         
+                        # Apply secondary y-axis formatting for Matplotlib
+                        if secondary_y_axis_format:
+                            from matplotlib.ticker import FuncFormatter
+                            def percentage_formatter(x, pos):
+                                return f'{x:.0%}'
+                            ax2.yaxis.set_major_formatter(FuncFormatter(percentage_formatter))
+                        if secondary_y_axis_min_max:
+                            ax2.set_ylim(secondary_y_axis_min_max)
+                        
                         # Gridlines
                         if show_gridlines:
                             ax1.grid(True, linestyle=gridline_style or '--', color=gridline_color or '#ccc', alpha=0.6)
@@ -1064,8 +1123,19 @@ def _generate_report(project_id, template_path, data_file_path):
                             ax1.grid(False)
                             ax2.grid(False)
                         
+                        # Apply primary y-axis formatting for Matplotlib
+                        if axis_tick_format:
+                            from matplotlib.ticker import FuncFormatter
+                            if "$" in axis_tick_format:
+                                def currency_formatter(x, pos):
+                                    return f'${x:,.0f}'
+                                ax1.yaxis.set_major_formatter(FuncFormatter(currency_formatter))
+                        if y_axis_min_max:
+                            ax1.set_ylim(y_axis_min_max)
+                        
                         # Legend
-                        if chart_meta.get("legend", True):
+                        show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                        if show_legend:
                             ax1.legend(loc='best')
                         
                         ax1.set_title(title, fontsize=font_size or 14, weight='bold')
@@ -1359,7 +1429,7 @@ def upload_report(project_id):
     # Clear any existing errors for this project before starting new generation
     if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
         current_app.chart_errors[project_id] = {}
-    
+
     # Generate the report
     current_app.logger.info(f"🔄 Starting report generation...")
     generated_report_path = _generate_report(project_id, abs_template_file_path, temp_report_data_path)
@@ -1497,7 +1567,7 @@ def upload_zip_and_generate_reports(project_id):
     # Clear any existing errors for this project before starting new generation
     if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
         current_app.chart_errors[project_id] = {}
-    
+
     # Prepare temp directories
     temp_dir = tempfile.mkdtemp()
     extracted_dir = os.path.join(temp_dir, 'extracted')
@@ -1560,7 +1630,7 @@ def upload_zip_and_generate_reports(project_id):
     shutil.rmtree(temp_dir)
 
     current_app.logger.info(f"Batch processing complete. Generated {len(generated_files)} out of {total_files} reports")
-    
+
     return jsonify({
         'message': f'Generated {len(generated_files)} out of {total_files} reports.',
         'download_zip': final_zip_path,

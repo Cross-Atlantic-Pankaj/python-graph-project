@@ -248,7 +248,7 @@ function Dashboard() {
             `Successfully generated and downloaded ${processed_files} out of ${total_files} reports.`,
             'success'
           );
-          handleCloseReportUploadDialog();
+        handleCloseReportUploadDialog();
         }, 1000);
         
       } catch (error) {
@@ -274,7 +274,7 @@ function Dashboard() {
       formData.append('report_file', reportFile);
 
       setSingleProgress({ message: 'Processing Excel data...', percentage: 40 });
-      
+
       await axios.post(
         `${process.env.REACT_APP_API_URL}/api/projects/${selectedProjectForReport.id}/upload_report`,
         formData,
@@ -325,7 +325,7 @@ function Dashboard() {
       }
 
       setSingleProgress({ message: 'Downloading generated report...', percentage: 90 });
-      
+
       // Download the generated report
       try {
         const downloadResponse = await axios.get(
@@ -363,7 +363,7 @@ function Dashboard() {
       }
 
       setTimeout(() => {
-        handleCloseReportUploadDialog();
+      handleCloseReportUploadDialog();
       }, 1000);
     } catch (uploadError) {
       console.error('Error uploading report:', uploadError.response?.data || uploadError.message);
@@ -439,13 +439,13 @@ function Dashboard() {
                   <TableCell>{new Date(project.created_at).toLocaleDateString()}</TableCell>
                   <TableCell align="right">
                     <Box sx={{ display: 'flex', gap: 1 }}>
-                      <Button
-                        variant="outlined"
-                        startIcon={<DescriptionIcon />}
-                        onClick={() => handleOpenReportUploadDialog(project)}
-                      >
-                        Generate Report
-                      </Button>
+                    <Button
+                      variant="outlined"
+                      startIcon={<DescriptionIcon />}
+                      onClick={() => handleOpenReportUploadDialog(project)}
+                    >
+                      Generate Report
+                    </Button>
                       <Button
                         variant="outlined"
                         color="warning"
@@ -546,8 +546,8 @@ function Dashboard() {
               <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                 <CircularProgress size={20} sx={{ mr: 1 }} />
                 <Typography variant="body2" sx={{ flexGrow: 1 }}>
-                  {batchProgress.message}
-                </Typography>
+                {batchProgress.message}
+              </Typography>
                 <Typography variant="body2" color="primary" fontWeight="bold">
                   {batchProgress.percentage}%
                 </Typography>
