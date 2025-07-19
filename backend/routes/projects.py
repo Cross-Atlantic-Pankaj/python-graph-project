@@ -179,6 +179,20 @@ def _generate_report(project_id, template_path, data_file_path):
                     key = f"{section_prefix}_{year.lower()}_kpi2"
                     value = row[col]
                     if pd.notna(value) and str(value).strip():
+                        # Format percentage values properly
+                        try:
+                            # Convert to float first to handle any numeric format
+                            float_val = float(value)
+                            # If the value is between 0 and 1, it's likely a decimal percentage
+                            if 0 <= float_val <= 1:
+                                # Convert decimal to percentage (e.g., 0.2 -> 20%)
+                                percentage_val = f"{float_val * 100:.1f}%"
+                                flat_data_map[key] = percentage_val
+                            else:
+                                # If it's already a larger number, assume it's already a percentage
+                                flat_data_map[key] = f"{float_val:.1f}%"
+                        except (ValueError, TypeError):
+                            # If conversion fails, use the original value as string
                         flat_data_map[key] = str(value).strip()
                     else:
                         current_app.logger.warning(f"⚠️ Empty value for {col} -> {key}")
@@ -188,6 +202,20 @@ def _generate_report(project_id, template_path, data_file_path):
                 key = f"{section_prefix}_cgrp"
                 value = row["Chart_Data_CAGR"]
                 if str(value).strip():
+                    # Format CAGR percentage values properly
+                    try:
+                        # Convert to float first to handle any numeric format
+                        float_val = float(value)
+                        # If the value is between 0 and 1, it's likely a decimal percentage
+                        if 0 <= float_val <= 1:
+                            # Convert decimal to percentage (e.g., 0.105 -> 10.5%)
+                            percentage_val = f"{float_val * 100:.1f}%"
+                            flat_data_map[key] = percentage_val
+                        else:
+                            # If it's already a larger number, assume it's already a percentage
+                            flat_data_map[key] = f"{float_val:.1f}%"
+                    except (ValueError, TypeError):
+                        # If conversion fails, use the original value as string
                     flat_data_map[key] = str(value).strip()
                 else:
                     current_app.logger.warning(f"⚠️ Empty value for Chart_Data_CAGR -> {key}")
@@ -293,11 +321,12 @@ def _generate_report(project_id, template_path, data_file_path):
                 gridline_style = chart_config.get("gridline_style")
                 chart_background = chart_config.get("chart_background")
                 plot_background = chart_config.get("plot_background")
-                data_label_format = chart_config.get("data_label_format")
-                data_label_font_size = chart_config.get("data_label_font_size")
-                data_label_color = chart_config.get("data_label_color")
+                data_label_format = chart_config.get("data_label_format") or chart_meta.get("data_label_format")
+                data_label_font_size = chart_config.get("data_label_font_size") or chart_meta.get("data_label_font_size")
+                data_label_color = chart_config.get("data_label_color") or chart_meta.get("data_label_color")
                 axis_tick_format = chart_config.get("axis_tick_format")
-                y_axis_min_max = chart_config.get("y_axis_min_max")
+                y_axis_min_max = chart_config.get("y_axis_min_max") or chart_meta.get("y_axis_min_max")
+                current_app.logger.debug(f"Y-axis min/max from config: {y_axis_min_max}")
                 secondary_y_axis_format = chart_config.get("secondary_y_axis_format") or chart_meta.get("secondary_y_axis_format")
                 secondary_y_axis_min_max = chart_config.get("secondary_y_axis_min_max") or chart_meta.get("secondary_y_axis_min_max")
                 sort_order = chart_config.get("sort_order")
@@ -310,6 +339,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 x_axis_label_distance = chart_config.get("x_axis_label_distance") or chart_meta.get("x_axis_label_distance")
                 y_axis_label_distance = chart_config.get("y_axis_label_distance") or chart_meta.get("y_axis_label_distance")
                 axis_tick_distance = chart_config.get("axis_tick_distance") or chart_meta.get("axis_tick_distance")
+                figsize = chart_config.get("figsize") or chart_meta.get("figsize")
 
                 # --- Excel range extraction helpers ---
                 def extract_excel_range(sheet, cell_range):
@@ -385,8 +415,8 @@ def _generate_report(project_id, template_path, data_file_path):
 
                     start_col_idx = column_index_from_string(start_col) - 1
                     end_col_idx = column_index_from_string(end_col) - 1
-                    start_row_idx = int(start_row) - 2
-                    end_row_idx = int(end_row) - 2
+                    start_row_idx = int(start_row) - 1  # Fixed: pandas is 0-indexed, Excel is 1-indexed
+                    end_row_idx = int(end_row) - 1      # Fixed: pandas is 0-indexed, Excel is 1-indexed
 
                     if start_col_idx == end_col_idx:
                         return df.iloc[start_row_idx:end_row_idx + 1, start_col_idx].tolist()
@@ -727,9 +757,18 @@ def _generate_report(project_id, template_path, data_file_path):
                 if chart_type != "pie":
                     if y_axis_min_max:
                         layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                        # Handle "auto" value for y-axis min/max
+                        if y_axis_min_max == "auto":
+                            # Don't set range for auto - let Plotly auto-scale
+                            pass
+                        else:
                         layout_updates["yaxis"]["range"] = y_axis_min_max
                         # Also set autorange to false to ensure the range is respected
                         layout_updates["yaxis"]["autorange"] = False
+                            # Force the range to be applied
+                            layout_updates["yaxis"]["fixedrange"] = False
+                            # Ensure the range is properly set
+                            current_app.logger.debug(f"Setting Y-axis range to: {y_axis_min_max}")
                     if axis_tick_format:
                         layout_updates["yaxis"] = layout_updates.get("yaxis", {})
                         layout_updates["yaxis"]["tickformat"] = axis_tick_format
@@ -744,7 +783,14 @@ def _generate_report(project_id, template_path, data_file_path):
                         layout_updates["yaxis2"]["tickformat"] = secondary_y_axis_format
                     if secondary_y_axis_min_max:
                         layout_updates["yaxis2"] = layout_updates.get("yaxis2", {})
+                        # Handle "auto" value for secondary y-axis min/max
+                        if secondary_y_axis_min_max == "auto":
+                            # Don't set range for auto - let Matplotlib auto-scale
+                            pass
+                        elif isinstance(secondary_y_axis_min_max, list) and len(secondary_y_axis_min_max) == 2:
                         layout_updates["yaxis2"]["range"] = secondary_y_axis_min_max
+                        else:
+                            current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
                     
                     # Axis tick font size
                     if axis_tick_font_size:
@@ -779,16 +825,50 @@ def _generate_report(project_id, template_path, data_file_path):
                 if data_label_format or data_label_font_size or data_label_color:
                     show_data_labels = True
                 
+                # Debug logging for data labels
+                current_app.logger.debug(f"Data labels enabled: {show_data_labels}")
+                current_app.logger.debug(f"Data label format: {data_label_format}")
+                current_app.logger.debug(f"Data label font size: {data_label_font_size}")
+                current_app.logger.debug(f"Data label color: {data_label_color}")
+                current_app.logger.debug(f"Value format: {value_format}")
+                current_app.logger.debug(f"Chart config keys: {list(chart_config.keys())}")
+                current_app.logger.debug(f"Chart meta keys: {list(chart_meta.keys())}")
+                
                 if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color):
-                    for trace in fig.data:
+                    current_app.logger.debug(f"Processing {len(fig.data)} traces for data labels")
+                    for i, trace in enumerate(fig.data):
+                        current_app.logger.debug(f"Trace {i}: type={trace.type}, mode={getattr(trace, 'mode', 'N/A')}")
+                        # Handle both bar and line charts (line charts are scatter with mode='lines')
                         if trace.type in ['bar', 'scatter']:
                             # Use value_format from chart_meta if available, otherwise use data_label_format
                             format_to_use = value_format if value_format else data_label_format
+                            
+                            # Determine if this is a line chart (scatter with lines mode)
+                            is_line_chart = trace.type == 'scatter' and trace.mode and 'lines' in trace.mode
+                            
                             if format_to_use:
                                 if trace.type == 'bar':
                                     trace.update(texttemplate=f"%{{y:{format_to_use}}}", textposition="auto")
                                 elif trace.type == 'scatter':
+                                    if is_line_chart:
+                                        # For line charts, show labels at the data points
                                     trace.update(texttemplate=f"%{{y:{format_to_use}}}", textposition="top center")
+                                    else:
+                                        # For scatter plots
+                                        trace.update(texttemplate=f"%{{y:{format_to_use}}}", textposition="top center")
+                            else:
+                                # If no format specified, still show data labels
+                                if trace.type == 'bar':
+                                    trace.update(texttemplate="%{y}", textposition="auto")
+                                elif trace.type == 'scatter':
+                                    if is_line_chart:
+                                        # For line charts, show labels at the data points
+                                        trace.update(texttemplate="%{y}", textposition="top center")
+                                    else:
+                                        # For scatter plots
+                                        trace.update(texttemplate="%{y}", textposition="top center")
+                            
+                            # Apply font styling
                             if data_label_font_size or data_label_color:
                                 trace.update(textfont={})
                                 if data_label_font_size:
@@ -812,6 +892,11 @@ def _generate_report(project_id, template_path, data_file_path):
                 if margin:
                     layout_updates["margin"] = margin
                 
+                # Apply figure size if specified
+                if figsize:
+                    layout_updates["width"] = figsize[0] * 100  # Convert to pixels
+                    layout_updates["height"] = figsize[1] * 100  # Convert to pixels
+                
                 # Apply axis label distances
                 if chart_type != "pie":
                     if x_axis_label_distance or y_axis_label_distance or axis_tick_distance:
@@ -821,6 +906,8 @@ def _generate_report(project_id, template_path, data_file_path):
                         if x_axis_label_distance:
                             layout_updates["xaxis"]["title"] = layout_updates["xaxis"].get("title", {})
                             layout_updates["xaxis"]["title"]["standoff"] = x_axis_label_distance
+                            # Also apply to tick distance for better control
+                            layout_updates["xaxis"]["ticklen"] = x_axis_label_distance
                         
                         if y_axis_label_distance:
                             layout_updates["yaxis"]["title"] = layout_updates["yaxis"].get("title", {})
@@ -1091,6 +1178,79 @@ def _generate_report(project_id, template_path, data_file_path):
                             current_app.logger.warning(f"⚠️ Unknown matplotlib chart type '{series_type}', falling back to scatter")
                             ax1.scatter(x_values, y_vals, label=label, color=color, alpha=0.7)
 
+                    # Add data labels to Matplotlib chart if enabled
+                    if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color):
+                        current_app.logger.debug(f"Adding data labels to Matplotlib chart")
+                        for i, series in enumerate(series_data):
+                            series_type = series.get("type", "bar").lower()
+                            y_vals = series.get("values")
+                            value_range = series.get("value_range")
+                            if value_range:
+                                if isinstance(value_range, list):
+                                    y_vals = value_range
+                                else:
+                                    y_vals = extract_values_from_range(value_range)
+                            
+                            if y_vals:
+                                # Determine format to use
+                                format_to_use = value_format if value_format else data_label_format
+                                if not format_to_use:
+                                    format_to_use = ".1f"  # Default format
+                                
+                                # Add data labels based on chart type
+                                if series_type == "bar":
+                                    for j, val in enumerate(y_vals):
+                                        if j < len(x_values):
+                                            # Format the value
+                                            try:
+                                                if format_to_use == ".1f":
+                                                    formatted_val = f"{float(val):.1f}"
+                                                elif format_to_use == ".0f":
+                                                    formatted_val = f"{float(val):.0f}"
+                                                elif format_to_use == ".0%":
+                                                    formatted_val = f"{float(val):.0%}"
+                                                else:
+                                                    formatted_val = f"{float(val):{format_to_use}}"
+                                            except:
+                                                formatted_val = str(val)
+                                            
+                                            # Add text label on top of bar
+                                            ax1.text(j, val, formatted_val, 
+                                                    ha='center', va='bottom', 
+                                                    fontsize=data_label_font_size or 10,
+                                                    color=data_label_color or '#000000',
+                                                    fontweight='bold')
+                                
+                                elif series_type == "line":
+                                    for j, val in enumerate(y_vals):
+                                        if j < len(x_values):
+                                            # For line charts, use secondary y-axis format if available
+                                            line_format = secondary_y_axis_format if secondary_y_axis_format else format_to_use
+                                            if not line_format:
+                                                line_format = ".1f"  # Default format
+                                            
+                                            # Format the value
+                                            try:
+                                                if line_format == ".1f":
+                                                    formatted_val = f"{float(val):.1f}"
+                                                elif line_format == ".0f":
+                                                    formatted_val = f"{float(val):.0f}"
+                                                elif line_format == ".0%":
+                                                    formatted_val = f"{float(val):.0%}"
+                                                elif line_format == ".1%":
+                                                    formatted_val = f"{float(val):.1%}"
+                                                else:
+                                                    formatted_val = f"{float(val):{line_format}}"
+                                            except:
+                                                formatted_val = str(val)
+                                            
+                                            # Add text label above line point
+                                            ax2.text(j, val, formatted_val, 
+                                                    ha='center', va='bottom', 
+                                                    fontsize=data_label_font_size or 10,
+                                                    color=data_label_color or '#000000',
+                                                    fontweight='bold')
+
                     # Set labels and styling
                     if chart_type != "pie":
                         ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), fontsize=font_size or 11)
@@ -1106,6 +1266,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         else:
                             ax1.tick_params(axis='x', rotation=45)
                         
+                        # Apply X-axis label distance using tick parameters
+                        if x_axis_label_distance:
+                            # Use tick label padding to control distance
+                            ax1.tick_params(axis='x', pad=x_axis_label_distance)
+                            current_app.logger.debug(f"Applied X-axis tick padding: {x_axis_label_distance}")
+                        
                         # Apply secondary y-axis formatting for Matplotlib
                         if secondary_y_axis_format:
                             from matplotlib.ticker import FuncFormatter
@@ -1113,9 +1279,17 @@ def _generate_report(project_id, template_path, data_file_path):
                                 return f'{x:.0%}'
                             ax2.yaxis.set_major_formatter(FuncFormatter(percentage_formatter))
                         if secondary_y_axis_min_max:
+                            # Handle "auto" value for secondary y-axis min/max
+                            if secondary_y_axis_min_max == "auto":
+                                # Don't set range for auto - let Matplotlib auto-scale
+                                pass
+                            elif isinstance(secondary_y_axis_min_max, list) and len(secondary_y_axis_min_max) == 2:
                             ax2.set_ylim(secondary_y_axis_min_max)
+                            else:
+                                current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
                         
                         # Gridlines
+                        current_app.logger.debug(f"Gridlines setting: {show_gridlines}")
                         if show_gridlines:
                             ax1.grid(True, linestyle=gridline_style or '--', color=gridline_color or '#ccc', alpha=0.6)
                             ax2.grid(True, linestyle=gridline_style or '--', color=gridline_color or '#ccc', alpha=0.6)
@@ -1131,7 +1305,13 @@ def _generate_report(project_id, template_path, data_file_path):
                                     return f'${x:,.0f}'
                                 ax1.yaxis.set_major_formatter(FuncFormatter(currency_formatter))
                         if y_axis_min_max:
-                            ax1.set_ylim(y_axis_min_max)
+                            current_app.logger.debug(f"Setting Matplotlib Y-axis range to: {y_axis_min_max}")
+                            # Ensure the range is properly applied
+                            if isinstance(y_axis_min_max, list) and len(y_axis_min_max) == 2:
+                                ax1.set_ylim(y_axis_min_max[0], y_axis_min_max[1])
+                                current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
+                            else:
+                                current_app.logger.warning(f"Invalid Y-axis range format: {y_axis_min_max}")
                         
                         # Legend
                         show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -1140,7 +1320,42 @@ def _generate_report(project_id, template_path, data_file_path):
                         
                         ax1.set_title(title, fontsize=font_size or 14, weight='bold')
                 
+                # Apply axis label distances for Matplotlib
+                current_app.logger.debug(f"X-axis label distance: {x_axis_label_distance}")
+                current_app.logger.debug(f"Y-axis label distance: {y_axis_label_distance}")
+                
+                if x_axis_label_distance or y_axis_label_distance:
+                    # Get current subplot parameters
+                    current_bottom = fig_mpl.subplotpars.bottom
+                    current_left = fig_mpl.subplotpars.left
+                    
+                    if x_axis_label_distance:
+                        # Convert the distance to a fraction of the figure height
+                        # Higher x_axis_label_distance values will push labels further down
+                        adjustment = x_axis_label_distance / 500.0  # Increased conversion factor for more visible effect
+                        fig_mpl.subplots_adjust(bottom=current_bottom - adjustment)
+                        current_app.logger.debug(f"Applied X-axis adjustment: {adjustment}")
+                    
+                    if y_axis_label_distance:
+                        # Convert the distance to a fraction of the figure width
+                        adjustment = y_axis_label_distance / 500.0  # Increased conversion factor
+                        fig_mpl.subplots_adjust(left=current_left - adjustment)
+                        current_app.logger.debug(f"Applied Y-axis adjustment: {adjustment}")
+                
+                # Apply tight_layout but preserve manual adjustments
                 fig_mpl.tight_layout()
+                
+                # Re-apply manual adjustments after tight_layout with larger effect
+                if x_axis_label_distance or y_axis_label_distance:
+                    if x_axis_label_distance:
+                        adjustment = x_axis_label_distance / 300.0  # Even larger effect after tight_layout
+                        fig_mpl.subplots_adjust(bottom=fig_mpl.subplotpars.bottom - adjustment)
+                        current_app.logger.debug(f"Re-applied X-axis adjustment: {adjustment}")
+                    
+                    if y_axis_label_distance:
+                        adjustment = y_axis_label_distance / 300.0  # Even larger effect after tight_layout
+                        fig_mpl.subplots_adjust(left=fig_mpl.subplotpars.left - adjustment)
+                        current_app.logger.debug(f"Re-applied Y-axis adjustment: {adjustment}")
 
                 tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
                 plt.savefig(tmpfile.name, bbox_inches='tight')
