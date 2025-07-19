@@ -193,7 +193,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 flat_data_map[key] = f"{float_val:.1f}%"
                         except (ValueError, TypeError):
                             # If conversion fails, use the original value as string
-                        flat_data_map[key] = str(value).strip()
+                            flat_data_map[key] = str(value).strip()
                     else:
                         current_app.logger.warning(f"⚠️ Empty value for {col} -> {key}")
 
@@ -216,7 +216,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             flat_data_map[key] = f"{float_val:.1f}%"
                     except (ValueError, TypeError):
                         # If conversion fails, use the original value as string
-                    flat_data_map[key] = str(value).strip()
+                        flat_data_map[key] = str(value).strip()
                 else:
                     current_app.logger.warning(f"⚠️ Empty value for Chart_Data_CAGR -> {key}")
 
@@ -762,9 +762,9 @@ def _generate_report(project_id, template_path, data_file_path):
                             # Don't set range for auto - let Plotly auto-scale
                             pass
                         else:
-                        layout_updates["yaxis"]["range"] = y_axis_min_max
-                        # Also set autorange to false to ensure the range is respected
-                        layout_updates["yaxis"]["autorange"] = False
+                            layout_updates["yaxis"]["range"] = y_axis_min_max
+                            # Also set autorange to false to ensure the range is respected
+                            layout_updates["yaxis"]["autorange"] = False
                             # Force the range to be applied
                             layout_updates["yaxis"]["fixedrange"] = False
                             # Ensure the range is properly set
@@ -788,7 +788,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             # Don't set range for auto - let Matplotlib auto-scale
                             pass
                         elif isinstance(secondary_y_axis_min_max, list) and len(secondary_y_axis_min_max) == 2:
-                        layout_updates["yaxis2"]["range"] = secondary_y_axis_min_max
+                            layout_updates["yaxis2"]["range"] = secondary_y_axis_min_max
                         else:
                             current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
                     
@@ -852,7 +852,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 elif trace.type == 'scatter':
                                     if is_line_chart:
                                         # For line charts, show labels at the data points
-                                    trace.update(texttemplate=f"%{{y:{format_to_use}}}", textposition="top center")
+                                        trace.update(texttemplate=f"%{{y:{format_to_use}}}", textposition="top center")
                                     else:
                                         # For scatter plots
                                         trace.update(texttemplate=f"%{{y:{format_to_use}}}", textposition="top center")
@@ -1284,7 +1284,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # Don't set range for auto - let Matplotlib auto-scale
                                 pass
                             elif isinstance(secondary_y_axis_min_max, list) and len(secondary_y_axis_min_max) == 2:
-                            ax2.set_ylim(secondary_y_axis_min_max)
+                                ax2.set_ylim(secondary_y_axis_min_max)
                             else:
                                 current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
                         
