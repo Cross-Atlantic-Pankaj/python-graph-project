@@ -300,46 +300,103 @@ def _generate_report(project_id, template_path, data_file_path):
                 chart_type = chart_type_map.get(chart_tag_lower, "").lower().strip()
                 title = chart_meta.get("chart_title", chart_tag)
 
+                # --- Comprehensive attribute detection logging ---
+                current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION STARTED")
+                current_app.logger.info(f"📊 Chart Type: {chart_type}")
+                current_app.logger.info(f"📋 Chart Meta Keys Found: {list(chart_meta.keys())}")
+                current_app.logger.info(f"📋 Chart Config Keys Found: {list(chart_config.keys())}")
+                current_app.logger.info(f"📋 Top-level Keys Found: {list(data_dict.keys())}")
+                
+                # Define all possible chart attributes
+                all_possible_attributes = [
+                    "chart_title", "font_size", "font_color", "font_family", "figsize", 
+                    "chart_background", "plot_background", "legend", "legend_position", "legend_font_size",
+                    "primary_y_label", "secondary_y_label", "x_label", "y_axis_min_max", 
+                    "secondary_y_axis_format", "secondary_y_axis_min_max", "x_axis_label_distance", 
+                    "y_axis_label_distance", "axis_tick_format", "axis_tick_font_size",
+                    "data_labels", "data_label_format", "data_label_font_size", "data_label_color",
+                    "show_gridlines", "gridline_color", "gridline_style", "margin", "bar_width", 
+                    "orientation", "bar_border_color", "bar_border_width", "barmode", "line_width", 
+                    "marker_size", "line_style", "fill_opacity", "hole", "startangle", "pull", 
+                    "bins", "box_points", "violin_points", "bubble_size", "waterfall_measure", 
+                    "funnel_measure", "sunburst_path", "treemap_path", "sankey_source", 
+                    "sankey_target", "sankey_value", "table_header", "indicator_mode", 
+                    "indicator_delta", "indicator_gauge", "3d_projection", "z_values", 
+                    "lat", "lon", "locations", "open_values", "high_values", "low_values", 
+                    "close_values", "annotations"
+                ]
+                
+                # Check which attributes are missing (not in chart_meta OR chart_config OR top-level)
+                missing_attributes = []
+                for attr in all_possible_attributes:
+                    if (attr not in chart_meta and 
+                        attr not in chart_config and 
+                        attr not in data_dict):
+                        missing_attributes.append(attr)
+                
+                # Only log missing attributes if there are any
+                if missing_attributes:
+                    current_app.logger.warning(f"❌ MISSING ATTRIBUTES for {chart_tag} (Not being read by system):")
+                    for attr in missing_attributes:
+                        current_app.logger.warning(f"   ❌ {attr}")
+                    current_app.logger.warning(f"📊 Total missing: {len(missing_attributes)} attributes")
+                else:
+                    current_app.logger.info(f"✅ All possible attributes found for {chart_tag}")
+                
+                current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION COMPLETED")
+
                 # --- Extract custom fields from chart_config ---
                 bar_colors = chart_config.get("bar_colors")
-                bar_width = chart_config.get("bar_width")
-                orientation = chart_config.get("orientation")
-                bar_border_color = chart_config.get("bar_border_color")
-                bar_border_width = chart_config.get("bar_border_width")
-                font_family = chart_config.get("font_family") or chart_meta.get("font_family")
-                font_size = chart_config.get("font_size") or chart_meta.get("font_size")
-                font_color = chart_config.get("font_color") or chart_meta.get("font_color")
-                legend_position = chart_config.get("legend_position")
-                legend_font_size = chart_config.get("legend_font_size")
-                show_gridlines = chart_config.get("show_gridlines") if "show_gridlines" in chart_config else chart_meta.get("show_gridlines")
+                bar_width = data_dict.get("bar_width") or chart_config.get("bar_width") or chart_meta.get("bar_width")
+                orientation = data_dict.get("orientation") or chart_config.get("orientation") or chart_meta.get("orientation")
+                bar_border_color = data_dict.get("bar_border_color") or chart_config.get("bar_border_color") or chart_meta.get("bar_border_color")
+                bar_border_width = data_dict.get("bar_border_width") or chart_config.get("bar_border_width") or chart_meta.get("bar_border_width")
+                font_family = data_dict.get("font_family") or chart_config.get("font_family") or chart_meta.get("font_family")
+                font_size = data_dict.get("font_size") or chart_config.get("font_size") or chart_meta.get("font_size")
+                font_color = data_dict.get("font_color") or chart_config.get("font_color") or chart_meta.get("font_color")
+                legend_position = data_dict.get("legend_position") or chart_config.get("legend_position") or chart_meta.get("legend_position")
+                legend_font_size = data_dict.get("legend_font_size") or chart_config.get("legend_font_size") or chart_meta.get("legend_font_size")
+                show_gridlines = data_dict.get("show_gridlines") if "show_gridlines" in data_dict else (chart_config.get("show_gridlines") if "show_gridlines" in chart_config else chart_meta.get("show_gridlines"))
                 # Ensure show_gridlines is a boolean
                 if isinstance(show_gridlines, str):
                     show_gridlines = show_gridlines.strip().lower() == "true"
                 elif show_gridlines is None:
                     show_gridlines = True  # Default to showing gridlines if not specified
-                gridline_color = chart_config.get("gridline_color")
-                gridline_style = chart_config.get("gridline_style")
-                chart_background = chart_config.get("chart_background")
-                plot_background = chart_config.get("plot_background")
-                data_label_format = chart_config.get("data_label_format") or chart_meta.get("data_label_format")
-                data_label_font_size = chart_config.get("data_label_font_size") or chart_meta.get("data_label_font_size")
-                data_label_color = chart_config.get("data_label_color") or chart_meta.get("data_label_color")
-                axis_tick_format = chart_config.get("axis_tick_format")
-                y_axis_min_max = chart_config.get("y_axis_min_max") or chart_meta.get("y_axis_min_max")
+                gridline_color = data_dict.get("gridline_color") or chart_config.get("gridline_color") or chart_meta.get("gridline_color")
+                gridline_style = data_dict.get("gridline_style") or chart_config.get("gridline_style") or chart_meta.get("gridline_style")
+                chart_background = data_dict.get("chart_background") or chart_config.get("chart_background") or chart_meta.get("chart_background")
+                plot_background = data_dict.get("plot_background") or chart_config.get("plot_background") or chart_meta.get("plot_background")
+                data_label_format = data_dict.get("data_label_format") or chart_config.get("data_label_format") or chart_meta.get("data_label_format")
+                data_label_font_size = data_dict.get("data_label_font_size") or chart_config.get("data_label_font_size") or chart_meta.get("data_label_font_size")
+                data_label_color = data_dict.get("data_label_color") or chart_config.get("data_label_color") or chart_meta.get("data_label_color")
+                axis_tick_format = data_dict.get("axis_tick_format") or chart_config.get("axis_tick_format") or chart_meta.get("axis_tick_format")
+                y_axis_min_max = data_dict.get("y_axis_min_max") or chart_config.get("y_axis_min_max") or chart_meta.get("y_axis_min_max")
                 current_app.logger.debug(f"Y-axis min/max from config: {y_axis_min_max}")
-                secondary_y_axis_format = chart_config.get("secondary_y_axis_format") or chart_meta.get("secondary_y_axis_format")
-                secondary_y_axis_min_max = chart_config.get("secondary_y_axis_min_max") or chart_meta.get("secondary_y_axis_min_max")
-                sort_order = chart_config.get("sort_order")
-                data_grouping = chart_config.get("data_grouping")
-                annotations = chart_config.get("annotations", [])
-                axis_tick_font_size = chart_config.get("axis_tick_font_size")
+                secondary_y_axis_format = data_dict.get("secondary_y_axis_format") or chart_config.get("secondary_y_axis_format") or chart_meta.get("secondary_y_axis_format")
+                secondary_y_axis_min_max = data_dict.get("secondary_y_axis_min_max") or chart_config.get("secondary_y_axis_min_max") or chart_meta.get("secondary_y_axis_min_max")
+                sort_order = data_dict.get("sort_order") or chart_config.get("sort_order") or chart_meta.get("sort_order")
+                data_grouping = data_dict.get("data_grouping") or chart_config.get("data_grouping") or chart_meta.get("data_grouping")
+                annotations = data_dict.get("annotations", []) or chart_config.get("annotations", []) or chart_meta.get("annotations", [])
+                axis_tick_font_size = data_dict.get("axis_tick_font_size") or chart_config.get("axis_tick_font_size") or chart_meta.get("axis_tick_font_size")
                 
                 # --- Extract margin settings ---
-                margin = chart_config.get("margin") or chart_meta.get("margin")
-                x_axis_label_distance = chart_config.get("x_axis_label_distance") or chart_meta.get("x_axis_label_distance")
-                y_axis_label_distance = chart_config.get("y_axis_label_distance") or chart_meta.get("y_axis_label_distance")
-                axis_tick_distance = chart_config.get("axis_tick_distance") or chart_meta.get("axis_tick_distance")
-                figsize = chart_config.get("figsize") or chart_meta.get("figsize")
+                margin = data_dict.get("margin") or chart_config.get("margin") or chart_meta.get("margin")
+                x_axis_label_distance = data_dict.get("x_axis_label_distance") or chart_config.get("x_axis_label_distance") or chart_meta.get("x_axis_label_distance")
+                y_axis_label_distance = data_dict.get("y_axis_label_distance") or chart_config.get("y_axis_label_distance") or chart_meta.get("y_axis_label_distance")
+                axis_tick_distance = data_dict.get("axis_tick_distance") or chart_config.get("axis_tick_distance") or chart_meta.get("axis_tick_distance")
+                figsize = data_dict.get("figsize") or chart_config.get("figsize") or chart_meta.get("figsize")
+                
+                # --- Extract additional missing attributes ---
+                legend = data_dict.get("legend") or chart_config.get("legend") or chart_meta.get("legend")
+                data_labels = data_dict.get("data_labels") or chart_config.get("data_labels") or chart_meta.get("data_labels")
+                line_width = data_dict.get("line_width") or chart_config.get("line_width") or chart_meta.get("line_width")
+                marker_size = data_dict.get("marker_size") or chart_config.get("marker_size") or chart_meta.get("marker_size")
+                line_style = data_dict.get("line_style") or chart_config.get("line_style") or chart_meta.get("line_style")
+                fill_opacity = data_dict.get("fill_opacity") or chart_config.get("fill_opacity") or chart_meta.get("fill_opacity")
+                hole = data_dict.get("hole") or chart_config.get("hole") or chart_meta.get("hole")
+                startangle = data_dict.get("startangle") or chart_config.get("startangle") or chart_meta.get("startangle")
+                pull = data_dict.get("pull") or chart_config.get("pull") or chart_meta.get("pull")
+                barmode = data_dict.get("barmode") or chart_config.get("barmode") or chart_meta.get("barmode")
 
                 # --- Excel range extraction helpers ---
                 def extract_excel_range(sheet, cell_range):
@@ -382,20 +439,78 @@ def _generate_report(project_id, template_path, data_file_path):
                     x_values = series_meta.get("x_axis", [])
                 
                 colors = series_meta.get("colors", [])
+                
+                # --- SERIES ATTRIBUTE DETECTION LOGGING ---
+                current_app.logger.info(f"🔍 SERIES ATTRIBUTE DETECTION STARTED")
+                current_app.logger.info(f"📊 Number of series: {len(series_data)}")
+                current_app.logger.info(f"📋 Series meta keys: {list(series_data.keys()) if isinstance(series_data, dict) else 'N/A'}")
+                
+                # Define all possible series attributes
+                all_possible_series_attributes = [
+                    "marker", "opacity", "textposition", "orientation", "width", "fill", 
+                    "fillcolor", "hole", "pull", "mode", "line", "nbinsx", "boxpoints", 
+                    "jitter", "sizeref", "sizemin", "symbol", "measure", "connector", "textinfo"
+                ]
+                
+                for i, series in enumerate(series_data):
+                    series_name = series.get("name", f"Series {i+1}")
+                    series_type = series.get("type", "unknown")
+                    current_app.logger.info(f"📈 SERIES {i+1}: {series_name}")
+                    current_app.logger.info(f"   Type: {series_type}")
+                    
+                    # Check which series attributes are missing
+                    missing_series_attributes = []
+                    for attr in all_possible_series_attributes:
+                        if attr not in series:
+                            missing_series_attributes.append(attr)
+                    
+                    # Only log missing attributes if there are any
+                    if missing_series_attributes:
+                        current_app.logger.warning(f"   ❌ MISSING SERIES ATTRIBUTES for {series_name}:")
+                        for attr in missing_series_attributes:
+                            current_app.logger.warning(f"      ❌ {attr}")
+                        current_app.logger.warning(f"   📊 Total missing: {len(missing_series_attributes)} attributes")
+                    else:
+                        current_app.logger.info(f"   ✅ All possible series attributes found for {series_name}")
+                
+                current_app.logger.info(f"🔍 SERIES ATTRIBUTE DETECTION COMPLETED")
 
                 # --- Plotly interactive chart generation ---
                 fig = go.Figure()
 
                 # --- Bar of Pie chart special handling ---
                 if chart_type in ["bar of pie", "bar_of_pie"]:
-                    # Re-fetch after extraction to ensure we have the extracted lists
+                    # Extract cell ranges for other_labels and other_values if they are cell ranges
                     other_labels = chart_meta.get("other_labels", [])
                     other_values = chart_meta.get("other_values", [])
                     other_colors = chart_meta.get("other_colors", [])
+                    
+                    # If other_labels and other_values are cell ranges, extract them
+                    if isinstance(other_labels, str) and re.match(r"^[A-Z]+\d+:[A-Z]+\d+$", other_labels):
+                        try:
+                            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+                            sheet = wb[chart_meta.get("source_sheet", "sample")]
+                            other_labels = extract_excel_range(sheet, other_labels)
+                            wb.close()
+                            current_app.logger.debug(f"Extracted other_labels from {chart_meta.get('other_labels')}: {other_labels}")
+                        except Exception as e:
+                            current_app.logger.warning(f"Failed to extract other_labels from {other_labels}: {e}")
+                    
+                    if isinstance(other_values, str) and re.match(r"^[A-Z]+\d+:[A-Z]+\d+$", other_values):
+                        try:
+                            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+                            sheet = wb[chart_meta.get("source_sheet", "sample")]
+                            other_values = extract_excel_range(sheet, other_values)
+                            wb.close()
+                            current_app.logger.debug(f"Extracted other_values from {chart_meta.get('other_values')}: {other_values}")
+                        except Exception as e:
+                            current_app.logger.warning(f"Failed to extract other_values from {other_values}: {e}")
+                    
                     value_format = chart_meta.get("value_format", "")
                     labels = series_meta.get("labels", x_values)
                     values = series_meta.get("values", [])
                     colors = series_meta.get("colors", [])
+                    
                     # Chart data prepared
                     fig = create_bar_of_pie_chart(
                         labels=labels,
@@ -497,7 +612,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             pie_kwargs["pull"] = chart_meta["pull"]
                         
                         fig.add_trace(go.Pie(**pie_kwargs,
-                            hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}{value_format}<extra></extra>"
+                            hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}{str(value_format) if value_format else ''}<extra></extra>"
                         ))
                 
                 # Handle stacked column, area, and other multi-series charts
@@ -505,6 +620,13 @@ def _generate_report(project_id, template_path, data_file_path):
                     for i, series in enumerate(series_data):
                         label = series.get("name", f"Series {i+1}")
                         series_type = series.get("type", "bar").lower()
+                        
+                        # Special handling for heatmap charts - skip standard data processing
+                        if series_type == "heatmap":
+                            # Heatmap data is already in the correct format (x, y, z, text)
+                            # Skip the standard y_vals extraction and processing
+                            continue
+                        
                         color = None
                         if "marker" in series and isinstance(series["marker"], dict) and "color" in series["marker"]:
                             color = series["marker"]["color"]
@@ -549,6 +671,25 @@ def _generate_report(project_id, template_path, data_file_path):
                             trace_kwargs["marker_line_color"] = bar_border_color
                         if bar_border_width and series_type == "bar":
                             trace_kwargs["marker_line_width"] = bar_border_width
+                        
+                        # Handle line-specific properties
+                        if line_width and series_type in ["line", "scatter", "scatter_line"]:
+                            trace_kwargs["line_width"] = line_width
+                        if marker_size and series_type in ["line", "scatter", "scatter_line"]:
+                            trace_kwargs["marker_size"] = marker_size
+                        if line_style and series_type in ["line", "scatter", "scatter_line"]:
+                            # Map line styles to Plotly format
+                            line_style_map = {
+                                "solid": "solid",
+                                "dashed": "dash",
+                                "dotted": "dot",
+                                "dashdot": "dashdot"
+                            }
+                            trace_kwargs["line_dash"] = line_style_map.get(line_style, "solid")
+                        
+                        # Handle opacity
+                        if fill_opacity:
+                            trace_kwargs["opacity"] = fill_opacity
 
                         # Add traces based on chart type - REPLACE THE RESTRICTIVE IF/ELIF BLOCKS
                         # Generic chart type handling for Plotly
@@ -645,10 +786,20 @@ def _generate_report(project_id, template_path, data_file_path):
                                     "labels": x_vals,
                                     "values": y_vals,
                                     "name": label,
-                                    "textinfo": "label+percent+value" if chart_meta.get("data_labels", True) else "none",
+                                    "textinfo": "label+percent+value" if data_labels else "none",
                                     "textposition": "outside",
-                                    "hole": 0.4 if series_type == "donut" else 0.0
+                                    "hole": hole if hole is not None else (0.4 if series_type == "donut" else 0.0)
                                 }
+                                
+                                # Add pie chart specific attributes
+                                if startangle is not None:
+                                    pie_kwargs["rotation"] = startangle
+                                if pull is not None:
+                                    # pull can be a single value or a list
+                                    if isinstance(pull, (int, float)):
+                                        pie_kwargs["pull"] = [pull] * len(y_vals)
+                                    elif isinstance(pull, list):
+                                        pie_kwargs["pull"] = pull
                                 
                                 if color:
                                     pie_kwargs["marker"] = dict(colors=color) if isinstance(color, list) else dict(colors=[color])
@@ -689,6 +840,38 @@ def _generate_report(project_id, template_path, data_file_path):
                                     trace_kwargs["marker"]["color"] = color
                                 fig.add_trace(plotly_chart_class(**trace_kwargs,
                                     hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Size: %{{marker.size}}<extra></extra>"
+                                ))
+                                
+                            elif series_type == "heatmap":
+                                # Heatmap specific settings
+                                heatmap_kwargs = {
+                                    "z": series.get("z", y_vals),  # Use z data if provided, otherwise y_vals
+                                    "x": series.get("x", x_vals),  # Use x data if provided, otherwise x_vals
+                                    "y": series.get("y", [label]),  # Use y data if provided, otherwise label
+                                    "name": label,
+                                    "colorscale": series.get("colorscale", "Viridis"),
+                                    "showscale": series.get("showscale", True)
+                                }
+                                
+                                # Handle text data safely (convert to strings to avoid concatenation errors)
+                                if "text" in series:
+                                    try:
+                                        heatmap_kwargs["text"] = [[str(cell) for cell in row] for row in series["text"]]
+                                    except:
+                                        current_app.logger.warning(f"⚠️ Could not process heatmap text data for {label}")
+                                
+                                # Handle colorbar settings
+                                if "colorbar" in series:
+                                    heatmap_kwargs["colorbar"] = series["colorbar"]
+                                
+                                # Handle zmin/zmax
+                                if "zmin" in series:
+                                    heatmap_kwargs["zmin"] = series["zmin"]
+                                if "zmax" in series:
+                                    heatmap_kwargs["zmax"] = series["zmax"]
+                                
+                                fig.add_trace(go.Heatmap(**heatmap_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Value: %{{z}}<extra></extra>"
                                 ))
                                 
                             else:
@@ -733,7 +916,12 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 # Legend configuration
                 show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                current_app.logger.debug(f"Legend setting: {chart_meta.get('legend')}")
+                current_app.logger.debug(f"Showlegend setting: {chart_meta.get('showlegend')}")
+                current_app.logger.debug(f"Final show_legend: {show_legend}")
+                
                 if show_legend:
+                    current_app.logger.debug("Configuring legend for Plotly")
                     if legend_position:
                         # Map 'top', 'bottom', 'left', 'right' to valid Plotly legend positions
                         pos_map = {
@@ -744,13 +932,18 @@ def _generate_report(project_id, template_path, data_file_path):
                         }
                         if legend_position in pos_map:
                             layout_updates["legend"] = pos_map[legend_position]
+                            current_app.logger.debug(f"Set legend position: {legend_position}")
                     if legend_font_size:
                         layout_updates.setdefault("legend", {})["font"] = {"size": legend_font_size}
+                        current_app.logger.debug(f"Set legend font size: {legend_font_size}")
                 else:
                     layout_updates["showlegend"] = False
+                    current_app.logger.debug("Legend disabled for Plotly")
                 
                 # Bar mode for stacked charts
-                if chart_type == "stacked_column":
+                if barmode:
+                    layout_updates["barmode"] = barmode
+                elif chart_type == "stacked_column":
                     layout_updates["barmode"] = "stack"
                 
                 # Axis min/max and tick format (only for non-pie charts)
@@ -810,7 +1003,16 @@ def _generate_report(project_id, template_path, data_file_path):
                         layout_updates["xaxis"]["gridcolor"] = gridline_color
                         layout_updates["yaxis"]["gridcolor"] = gridline_color
                     if gridline_style:
-                        dash_map = {"solid": "solid", "dot": "dot", "dash": "dash"}
+                        # Map gridline styles to valid Plotly dash styles
+                        dash_map = {
+                            "solid": "solid", 
+                            "dashed": "dash",
+                            "dash": "dash",  # Map 'dash' to 'dash'
+                            "dashdot": "dashdot", 
+                            "dotted": "dot",
+                            "dot": "dot",
+                            "dotdash": "dashdot"
+                        }
                         dash_style = dash_map.get(gridline_style, "solid")
                         layout_updates["xaxis"] = layout_updates.get("xaxis", {})
                         layout_updates["yaxis"] = layout_updates.get("yaxis", {})
@@ -821,12 +1023,16 @@ def _generate_report(project_id, template_path, data_file_path):
                 show_data_labels = chart_meta.get("data_labels", True)
                 value_format = chart_meta.get("value_format", "")
                 
-                # Enable data labels if any data label settings are provided
-                if data_label_format or data_label_font_size or data_label_color:
+                # Only enable data labels if explicitly set to True AND any data label settings are provided
+                if show_data_labels and (data_label_format or data_label_font_size or data_label_color):
                     show_data_labels = True
+                elif not show_data_labels:
+                    # If data_labels is explicitly set to False, respect that setting
+                    show_data_labels = False
                 
                 # Debug logging for data labels
-                current_app.logger.debug(f"Data labels enabled: {show_data_labels}")
+                current_app.logger.debug(f"Original data_labels setting: {chart_meta.get('data_labels')}")
+                current_app.logger.debug(f"Final show_data_labels: {show_data_labels}")
                 current_app.logger.debug(f"Data label format: {data_label_format}")
                 current_app.logger.debug(f"Data label font size: {data_label_font_size}")
                 current_app.logger.debug(f"Data label color: {data_label_color}")
@@ -896,6 +1102,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 if figsize:
                     layout_updates["width"] = figsize[0] * 100  # Convert to pixels
                     layout_updates["height"] = figsize[1] * 100  # Convert to pixels
+                    current_app.logger.debug(f"Applied Plotly figsize: {figsize} -> width={figsize[0]*100}, height={figsize[1]*100}")
                 
                 # Apply axis label distances
                 if chart_type != "pie":
@@ -926,7 +1133,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     
                     if expanded_segment and len(series_data) == 1:
                         # Create subplot for expanded pie chart
-                        fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 8), dpi=200)
+                        mpl_figsize = figsize if figsize else (15, 8)
+                        fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=mpl_figsize, dpi=200)
                         
                         # Apply background colors to Matplotlib figure
                         if chart_background:
@@ -951,6 +1159,26 @@ def _generate_report(project_id, template_path, data_file_path):
                         
                         ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
                         
+                        # Add legend for pie chart
+                        show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                        if show_legend:
+                            # Initialize legend_loc for pie charts
+                            legend_loc = 'best'  # default
+                            if legend_position:
+                                loc_map = {
+                                    "top": "upper center",
+                                    "bottom": "lower center", 
+                                    "left": "center left",
+                                    "right": "center right"
+                                }
+                                legend_loc = loc_map.get(legend_position, 'best')
+                            
+                            # Force legend to bottom if specified
+                            if legend_position == "bottom":
+                                ax1.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                            else:
+                                ax1.legend(wedges, labels, loc=legend_loc, fontsize=legend_font_size)
+                        
                         # Create bar chart for expanded segment
                         if expanded_segment in labels:
                             segment_idx = labels.index(expanded_segment)
@@ -966,7 +1194,8 @@ def _generate_report(project_id, template_path, data_file_path):
                         
                     else:
                         # Regular pie chart
-                        fig_mpl, ax = plt.subplots(figsize=(10, 8), dpi=200)
+                        mpl_figsize = figsize if figsize else (10, 8)
+                        fig_mpl, ax = plt.subplots(figsize=mpl_figsize, dpi=200)
                         
                         # Apply background colors to Matplotlib figure
                         if chart_background:
@@ -990,10 +1219,31 @@ def _generate_report(project_id, template_path, data_file_path):
                                 autotext.set_fontweight('bold')
                             
                             ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                            
+                            # Add legend for regular pie chart
+                            show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            if show_legend:
+                                # Initialize legend_loc for pie charts
+                                legend_loc = 'best'  # default
+                                if legend_position:
+                                    loc_map = {
+                                        "top": "upper center",
+                                        "bottom": "lower center", 
+                                        "left": "center left",
+                                        "right": "center right"
+                                    }
+                                    legend_loc = loc_map.get(legend_position, 'best')
+                                
+                                # Force legend to bottom if specified
+                                if legend_position == "bottom":
+                                    ax.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                                else:
+                                    ax.legend(wedges, labels, loc=legend_loc, fontsize=legend_font_size)
                         
                 elif chart_type in ["bar of pie", "bar_of_pie"]:
                     # Matplotlib version of bar of pie
-                    fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 8), dpi=200)
+                    mpl_figsize = figsize if figsize else (15, 8)
+                    fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=mpl_figsize, dpi=200)
                     
                     # Apply background colors to Matplotlib figure
                     if chart_background:
@@ -1031,10 +1281,32 @@ def _generate_report(project_id, template_path, data_file_path):
                     ax2.set_ylabel("Value")
                     for i, v in enumerate(other_values):
                         ax2.text(i, v, f"{v}", ha='center', va='bottom', fontweight='bold')
+                    
+                    # Add legend for bar of pie chart
+                    show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                    if show_legend:
+                        # Initialize legend_loc for bar of pie charts
+                        legend_loc = 'best'  # default
+                        if legend_position:
+                            loc_map = {
+                                "top": "upper center",
+                                "bottom": "lower center", 
+                                "left": "center left",
+                                "right": "center right"
+                            }
+                            legend_loc = loc_map.get(legend_position, 'best')
+                        
+                        # Force legend to bottom if specified
+                        if legend_position == "bottom":
+                            ax1.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                        else:
+                            ax1.legend(wedges, labels, loc=legend_loc, fontsize=legend_font_size)
                 
                 else:
                     # Bar, line, area charts
-                    fig_mpl, ax1 = plt.subplots(figsize=(10, 6), dpi=200)
+                    mpl_figsize = figsize if figsize else (10, 6)
+                    current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
+                    fig_mpl, ax1 = plt.subplots(figsize=mpl_figsize, dpi=200)
                     ax2 = ax1.twinx()
                     
                     # Apply background colors to Matplotlib figure
@@ -1047,6 +1319,750 @@ def _generate_report(project_id, template_path, data_file_path):
                     for i, series in enumerate(series_data):
                         label = series.get("name", f"Series {i+1}")
                         series_type = series.get("type", "bar").lower()
+                        
+                        # Special handling for heatmap charts - skip standard data processing
+                        if series_type == "heatmap":
+                            # Heatmap data is already in the correct format (x, y, z, text)
+                            # Skip the standard y_vals extraction and processing
+                            continue
+                        
+                        color = None
+                        if "marker" in series and isinstance(series["marker"], dict) and "color" in series["marker"]:
+                            color = series["marker"]["color"]
+                        elif bar_colors:
+                            color = bar_colors
+                        elif i < len(colors):
+                            color = colors[i]
+
+                        y_vals = series.get("values")
+                        value_range = series.get("value_range")
+                        if value_range:
+                            # Check if value_range is already extracted (list) or still a string
+                            if isinstance(value_range, list):
+                                y_vals = value_range
+                            else:
+                                y_vals = extract_values_from_range(value_range)
+
+                        # --- Apply grouping and sorting ---
+                        x_vals = x_values
+                        if y_vals is not None and x_vals is not None:
+                            x_vals, y_vals = group_and_sort(x_vals, y_vals, data_grouping, sort_order)
+
+                        trace_kwargs = {
+                            "x": x_vals,
+                            "y": y_vals,
+                            "name": label,
+                        }
+                        
+                        # Handle colors
+                        if color:
+                            if isinstance(color, list) and series_type == "bar":
+                                trace_kwargs["marker"] = dict(color=color)
+                            elif isinstance(color, str):
+                                trace_kwargs["marker_color"] = color
+                        
+                        # Handle bar-specific properties
+                        if bar_width and series_type == "bar":
+                            trace_kwargs["width"] = bar_width
+                        if orientation and series_type == "bar":
+                            trace_kwargs["orientation"] = orientation[0].lower() if isinstance(orientation, str) else orientation
+                        if bar_border_color and series_type == "bar":
+                            trace_kwargs["marker_line_color"] = bar_border_color
+                        if bar_border_width and series_type == "bar":
+                            trace_kwargs["marker_line_width"] = bar_border_width
+                        
+                        # Handle line-specific properties
+                        if line_width and series_type in ["line", "scatter", "scatter_line"]:
+                            trace_kwargs["line_width"] = line_width
+                        if marker_size and series_type in ["line", "scatter", "scatter_line"]:
+                            trace_kwargs["marker_size"] = marker_size
+                        if line_style and series_type in ["line", "scatter", "scatter_line"]:
+                            # Map line styles to Plotly format
+                            line_style_map = {
+                                "solid": "solid",
+                                "dashed": "dash",
+                                "dotted": "dot",
+                                "dashdot": "dashdot"
+                            }
+                            trace_kwargs["line_dash"] = line_style_map.get(line_style, "solid")
+                        
+                        # Handle opacity
+                        if fill_opacity:
+                            trace_kwargs["opacity"] = fill_opacity
+
+                        # Add traces based on chart type - REPLACE THE RESTRICTIVE IF/ELIF BLOCKS
+                        # Generic chart type handling for Plotly
+                        chart_type_mapping = {
+                            # Bar charts
+                            "bar": go.Bar,
+                            "column": go.Bar,
+                            "stacked_column": go.Bar,
+                            "horizontal_bar": go.Bar,
+                            
+                            # Line charts
+                            "line": go.Scatter,
+                            "scatter": go.Scatter,
+                            "scatter_line": go.Scatter,
+                            
+                            # Area charts
+                            "area": go.Scatter,
+                            "filled_area": go.Scatter,
+                            
+                            # Pie charts
+                            "pie": go.Pie,
+                            "donut": go.Pie,
+                            
+                            # 3D charts
+                            "scatter3d": go.Scatter3d,
+                            "surface": go.Surface,
+                            "mesh3d": go.Mesh3d,
+                            
+                            # Statistical charts
+                            "histogram": go.Histogram,
+                            "box": go.Box,
+                            "violin": go.Violin,
+                            
+                            # Financial charts
+                            "candlestick": go.Candlestick,
+                            "ohlc": go.Ohlc,
+                            
+                            # Geographic charts
+                            "scattergeo": go.Scattergeo,
+                            "choropleth": go.Choropleth,
+                            
+                            # Other charts
+                            "bubble": go.Scatter,
+                            "heatmap": go.Heatmap,
+                            "contour": go.Contour,
+                            "waterfall": go.Waterfall,
+                            "funnel": go.Funnel,
+                            "sunburst": go.Sunburst,
+                            "treemap": go.Treemap,
+                            "icicle": go.Icicle,
+                            "sankey": go.Sankey,
+                            "table": go.Table,
+                            "indicator": go.Indicator
+                        }
+                        
+                        # Get the appropriate Plotly chart class
+                        plotly_chart_class = chart_type_mapping.get(series_type)
+                        
+                        if plotly_chart_class:
+                            # Prepare trace arguments based on chart type
+                            if series_type in ["bar", "column", "stacked_column", "horizontal_bar"]:
+                                # Bar chart specific settings
+                                # REMOVE: if chart_type == "stacked_column": trace_kwargs["barmode"] = "stack"
+                                if orientation and orientation.lower() == "horizontal":
+                                    trace_kwargs["orientation"] = "h"
+                                    # Swap x and y for horizontal bars
+                                    trace_kwargs["x"], trace_kwargs["y"] = trace_kwargs["y"], trace_kwargs["x"]
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["line", "scatter", "scatter_line"]:
+                                # Line/Scatter chart specific settings
+                                mode = "lines+markers" if series_type == "scatter_line" else "markers" if series_type == "scatter" else "lines"
+                                trace_kwargs["mode"] = mode
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["area", "filled_area"]:
+                                # Area chart specific settings
+                                trace_kwargs["mode"] = "lines"
+                                trace_kwargs["fill"] = "tozeroy"
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
+                                ))
+                                
+                            elif series_type == "pie":
+                                # Pie chart specific settings
+                                pie_kwargs = {
+                                    "labels": x_vals,
+                                    "values": y_vals,
+                                    "name": label,
+                                    "textinfo": "label+percent+value" if data_labels else "none",
+                                    "textposition": "outside",
+                                    "hole": hole if hole is not None else (0.4 if series_type == "donut" else 0.0)
+                                }
+                                
+                                # Add pie chart specific attributes
+                                if startangle is not None:
+                                    pie_kwargs["rotation"] = startangle
+                                if pull is not None:
+                                    # pull can be a single value or a list
+                                    if isinstance(pull, (int, float)):
+                                        pie_kwargs["pull"] = [pull] * len(y_vals)
+                                    elif isinstance(pull, list):
+                                        pie_kwargs["pull"] = pull
+                                
+                                if color:
+                                    pie_kwargs["marker"] = dict(colors=color) if isinstance(color, list) else dict(colors=[color])
+                                
+                                fig.add_trace(plotly_chart_class(**pie_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["scatter3d", "surface", "mesh3d"]:
+                                # 3D chart specific settings
+                                if "z" not in trace_kwargs and len(y_vals) > 0:
+                                    # Create a simple z-axis if not provided
+                                    trace_kwargs["z"] = [i for i in range(len(y_vals))]
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Z: %{{z}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["histogram", "box", "violin"]:
+                                # Statistical chart specific settings
+                                if series_type == "histogram":
+                                    trace_kwargs["x"] = y_vals  # Histogram uses x for values
+                                    del trace_kwargs["y"]
+                                elif series_type in ["box", "violin"]:
+                                    trace_kwargs["y"] = y_vals
+                                    trace_kwargs["x"] = [label] * len(y_vals) if len(y_vals) > 0 else [label]
+                                
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Value: %{{y if series_type in ['box', 'violin'] else 'x'}}<extra></extra>"
+                                ))
+                                
+                            elif series_type in ["bubble"]:
+                                # Bubble chart specific settings
+                                sizes = series.get("size", [20] * len(y_vals))
+                                trace_kwargs["mode"] = "markers"
+                                trace_kwargs["marker"] = {"size": sizes}
+                                if color:
+                                    trace_kwargs["marker"]["color"] = color
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Size: %{{marker.size}}<extra></extra>"
+                                ))
+                                
+                            elif series_type == "heatmap":
+                                # Heatmap specific settings
+                                heatmap_kwargs = {
+                                    "z": series.get("z", y_vals),  # Use z data if provided, otherwise y_vals
+                                    "x": series.get("x", x_vals),  # Use x data if provided, otherwise x_vals
+                                    "y": series.get("y", [label]),  # Use y data if provided, otherwise label
+                                    "name": label,
+                                    "colorscale": series.get("colorscale", "Viridis"),
+                                    "showscale": series.get("showscale", True)
+                                }
+                                
+                                # Handle text data safely (convert to strings to avoid concatenation errors)
+                                if "text" in series:
+                                    try:
+                                        heatmap_kwargs["text"] = [[str(cell) for cell in row] for row in series["text"]]
+                                    except:
+                                        current_app.logger.warning(f"⚠️ Could not process heatmap text data for {label}")
+                                
+                                # Handle colorbar settings
+                                if "colorbar" in series:
+                                    heatmap_kwargs["colorbar"] = series["colorbar"]
+                                
+                                # Handle zmin/zmax
+                                if "zmin" in series:
+                                    heatmap_kwargs["zmin"] = series["zmin"]
+                                if "zmax" in series:
+                                    heatmap_kwargs["zmax"] = series["zmax"]
+                                
+                                fig.add_trace(go.Heatmap(**heatmap_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Value: %{{z}}<extra></extra>"
+                                ))
+                                
+                            else:
+                                # Generic handling for other chart types
+                                fig.add_trace(plotly_chart_class(**trace_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Value: %{{y}}<extra></extra>"
+                                ))
+                        else:
+                            # Fallback to scatter if chart type not recognized
+                            current_app.logger.warning(f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
+                            fig.add_trace(go.Scatter(**trace_kwargs,
+                                mode='markers',
+                                hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
+                            ))
+
+                # --- Process heatmap charts separately ---
+                # Heatmaps need special handling because they have x, y, z, text data directly
+                for i, series in enumerate(series_data):
+                    label = series.get("name", f"Series {i+1}")
+                    series_type = series.get("type", "bar").lower()
+                    
+                    if series_type == "heatmap":
+                        # Heatmap specific settings
+                        heatmap_kwargs = {
+                            "z": series.get("z", []),  # Use z data directly
+                            "x": series.get("x", []),  # Use x data directly
+                            "y": series.get("y", []),  # Use y data directly
+                            "name": label,
+                            "colorscale": series.get("colorscale", "Viridis"),
+                            "showscale": series.get("showscale", True)
+                        }
+                        
+                        # Handle text data safely (convert to strings to avoid concatenation errors)
+                        if "text" in series:
+                            try:
+                                heatmap_kwargs["text"] = [[str(cell) for cell in row] for row in series["text"]]
+                            except:
+                                current_app.logger.warning(f"⚠️ Could not process heatmap text data for {label}")
+                        
+                        # Handle colorbar settings
+                        if "colorbar" in series:
+                            heatmap_kwargs["colorbar"] = series["colorbar"]
+                        
+                        # Handle zmin/zmax
+                        if "zmin" in series:
+                            heatmap_kwargs["zmin"] = series["zmin"]
+                        if "zmax" in series:
+                            heatmap_kwargs["zmax"] = series["zmax"]
+                        
+                        fig.add_trace(go.Heatmap(**heatmap_kwargs,
+                            hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Value: %{{z}}<extra></extra>"
+                        ))
+
+                # --- Layout updates ---
+                layout_updates = {}
+                
+                # Title and axis labels
+                layout_updates["title"] = title
+                
+                # Handle axis labels based on chart type
+                if chart_type != "pie":
+                    layout_updates["xaxis_title"] = chart_meta.get("x_label", chart_config.get("x_axis_title", "X"))
+                    layout_updates["yaxis_title"] = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Y"))
+                
+                # Font
+                if font_family or font_size or font_color:
+                    layout_updates["font"] = {}
+                    if font_family:
+                        layout_updates["font"]["family"] = font_family
+                    if font_size:
+                        layout_updates["font"]["size"] = font_size
+                    if font_color:
+                        layout_updates["font"]["color"] = font_color
+                
+                # Backgrounds
+                if chart_background:
+                    layout_updates["paper_bgcolor"] = chart_background
+                if plot_background:
+                    layout_updates["plot_bgcolor"] = plot_background
+                
+                # Legend configuration
+                show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                current_app.logger.debug(f"Legend setting: {chart_meta.get('legend')}")
+                current_app.logger.debug(f"Showlegend setting: {chart_meta.get('showlegend')}")
+                current_app.logger.debug(f"Final show_legend: {show_legend}")
+                
+                if show_legend:
+                    current_app.logger.debug("Configuring legend for Plotly")
+                    if legend_position:
+                        # Map 'top', 'bottom', 'left', 'right' to valid Plotly legend positions
+                        pos_map = {
+                            "top":    dict(x=0.5, y=1.1, xanchor="center", yanchor="top"),
+                            "bottom": dict(x=0.5, y=-0.2, xanchor="center", yanchor="bottom"),
+                            "left":   dict(x=-0.2, y=0.5, xanchor="left", yanchor="middle"),
+                            "right":  dict(x=1.1, y=0.5, xanchor="right", yanchor="middle"),
+                        }
+                        if legend_position in pos_map:
+                            layout_updates["legend"] = pos_map[legend_position]
+                            current_app.logger.debug(f"Set legend position: {legend_position}")
+                    if legend_font_size:
+                        layout_updates.setdefault("legend", {})["font"] = {"size": legend_font_size}
+                        current_app.logger.debug(f"Set legend font size: {legend_font_size}")
+                else:
+                    layout_updates["showlegend"] = False
+                    current_app.logger.debug("Legend disabled for Plotly")
+                
+                # Bar mode for stacked charts
+                if barmode:
+                    layout_updates["barmode"] = barmode
+                elif chart_type == "stacked_column":
+                    layout_updates["barmode"] = "stack"
+                
+                # Axis min/max and tick format (only for non-pie charts)
+                if chart_type != "pie":
+                    if y_axis_min_max:
+                        layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                        # Handle "auto" value for y-axis min/max
+                        if y_axis_min_max == "auto":
+                            # Don't set range for auto - let Plotly auto-scale
+                            pass
+                        else:
+                            layout_updates["yaxis"]["range"] = y_axis_min_max
+                            # Also set autorange to false to ensure the range is respected
+                            layout_updates["yaxis"]["autorange"] = False
+                            # Force the range to be applied
+                            layout_updates["yaxis"]["fixedrange"] = False
+                            # Ensure the range is properly set
+                            current_app.logger.debug(f"Setting Y-axis range to: {y_axis_min_max}")
+                    if axis_tick_format:
+                        layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                        layout_updates["yaxis"]["tickformat"] = axis_tick_format
+                        # Also apply to secondary y-axis if it's a currency format
+                        if "$" in axis_tick_format:
+                            layout_updates["yaxis2"] = layout_updates.get("yaxis2", {})
+                            layout_updates["yaxis2"]["tickformat"] = axis_tick_format
+                    
+                    # Secondary y-axis formatting
+                    if secondary_y_axis_format:
+                        layout_updates["yaxis2"] = layout_updates.get("yaxis2", {})
+                        layout_updates["yaxis2"]["tickformat"] = secondary_y_axis_format
+                    if secondary_y_axis_min_max:
+                        layout_updates["yaxis2"] = layout_updates.get("yaxis2", {})
+                        # Handle "auto" value for secondary y-axis min/max
+                        if secondary_y_axis_min_max == "auto":
+                            # Don't set range for auto - let Matplotlib auto-scale
+                            pass
+                        elif isinstance(secondary_y_axis_min_max, list) and len(secondary_y_axis_min_max) == 2:
+                            layout_updates["yaxis2"]["range"] = secondary_y_axis_min_max
+                        else:
+                            current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
+                    
+                    # Axis tick font size
+                    if axis_tick_font_size:
+                        layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                        layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                        layout_updates["xaxis"]["tickfont"] = {"size": axis_tick_font_size}
+                        layout_updates["yaxis"]["tickfont"] = {"size": axis_tick_font_size}
+                    # Gridlines
+                    if show_gridlines is not None:
+                        layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                        layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                        layout_updates["xaxis"]["showgrid"] = bool(show_gridlines)
+                        layout_updates["yaxis"]["showgrid"] = bool(show_gridlines)
+                    if gridline_color:
+                        layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                        layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                        layout_updates["xaxis"]["gridcolor"] = gridline_color
+                        layout_updates["yaxis"]["gridcolor"] = gridline_color
+                    if gridline_style:
+                        # Map gridline styles to valid Plotly dash styles
+                        dash_map = {
+                            "solid": "solid", 
+                            "dashed": "dash",
+                            "dash": "dash",  # Map 'dash' to 'dash'
+                            "dashdot": "dashdot", 
+                            "dotted": "dot",
+                            "dot": "dot",
+                            "dotdash": "dashdot"
+                        }
+                        dash_style = dash_map.get(gridline_style, "solid")
+                        layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                        layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                        layout_updates["xaxis"]["griddash"] = dash_style
+                        layout_updates["yaxis"]["griddash"] = dash_style
+                
+                # Data labels (for bar/line traces)
+                show_data_labels = chart_meta.get("data_labels", True)
+                value_format = chart_meta.get("value_format", "")
+                
+                # Only enable data labels if explicitly set to True AND any data label settings are provided
+                if show_data_labels and (data_label_format or data_label_font_size or data_label_color):
+                    show_data_labels = True
+                elif not show_data_labels:
+                    # If data_labels is explicitly set to False, respect that setting
+                    show_data_labels = False
+                
+                # Debug logging for data labels
+                current_app.logger.debug(f"Original data_labels setting: {chart_meta.get('data_labels')}")
+                current_app.logger.debug(f"Final show_data_labels: {show_data_labels}")
+                current_app.logger.debug(f"Data label format: {data_label_format}")
+                current_app.logger.debug(f"Data label font size: {data_label_font_size}")
+                current_app.logger.debug(f"Data label color: {data_label_color}")
+                current_app.logger.debug(f"Value format: {value_format}")
+                current_app.logger.debug(f"Chart config keys: {list(chart_config.keys())}")
+                current_app.logger.debug(f"Chart meta keys: {list(chart_meta.keys())}")
+                
+                if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color):
+                    current_app.logger.debug(f"Processing {len(fig.data)} traces for data labels")
+                    for i, trace in enumerate(fig.data):
+                        current_app.logger.debug(f"Trace {i}: type={trace.type}, mode={getattr(trace, 'mode', 'N/A')}")
+                        # Handle both bar and line charts (line charts are scatter with mode='lines')
+                        if trace.type in ['bar', 'scatter']:
+                            # Use value_format from chart_meta if available, otherwise use data_label_format
+                            format_to_use = value_format if value_format else data_label_format
+                            
+                            # Determine if this is a line chart (scatter with lines mode)
+                            is_line_chart = trace.type == 'scatter' and trace.mode and 'lines' in trace.mode
+                            
+                            if format_to_use:
+                                if trace.type == 'bar':
+                                    trace.update(texttemplate=f"%{{y:{format_to_use}}}", textposition="auto")
+                                elif trace.type == 'scatter':
+                                    if is_line_chart:
+                                        # For line charts, show labels at the data points
+                                        trace.update(texttemplate=f"%{{y:{format_to_use}}}", textposition="top center")
+                                    else:
+                                        # For scatter plots
+                                        trace.update(texttemplate=f"%{{y:{format_to_use}}}", textposition="top center")
+                            else:
+                                # If no format specified, still show data labels
+                                if trace.type == 'bar':
+                                    trace.update(texttemplate="%{y}", textposition="auto")
+                                elif trace.type == 'scatter':
+                                    if is_line_chart:
+                                        # For line charts, show labels at the data points
+                                        trace.update(texttemplate="%{y}", textposition="top center")
+                                    else:
+                                        # For scatter plots
+                                        trace.update(texttemplate="%{y}", textposition="top center")
+                            
+                            # Apply font styling
+                            if data_label_font_size or data_label_color:
+                                trace.update(textfont={})
+                                if data_label_font_size:
+                                    trace.textfont["size"] = data_label_font_size
+                                if data_label_color:
+                                    trace.textfont["color"] = data_label_color
+                
+                # Annotations
+                if annotations:
+                    layout_updates["annotations"] = []
+                    for ann in annotations:
+                        ann_dict = {
+                            "text": ann.get("text", ""),
+                            "x": ann.get("x_value", ann.get("x")),
+                            "y": ann.get("y_value", ann.get("y")),
+                            "showarrow": True
+                        }
+                        layout_updates["annotations"].append(ann_dict)
+                
+                # --- Apply margin settings ---
+                if margin:
+                    layout_updates["margin"] = margin
+                
+                # Apply figure size if specified
+                if figsize:
+                    layout_updates["width"] = figsize[0] * 100  # Convert to pixels
+                    layout_updates["height"] = figsize[1] * 100  # Convert to pixels
+                    current_app.logger.debug(f"Applied Plotly figsize: {figsize} -> width={figsize[0]*100}, height={figsize[1]*100}")
+                
+                # Apply axis label distances
+                if chart_type != "pie":
+                    if x_axis_label_distance or y_axis_label_distance or axis_tick_distance:
+                        layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                        layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                        
+                        if x_axis_label_distance:
+                            layout_updates["xaxis"]["title"] = layout_updates["xaxis"].get("title", {})
+                            layout_updates["xaxis"]["title"]["standoff"] = x_axis_label_distance
+                            # Also apply to tick distance for better control
+                            layout_updates["xaxis"]["ticklen"] = x_axis_label_distance
+                        
+                        if y_axis_label_distance:
+                            layout_updates["yaxis"]["title"] = layout_updates["yaxis"].get("title", {})
+                            layout_updates["yaxis"]["title"]["standoff"] = y_axis_label_distance
+                        
+                        if axis_tick_distance:
+                            layout_updates["xaxis"]["ticklen"] = axis_tick_distance
+                            layout_updates["yaxis"]["ticklen"] = axis_tick_distance
+
+                fig.update_layout(**layout_updates)
+
+                # --- Matplotlib static chart for DOCX ---
+                if chart_type == "pie":
+                    # Check if this is an expanded pie chart
+                    expanded_segment = chart_meta.get("expanded_segment")
+                    
+                    if expanded_segment and len(series_data) == 1:
+                        # Create subplot for expanded pie chart
+                        mpl_figsize = figsize if figsize else (15, 8)
+                        fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=mpl_figsize, dpi=200)
+                        
+                        # Apply background colors to Matplotlib figure
+                        if chart_background:
+                            fig_mpl.patch.set_facecolor(chart_background)
+                        if plot_background:
+                            ax1.set_facecolor(plot_background)
+                            ax2.set_facecolor(plot_background)
+                        
+                        series = series_data[0]
+                        labels = series.get("labels", x_values)
+                        values = series.get("values", [])
+                        color = series.get("marker", {}).get("color") if "marker" in series else colors
+                        
+                        # Create pie chart
+                        wedges, texts, autotexts = ax1.pie(values, labels=labels, autopct='%1.1f%%', 
+                                                          colors=color, startangle=90)
+                        
+                        # Style the text
+                        for autotext in autotexts:
+                            autotext.set_color('white')
+                            autotext.set_fontweight('bold')
+                        
+                        ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                        
+                        # Add legend for pie chart
+                        show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                        if show_legend:
+                            # Initialize legend_loc for pie charts
+                            legend_loc = 'best'  # default
+                            if legend_position:
+                                loc_map = {
+                                    "top": "upper center",
+                                    "bottom": "lower center", 
+                                    "left": "center left",
+                                    "right": "center right"
+                                }
+                                legend_loc = loc_map.get(legend_position, 'best')
+                            
+                            # Force legend to bottom if specified
+                            if legend_position == "bottom":
+                                ax1.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                            else:
+                                ax1.legend(wedges, labels, loc=legend_loc, fontsize=legend_font_size)
+                        
+                        # Create bar chart for expanded segment
+                        if expanded_segment in labels:
+                            segment_idx = labels.index(expanded_segment)
+                            segment_value = values[segment_idx]
+                            segment_color = color[segment_idx] if isinstance(color, list) and segment_idx < len(color) else color
+                            
+                            ax2.bar([expanded_segment], [segment_value], color=segment_color, alpha=0.7)
+                            ax2.set_title(f"{expanded_segment} Details", fontsize=font_size or 12, weight='bold')
+                            ax2.set_ylabel("Value")
+                            
+                            # Add value label on bar
+                            ax2.text(0, segment_value, f"{segment_value}", ha='center', va='bottom', fontweight='bold')
+                        
+                    else:
+                        # Regular pie chart
+                        mpl_figsize = figsize if figsize else (10, 8)
+                        fig_mpl, ax = plt.subplots(figsize=mpl_figsize, dpi=200)
+                        
+                        # Apply background colors to Matplotlib figure
+                        if chart_background:
+                            fig_mpl.patch.set_facecolor(chart_background)
+                        if plot_background:
+                            ax.set_facecolor(plot_background)
+                        
+                        if len(series_data) == 1:
+                            series = series_data[0]
+                            labels = series.get("labels", x_values)
+                            values = series.get("values", [])
+                            color = series.get("marker", {}).get("color") if "marker" in series else colors
+                            
+                            # Create pie chart
+                            wedges, texts, autotexts = ax.pie(values, labels=labels, autopct='%1.1f%%', 
+                                                             colors=color, startangle=90)
+                            
+                            # Style the text
+                            for autotext in autotexts:
+                                autotext.set_color('white')
+                                autotext.set_fontweight('bold')
+                            
+                            ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                            
+                            # Add legend for regular pie chart
+                            show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            if show_legend:
+                                # Initialize legend_loc for pie charts
+                                legend_loc = 'best'  # default
+                                if legend_position:
+                                    loc_map = {
+                                        "top": "upper center",
+                                        "bottom": "lower center", 
+                                        "left": "center left",
+                                        "right": "center right"
+                                    }
+                                    legend_loc = loc_map.get(legend_position, 'best')
+                                
+                                # Force legend to bottom if specified
+                                if legend_position == "bottom":
+                                    ax.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                                else:
+                                    ax.legend(wedges, labels, loc=legend_loc, fontsize=legend_font_size)
+                        
+                elif chart_type in ["bar of pie", "bar_of_pie"]:
+                    # Matplotlib version of bar of pie
+                    mpl_figsize = figsize if figsize else (15, 8)
+                    fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=mpl_figsize, dpi=200)
+                    
+                    # Apply background colors to Matplotlib figure
+                    if chart_background:
+                        fig_mpl.patch.set_facecolor(chart_background)
+                    if plot_background:
+                        ax1.set_facecolor(plot_background)
+                        ax2.set_facecolor(plot_background)
+                    labels = series_meta.get("labels", x_values)
+                    values = series_meta.get("values", [])
+                    colors = series_meta.get("colors", [])
+                    other_labels = chart_meta.get("other_labels", [])
+                    other_values = chart_meta.get("other_values", [])
+                    other_colors = chart_meta.get("other_colors", [])
+                    if not (other_labels and other_values):
+                        if "other_label_range" in chart_meta and "other_value_range" in chart_meta and "source_sheet" in chart_meta:
+                            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+                            sheet = wb[chart_meta["source_sheet"]]
+                            other_labels = extract_excel_range(sheet, chart_meta["other_label_range"])
+                            other_values = extract_excel_range(sheet, chart_meta["other_value_range"])
+                    # Pie chart
+                    if colors:
+                        wedges, texts, autotexts = ax1.pie(values, labels=labels, autopct='%1.1f%%', colors=colors, startangle=90)
+                    else:
+                        wedges, texts, autotexts = ax1.pie(values, labels=labels, autopct='%1.1f%%', startangle=90)
+                    for autotext in autotexts:
+                        autotext.set_color('white')
+                        autotext.set_fontweight('bold')
+                    ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                    # Bar chart
+                    if other_colors:
+                        ax2.bar(other_labels, other_values, color=other_colors, alpha=0.7)
+                    else:
+                        ax2.bar(other_labels, other_values, color=colors if colors else None, alpha=0.7)
+                    ax2.set_title("Breakdown of 'Other'", fontsize=font_size or 12, weight='bold')
+                    ax2.set_ylabel("Value")
+                    for i, v in enumerate(other_values):
+                        ax2.text(i, v, f"{v}", ha='center', va='bottom', fontweight='bold')
+                    
+                    # Add legend for bar of pie chart
+                    show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                    if show_legend:
+                        # Initialize legend_loc for bar of pie charts
+                        legend_loc = 'best'  # default
+                        if legend_position:
+                            loc_map = {
+                                "top": "upper center",
+                                "bottom": "lower center", 
+                                "left": "center left",
+                                "right": "center right"
+                            }
+                            legend_loc = loc_map.get(legend_position, 'best')
+                        
+                        # Force legend to bottom if specified
+                        if legend_position == "bottom":
+                            ax1.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                        else:
+                            ax1.legend(wedges, labels, loc=legend_loc, fontsize=legend_font_size)
+                
+                else:
+                    # Bar, line, area charts
+                    mpl_figsize = figsize if figsize else (10, 6)
+                    current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
+                    fig_mpl, ax1 = plt.subplots(figsize=mpl_figsize, dpi=200)
+                    ax2 = ax1.twinx()
+                    
+                    # Apply background colors to Matplotlib figure
+                    if chart_background:
+                        fig_mpl.patch.set_facecolor(chart_background)
+                    if plot_background:
+                        ax1.set_facecolor(plot_background)
+                        ax2.set_facecolor(plot_background)
+
+                    for i, series in enumerate(series_data):
+                        label = series.get("name", f"Series {i+1}")
+                        series_type = series.get("type", "bar").lower()
+                        
+                        # Special handling for heatmap charts - skip standard data processing
+                        if series_type == "heatmap":
+                            # Heatmap data is already in the correct format (x, y, z, text)
+                            # Skip the standard y_vals extraction and processing
+                            continue
+                        
                         color = None
                         if "marker" in series and isinstance(series["marker"], dict) and "color" in series["marker"]:
                             color = series["marker"]["color"]
@@ -1115,7 +2131,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 if isinstance(color, list):
                                     for j, val in enumerate(y_vals):
                                         bar_color = color[j % len(color)]
-                                        ax1.bar(x_values[j], val, color=bar_color, alpha=0.7)
+                                        ax1.bar(x_values[j], val, color=bar_color, alpha=0.7, label=label if j == 0 else "")
                                 else:
                                     ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7)
                                     
@@ -1124,7 +2140,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             if isinstance(color, list):
                                 for j, val in enumerate(y_vals):
                                     bar_color = color[j % len(color)]
-                                    ax1.barh(x_values[j], val, color=bar_color, alpha=0.7)
+                                    ax1.barh(x_values[j], val, color=bar_color, alpha=0.7, label=label if j == 0 else "")
                             else:
                                 ax1.barh(x_values, y_vals, label=label, color=color, alpha=0.7)
                                 
@@ -1162,7 +2178,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             
                         elif mpl_chart_type == "imshow":
                             # Heatmap (simplified)
-                            heatmap_data = series.get("values", [])
+                            heatmap_data = series.get("z", [])
                             if len(heatmap_data) > 0:
                                 ax1.imshow(heatmap_data, cmap='viridis', aspect='auto')
                                 
@@ -1214,12 +2230,15 @@ def _generate_report(project_id, template_path, data_file_path):
                                             except:
                                                 formatted_val = str(val)
                                             
-                                            # Add text label on top of bar
+                                            # Add text label on top of bar (ENHANCED VERSION)
+                                            label_color = data_label_color or '#000000'
                                             ax1.text(j, val, formatted_val, 
                                                     ha='center', va='bottom', 
-                                                    fontsize=data_label_font_size or 10,
-                                                    color=data_label_color or '#000000',
-                                                    fontweight='bold')
+                                                    fontsize=data_label_font_size or 18,  # Increased default size
+                                                    color=label_color,
+                                                    fontweight='bold',
+                                                    bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
+                                            current_app.logger.debug(f"Added bar data label with color: {label_color}")
                                 
                                 elif series_type == "line":
                                     for j, val in enumerate(y_vals):
@@ -1244,27 +2263,33 @@ def _generate_report(project_id, template_path, data_file_path):
                                             except:
                                                 formatted_val = str(val)
                                             
-                                            # Add text label above line point
+                                            # Add text label above line point (ENHANCED VERSION)
+                                            label_color = data_label_color or '#000000'
                                             ax2.text(j, val, formatted_val, 
                                                     ha='center', va='bottom', 
-                                                    fontsize=data_label_font_size or 10,
-                                                    color=data_label_color or '#000000',
-                                                    fontweight='bold')
+                                                    fontsize=data_label_font_size or 18,  # Increased default size
+                                                    color=label_color,
+                                                    fontweight='bold',
+                                                    bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
+                                            current_app.logger.debug(f"Added line data label with color: {label_color}")
 
                     # Set labels and styling
                     if chart_type != "pie":
-                        ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), fontsize=font_size or 11)
-                        ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Primary Y")), fontsize=font_size or 11)
+                        label_fontsize = int((font_size or 11) * 0.8)
+                        ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), fontsize=label_fontsize, color=font_color)
+                        ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Primary Y")), fontsize=label_fontsize, color=font_color)
                         if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
-                            ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), fontsize=font_size or 11)
+                            ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), fontsize=label_fontsize, color=font_color)
 
                         # Set axis tick font size if provided
                         if axis_tick_font_size:
-                            ax1.tick_params(axis='x', labelsize=axis_tick_font_size, rotation=45)
-                            ax1.tick_params(axis='y', labelsize=axis_tick_font_size)
-                            ax2.tick_params(axis='y', labelsize=axis_tick_font_size)
+                            ax1.tick_params(axis='x', labelsize=axis_tick_font_size, rotation=45, colors=font_color)
+                            ax1.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
+                            ax2.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
                         else:
-                            ax1.tick_params(axis='x', rotation=45)
+                            ax1.tick_params(axis='x', rotation=45, colors=font_color)
+                            ax1.tick_params(axis='y', colors=font_color)
+                            ax2.tick_params(axis='y', colors=font_color)
                         
                         # Apply X-axis label distance using tick parameters
                         if x_axis_label_distance:
@@ -1291,8 +2316,19 @@ def _generate_report(project_id, template_path, data_file_path):
                         # Gridlines
                         current_app.logger.debug(f"Gridlines setting: {show_gridlines}")
                         if show_gridlines:
-                            ax1.grid(True, linestyle=gridline_style or '--', color=gridline_color or '#ccc', alpha=0.6)
-                            ax2.grid(True, linestyle=gridline_style or '--', color=gridline_color or '#ccc', alpha=0.6)
+                            # Map gridline styles to valid Matplotlib linestyles
+                            matplotlib_linestyle_map = {
+                                "solid": "-",
+                                "dashed": "--", 
+                                "dash": "--",  # Map 'dash' to '--'
+                                "dashdot": "-.",
+                                "dotted": ":",
+                                "dot": ":",
+                                "dotdash": "-."
+                            }
+                            mapped_linestyle = matplotlib_linestyle_map.get(gridline_style, "--")
+                            ax1.grid(True, linestyle=mapped_linestyle, color=gridline_color or '#ccc', alpha=0.6)
+                            ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color or '#ccc', alpha=0.6)
                         else:
                             ax1.grid(False)
                             ax2.grid(False)
@@ -1315,10 +2351,83 @@ def _generate_report(project_id, template_path, data_file_path):
                         
                         # Legend
                         show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
-                        if show_legend:
-                            ax1.legend(loc='best')
+                        current_app.logger.debug(f"Matplotlib legend setting: {show_legend}")
                         
-                        ax1.set_title(title, fontsize=font_size or 14, weight='bold')
+                        # Initialize legend_loc outside the if block to fix scope issue
+                        legend_loc = 'best'  # default
+                        if show_legend:
+                            # For dual-axis charts, combine legends from both axes
+                            lines1, labels1 = ax1.get_legend_handles_labels()
+                            lines2, labels2 = ax2.get_legend_handles_labels()
+                            
+                            # Map legend position for Matplotlib
+                            current_app.logger.debug(f"Legend position from config: {legend_position}")
+                            if legend_position:
+                                loc_map = {
+                                    "top": "upper center",
+                                    "bottom": "lower center", 
+                                    "left": "center left",
+                                    "right": "center right"
+                                }
+                                legend_loc = loc_map.get(legend_position, 'best')
+                                current_app.logger.debug(f"Matplotlib legend position mapping: {legend_position} -> {legend_loc}")
+                            else:
+                                current_app.logger.debug("No legend position specified, using default 'best'")
+                            
+                            # Force legend to bottom if specified
+                            if legend_position == "bottom":
+                                ax1.legend(lines1 + lines2, labels1 + labels2, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                                current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at forced bottom position")
+                            else:
+                                ax1.legend(lines1 + lines2, labels1 + labels2, loc=legend_loc, fontsize=legend_font_size)
+                                current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at position: {legend_loc}")
+                        
+                        # Set title with proper font attributes (ENHANCED VERSION)
+                        title_fontsize = font_size or 28  # Increased default size
+                        if font_color:
+                            ax1.set_title(title, fontsize=title_fontsize, weight='bold', color=font_color, 
+                                         bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                            current_app.logger.debug(f"Applied title with color: {font_color}, size: {title_fontsize}")
+                        else:
+                            ax1.set_title(title, fontsize=title_fontsize, weight='bold',
+                                         bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
+                        
+                        # Apply font color to axis labels (ENHANCED VERSION)
+                        x_label_text = chart_meta.get("x_label", "X")
+                        primary_y_label_text = chart_meta.get("primary_y_label", "Y")
+                        label_fontsize = int(title_fontsize * 0.9)  # Increased relative size
+                        
+                        if font_color:
+                            ax1.set_xlabel(x_label_text, fontsize=label_fontsize, weight='bold', color=font_color,
+                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                            ax1.set_ylabel(primary_y_label_text, fontsize=label_fontsize, weight='bold', color=font_color,
+                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                            current_app.logger.debug(f"Applied axis labels with color: {font_color}")
+                        else:
+                            ax1.set_xlabel(x_label_text, fontsize=label_fontsize, weight='bold',
+                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                            ax1.set_ylabel(primary_y_label_text, fontsize=label_fontsize, weight='bold',
+                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                        
+                        # Apply font size and color to tick labels (ENHANCED VERSION)
+                        tick_fontsize = axis_tick_font_size or int(title_fontsize * 0.8)  # Increased relative size
+                        if font_color:
+                            ax1.tick_params(axis='both', labelsize=tick_fontsize, colors=font_color)
+                            current_app.logger.debug(f"Applied tick labels with color: {font_color}, size: {tick_fontsize}")
+                        else:
+                            ax1.tick_params(axis='both', labelsize=tick_fontsize)
+                        
+                        # Also apply font color to secondary y-axis (ENHANCED VERSION)
+                        if 'ax2' in locals():
+                            if font_color:
+                                ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold', color=font_color,
+                                             bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                                ax2.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
+                                current_app.logger.debug(f"Applied secondary axis with color: {font_color}")
+                            else:
+                                ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold',
+                                             bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                                ax2.tick_params(axis='y', labelsize=tick_fontsize)
                 
                 # Apply axis label distances for Matplotlib
                 current_app.logger.debug(f"X-axis label distance: {x_axis_label_distance}")
@@ -1357,8 +2466,86 @@ def _generate_report(project_id, template_path, data_file_path):
                         fig_mpl.subplots_adjust(left=fig_mpl.subplotpars.left - adjustment)
                         current_app.logger.debug(f"Re-applied Y-axis adjustment: {adjustment}")
 
+                # Add annotations if specified
+                if annotations:
+                    current_app.logger.debug(f"Adding {len(annotations)} annotations to chart")
+                    
+                    # For heatmaps, extract x and y values from series data
+                    if chart_type == "heatmap" and series_data:
+                        heatmap_x_values = series_data[0].get("x", []) if series_data else []
+                        heatmap_y_values = series_data[0].get("y", []) if series_data else []
+                    else:
+                        heatmap_x_values = []
+                        heatmap_y_values = []
+                    
+                    for annotation in annotations:
+                        text = annotation.get("text", "")
+                        x_value = annotation.get("x_value", 0)
+                        y_value = annotation.get("y_value", 0)
+                        
+                        # Find x position based on x_value
+                        x_pos = 0
+                        if chart_type == "heatmap" and heatmap_x_values:
+                            # For heatmaps, look in the heatmap x values
+                            if x_value in heatmap_x_values:
+                                x_pos = heatmap_x_values.index(x_value)
+                        elif x_value in x_values:
+                            # For other charts, look in the standard x_values
+                            x_pos = x_values.index(x_value)
+                        
+                        # Find y position based on y_value
+                        y_pos = y_value
+                        if chart_type == "heatmap" and heatmap_y_values:
+                            # For heatmaps, look in the heatmap y values
+                            if y_value in heatmap_y_values:
+                                y_pos = heatmap_y_values.index(y_value)
+                        
+                        # Add annotation text
+                        ax1.annotate(text, xy=(x_pos, y_pos), xytext=(x_pos, y_pos + 50),
+                                   arrowprops=dict(arrowstyle='->', color='red'),
+                                   fontsize=12, color='red', weight='bold',
+                                   ha='center', va='bottom')
+                        current_app.logger.debug(f"Added annotation: '{text}' at position ({x_pos}, {y_pos})")
+
+                # Apply margin settings to Matplotlib (FIXED VERSION)
+                if margin:
+                    current_app.logger.debug(f"Applying margin to Matplotlib: {margin}")
+                    # Use figure padding instead of subplot adjustments
+                    # Convert margin values to inches (assuming 100 DPI)
+                    left_margin_inches = margin.get("l", 0) / 100.0
+                    right_margin_inches = margin.get("r", 0) / 100.0
+                    top_margin_inches = margin.get("t", 0) / 100.0
+                    bottom_margin_inches = margin.get("b", 0) / 100.0
+                    
+                    # Apply margins using figure padding
+                    fig_mpl.subplots_adjust(
+                        left=left_margin_inches,
+                        right=1.0 - right_margin_inches,
+                        top=1.0 - top_margin_inches,
+                        bottom=bottom_margin_inches
+                    )
+                    current_app.logger.debug(f"Applied margins (inches): left={left_margin_inches}, right={right_margin_inches}, top={top_margin_inches}, bottom={bottom_margin_inches}")
+                
+                # Adjust layout to accommodate legend position
+                if show_legend and legend_position == "bottom":
+                    # Add extra space at bottom for legend
+                    fig_mpl.subplots_adjust(bottom=fig_mpl.subplotpars.bottom + 0.15)
+                    current_app.logger.debug("Added extra bottom space for legend")
+
                 tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-                plt.savefig(tmpfile.name, bbox_inches='tight')
+                # Use different bbox_inches parameter based on legend position
+                if show_legend and legend_position == "bottom":
+                    # For bottom legend, use 'tight' but with extra padding
+                    plt.savefig(tmpfile.name, bbox_inches='tight', pad_inches=0.3, dpi=200)
+                    current_app.logger.debug(f"Saved Matplotlib chart with bottom legend using extra padding")
+                else:
+                    # For other positions, use standard tight layout
+                    plt.savefig(tmpfile.name, bbox_inches='tight', dpi=200)
+                    # Only log legend position if legend_loc is defined (for charts that have legends)
+                    if 'legend_loc' in locals():
+                        current_app.logger.debug(f"Saved Matplotlib chart with legend at position: {legend_loc}")
+                    else:
+                        current_app.logger.debug(f"Saved Matplotlib chart without legend")
                 plt.close(fig_mpl)
 
                 return tmpfile.name
