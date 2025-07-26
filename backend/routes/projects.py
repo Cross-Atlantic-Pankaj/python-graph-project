@@ -11,6 +11,7 @@ from bson.objectid import ObjectId
 from datetime import datetime 
 from docx import Document
 from docx.shared import Inches
+from docx.text.paragraph import Paragraph
 import openpyxl
 import tempfile
 import re
@@ -39,6 +40,61 @@ def allowed_file(filename):
 
 def allowed_report_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_REPORT_EXTENSIONS
+
+def extract_report_info_from_excel(excel_path):
+    """Extract Report_Name and Report_Code from Excel file"""
+    try:
+        # Load the Excel file
+        wb = openpyxl.load_workbook(excel_path, data_only=True)
+        sheet = wb.active
+        
+        report_name = None
+        report_code = None
+        
+        # Search for the columns in the first few rows
+        for row_idx in range(1, min(10, sheet.max_row + 1)):  # Check first 10 rows
+            for col_idx in range(1, min(10, sheet.max_column + 1)):  # Check first 10 columns
+                cell_value = sheet.cell(row=row_idx, column=col_idx).value
+                
+                if cell_value and isinstance(cell_value, str):
+                    cell_value = cell_value.strip()
+                    
+                    # Look for Report_Name column
+                    if cell_value.lower() == 'report_name':
+                        # Get the value from the next row in the same column
+                        if row_idx + 1 <= sheet.max_row:
+                            report_name = sheet.cell(row=row_idx + 1, column=col_idx).value
+                            if report_name:
+                                report_name = str(report_name).strip()
+                    
+                    # Look for Report_Code column
+                    elif cell_value.lower() == 'report_code':
+                        # Get the value from the next row in the same column
+                        if row_idx + 1 <= sheet.max_row:
+                            report_code = sheet.cell(row=row_idx + 1, column=col_idx).value
+                            if report_code:
+                                report_code = str(report_code).strip()
+        
+        wb.close()
+        
+        # Fallback to filename if not found
+        if not report_name:
+            report_name = os.path.splitext(os.path.basename(excel_path))[0]
+            current_app.logger.warning(f"Report_Name not found in {excel_path}, using filename: {report_name}")
+        
+        if not report_code:
+            report_code = f"REPORT_{os.path.splitext(os.path.basename(excel_path))[0]}"
+            current_app.logger.warning(f"Report_Code not found in {excel_path}, using generated code: {report_code}")
+        
+        current_app.logger.info(f"Extracted from {excel_path}: Report_Name='{report_name}', Report_Code='{report_code}'")
+        return report_name, report_code
+        
+    except Exception as e:
+        current_app.logger.error(f"Error extracting report info from {excel_path}: {e}")
+        # Fallback to filename-based naming
+        fallback_name = os.path.splitext(os.path.basename(excel_path))[0]
+        fallback_code = f"REPORT_{fallback_name}"
+        return fallback_name, fallback_code
 
 def create_expanded_pie_chart(labels, values, colors, expanded_segment, title, value_format=""):
     """
@@ -85,6 +141,21 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
     """
     Create a 'bar of pie' chart using Plotly: pie chart with one segment broken down as a bar chart.
     """
+    # Filter out empty/null values from other_labels and other_values
+    filtered_data = []
+    for label, value in zip(other_labels, other_values):
+        # Check if both label and value are not empty/null
+        if (label is not None and str(label).strip() != "" and 
+            value is not None and str(value).strip() != "" and 
+            str(value).strip() != "0"):
+            filtered_data.append((label, value))
+    
+    if filtered_data:
+        filtered_labels, filtered_values = zip(*filtered_data)
+    else:
+        # If no valid data, use empty lists
+        filtered_labels, filtered_values = [], []
+    
     fig = make_subplots(
         rows=1, cols=2,
         specs=[[{"type": "pie"}, {"type": "bar"}]],
@@ -101,15 +172,24 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
         pull=[0.1 if l == "Other" else 0 for l in labels],
         name="Main Pie"
     ), row=1, col=1)
-    # Bar chart for breakdown
+    
+    # Bar chart for breakdown (only if we have filtered data)
+    if filtered_labels and filtered_values:
+        # Create individual bar traces for each data point to avoid stacking
+        for i, (label, value) in enumerate(zip(filtered_labels, filtered_values)):
+            # Use individual colors for each bar
+            bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
+            
     fig.add_trace(go.Bar(
-        x=other_labels,
-        y=other_values,
-        marker_color=other_colors,
-        text=[f"{v}{value_format}" for v in other_values],
+                x=[label],  # Single x value for each bar
+                y=[value],  # Single y value for each bar
+                marker_color=bar_color,
+                text=[f"{value}{value_format}"],
         textposition="auto",
-        name="Breakdown of 'Other'"
+                name=f"Breakdown {i+1}",
+                showlegend=False  # Hide individual bar legends
     ), row=1, col=2)
+    
     fig.update_layout(
         title_text=title,
         showlegend=False,
@@ -134,8 +214,21 @@ def _generate_report(project_id, template_path, data_file_path):
     try:
         current_app.logger.debug(f"Generating report for project: {project_id}")
 
-        df = pd.read_excel(data_file_path, sheet_name=0)  # Use first sheet
+        # Try to read Excel with original formatting preserved
+        try:
+            df = pd.read_excel(data_file_path, sheet_name=0, keep_default_na=False)  # Use first sheet
+        except:
+            df = pd.read_excel(data_file_path, sheet_name=0)  # Fallback to default
+        
         df.columns = df.columns.str.strip().str.replace(" ", "_").str.replace("__", "_")
+        
+        # Log the raw data to see what pandas is reading
+        current_app.logger.info("🔍 RAW EXCEL DATA (first few rows):")
+        for col in df.columns:
+            if 'growth' in col.lower() or 'cagr' in col.lower():
+                current_app.logger.info(f"  {col}: {df[col].head().tolist()}")
+                # Also log the data types
+                current_app.logger.info(f"  {col} dtype: {df[col].dtype}")
 
         # Excel structure loaded silently
         
@@ -153,6 +246,36 @@ def _generate_report(project_id, template_path, data_file_path):
         # Data maps created silently
 
         flat_data_map = {}
+        # Add global metadata columns that can be used across all sections
+        global_metadata = {}
+        
+        # First pass: Process global metadata columns from ALL rows
+        for _, row in df.iterrows():
+            for col in df.columns:
+                col_lower = col.lower().strip()
+                
+                # Handle global metadata columns (can be used across all sections)
+                if col_lower in ['country', 'report_name', 'report_code', 'currency']:
+                    value = row[col]
+                    if pd.notna(value) and str(value).strip():
+                        # Store in global metadata for use across all sections
+                        global_metadata[col_lower] = str(value).strip()
+                        # Also add to flat_data_map with the column name as key
+                        flat_data_map[col_lower] = str(value).strip()
+                        current_app.logger.debug(f"📋 Global metadata: {col_lower} -> {value}")
+                    else:
+                        current_app.logger.warning(f"⚠️ Empty or null value for global metadata column: {col} (value: {value})")
+        
+        # Ensure we have all required global metadata - if any are missing, log a warning
+        required_global_metadata = ['country', 'report_name', 'report_code', 'currency']
+        missing_metadata = [key for key in required_global_metadata if key not in flat_data_map]
+        if missing_metadata:
+            current_app.logger.warning(f"⚠️ Missing global metadata: {missing_metadata}")
+            current_app.logger.info(f"📋 Available global metadata: {list(flat_data_map.keys())}")
+        else:
+            current_app.logger.info(f"✅ All required global metadata found: {list(flat_data_map.keys())}")
+        
+        # Second pass: Process chart-specific data from rows with chart tags
         for _, row in df.iterrows():
             chart_tag = row.get("Chart_Tag")
             if not isinstance(chart_tag, str) or not chart_tag:
@@ -163,13 +286,24 @@ def _generate_report(project_id, template_path, data_file_path):
             for col in df.columns:
                 col_lower = col.lower().strip()
                 
+                # Skip global metadata columns as they're already processed
+                if col_lower in ['country', 'report_name', 'report_code', 'currency']:
+                    continue
+                
                 # Handle Chart Data columns (for values)
                 if col_lower.startswith("chart_data_y"):
                     year = col.replace("Chart_Data_", "").replace("chart_data_", "")
                     key = f"{section_prefix}_{year.lower()}"
                     value = row[col]
                     if pd.notna(value) and str(value).strip():
-                        flat_data_map[key] = str(value).strip()
+                        # Format values to always show one decimal place
+                        try:
+                            float_val = float(value)
+                            formatted_val = f"{float_val:.1f}"
+                            flat_data_map[key] = formatted_val
+                        except (ValueError, TypeError):
+                            # If conversion fails, use the original value as string
+                            flat_data_map[key] = str(value).strip()
                     else:
                         current_app.logger.warning(f"⚠️ Empty value for {col} -> {key}")
                 
@@ -179,21 +313,38 @@ def _generate_report(project_id, template_path, data_file_path):
                     key = f"{section_prefix}_{year.lower()}_kpi2"
                     value = row[col]
                     if pd.notna(value) and str(value).strip():
-                        # Format percentage values properly
+                        # Convert percentage values from Excel to decimal format for table display
                         try:
+                            # Log the raw value and its type
+                            current_app.logger.info(f"🔍 RAW GROWTH VALUE: {value} (type: {type(value)}) for {key}")
+                            
                             # Convert to float first to handle any numeric format
                             float_val = float(value)
-                            # If the value is between 0 and 1, it's likely a decimal percentage
-                            if 0 <= float_val <= 1:
-                                # Convert decimal to percentage (e.g., 0.2 -> 20%)
-                                percentage_val = f"{float_val * 100:.1f}%"
-                                flat_data_map[key] = percentage_val
+                            current_app.logger.debug(f"Processing growth value: {value} -> {float_val} for key {key}")
+                            
+                            # Check if the original value string contains '%' (Excel percentage format)
+                            original_str = str(value).strip()
+                            if '%' in original_str:
+                                # Remove % and convert to decimal
+                                clean_val = original_str.replace('%', '').strip()
+                                float_val = float(clean_val)
+                                decimal_val = f"{float_val / 100:.3f}"
+                                flat_data_map[key] = decimal_val
+                                current_app.logger.debug(f"Converted Excel percentage {original_str} to decimal {decimal_val}")
+                            elif float_val > 1:
+                                # Convert percentage to decimal (e.g., 20% -> 0.2)
+                                decimal_val = f"{float_val / 100:.3f}"
+                                flat_data_map[key] = decimal_val
+                                current_app.logger.debug(f"Converted percentage {float_val}% to decimal {decimal_val}")
                             else:
-                                # If it's already a larger number, assume it's already a percentage
-                                flat_data_map[key] = f"{float_val:.1f}%"
+                                # If it's already a decimal, format it properly
+                                decimal_val = f"{float_val:.3f}"
+                                flat_data_map[key] = decimal_val
+                                current_app.logger.debug(f"Formatted decimal {float_val} to {decimal_val}")
                         except (ValueError, TypeError):
                             # If conversion fails, use the original value as string
                             flat_data_map[key] = str(value).strip()
+                            current_app.logger.warning(f"Could not convert growth value: {value}")
                     else:
                         current_app.logger.warning(f"⚠️ Empty value for {col} -> {key}")
 
@@ -202,56 +353,136 @@ def _generate_report(project_id, template_path, data_file_path):
                 key = f"{section_prefix}_cgrp"
                 value = row["Chart_Data_CAGR"]
                 if str(value).strip():
-                    # Format CAGR percentage values properly
+                    # Convert CAGR percentage values from Excel to decimal format for table display
                     try:
                         # Convert to float first to handle any numeric format
                         float_val = float(value)
-                        # If the value is between 0 and 1, it's likely a decimal percentage
-                        if 0 <= float_val <= 1:
-                            # Convert decimal to percentage (e.g., 0.105 -> 10.5%)
-                            percentage_val = f"{float_val * 100:.1f}%"
-                            flat_data_map[key] = percentage_val
+                        current_app.logger.debug(f"Processing CAGR value: {value} -> {float_val} for key {key}")
+                        
+                        # Check if the original value string contains '%' (Excel percentage format)
+                        original_str = str(value).strip()
+                        if '%' in original_str:
+                            # Remove % and convert to decimal
+                            clean_val = original_str.replace('%', '').strip()
+                            float_val = float(clean_val)
+                            decimal_val = f"{float_val / 100:.3f}"
+                            flat_data_map[key] = decimal_val
+                            current_app.logger.debug(f"Converted Excel CAGR percentage {original_str} to decimal {decimal_val}")
+                        elif float_val > 1:
+                            # Convert percentage to decimal (e.g., 10.5% -> 0.105)
+                            decimal_val = f"{float_val / 100:.3f}"
+                            flat_data_map[key] = decimal_val
+                            current_app.logger.debug(f"Converted CAGR percentage {float_val}% to decimal {decimal_val}")
                         else:
-                            # If it's already a larger number, assume it's already a percentage
-                            flat_data_map[key] = f"{float_val:.1f}%"
+                            # If it's already a decimal, format it properly
+                            decimal_val = f"{float_val:.3f}"
+                            flat_data_map[key] = decimal_val
+                            current_app.logger.debug(f"Formatted CAGR decimal {float_val} to {decimal_val}")
                     except (ValueError, TypeError):
                         # If conversion fails, use the original value as string
                         flat_data_map[key] = str(value).strip()
+                        current_app.logger.warning(f"Could not convert CAGR value: {value}")
                 else:
                     current_app.logger.warning(f"⚠️ Empty value for Chart_Data_CAGR -> {key}")
 
         # Ensure all keys are lowercase
         flat_data_map = {k.lower(): v for k, v in flat_data_map.items()}
         
+        # Log the final data map for debugging
+        current_app.logger.info("🔍 FINAL DATA MAP FOR TABLE REPLACEMENT:")
+        for key, value in flat_data_map.items():
+            if 'kpi2' in key or 'cgrp' in key or key in ['country', 'report_name', 'report_code', 'currency']:  # Log growth rates, CAGR, and global metadata
+                current_app.logger.info(f"  {key}: {value} (type: {type(value)})")
+        
         # Data mapping completed silently
 
         doc = Document(template_path)
 
         def replace_text_in_paragraph(paragraph):
+            nonlocal flat_data_map, text_map  # Access variables from outer scope
             # First, try to replace placeholders that are contained within single runs
             for run in paragraph.runs:
                 original_text = run.text
+                
+                # Handle ${} format placeholders
                 matches = re.findall(r"\$\{(.*?)\}", run.text)
                 for match in matches:
                     key_lower = match.lower().strip()
                     val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     if val:
                         pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
+                        old_text = run.text
                         run.text = pattern.sub(val, run.text)
+                        # Log replacements for growth rates, CAGR, and global metadata
+                        if 'kpi2' in key_lower or 'cgrp' in key_lower or key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                            current_app.logger.info(f"🔄 TABLE REPLACEMENT: ${{{match}}} -> {val} (in text: {old_text} -> {run.text})")
                     else:
                         current_app.logger.warning(f"⚠️ No value found for placeholder ${{{match}}} (key: {key_lower})")
+                        # Enhanced debugging for global metadata
+                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                            current_app.logger.error(f"❌ CRITICAL: Global metadata '{key_lower}' not found in flat_data_map!")
+                            current_app.logger.error(f"❌ Available keys in flat_data_map: {list(flat_data_map.keys())}")
+                            current_app.logger.error(f"❌ Available keys in text_map: {list(text_map.keys())}")
+                
+                # Handle <> format placeholders
+                angle_matches = re.findall(r"<(.*?)>", run.text)
+                for match in angle_matches:
+                    key_lower = match.lower().strip()
+                    val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                    if val:
+                        pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
+                        old_text = run.text
+                        run.text = pattern.sub(val, run.text)
+                        # Log replacements for global metadata
+                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                            current_app.logger.info(f"🔄 ANGLE REPLACEMENT: <{match}> -> {val} (in text: {old_text} -> {run.text})")
+                    else:
+                        current_app.logger.warning(f"⚠️ No value found for placeholder <{match}> (key: {key_lower})")
+                        # Enhanced debugging for global metadata
+                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                            current_app.logger.error(f"❌ CRITICAL: Global metadata '{key_lower}' not found in flat_data_map!")
+                            current_app.logger.error(f"❌ Available keys in flat_data_map: {list(flat_data_map.keys())}")
+                            current_app.logger.error(f"❌ Available keys in text_map: {list(text_map.keys())}")
             
             # Then, handle placeholders that might be split across multiple runs
             # Get the full paragraph text to find all placeholders
             full_text = paragraph.text
-            all_matches = re.findall(r"\$\{(.*?)\}", full_text)
             
+            # Handle ${} format placeholders across multiple runs
+            all_matches = re.findall(r"\$\{(.*?)\}", full_text)
             for match in all_matches:
                 key_lower = match.lower().strip()
                 val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                 if val:
                     placeholder = f"${{{match}}}"
                     if placeholder in full_text:
+                        # Log replacements for growth rates, CAGR, and global metadata
+                        if 'kpi2' in key_lower or 'cgrp' in key_lower or key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                            current_app.logger.info(f"🔄 TABLE REPLACEMENT (multi-run): ${{{match}}} -> {val}")
+                        
+                        # Clear all runs and recreate with replacement
+                        for run in paragraph.runs:
+                            run.text = ""
+                        # Set the first run to the replaced text
+                        if paragraph.runs:
+                            paragraph.runs[0].text = full_text.replace(placeholder, str(val))
+                        else:
+                            # If no runs exist, create one
+                            paragraph.add_run(full_text.replace(placeholder, str(val)))
+                        break  # Only process one placeholder at a time to avoid conflicts
+            
+            # Handle <> format placeholders across multiple runs
+            all_angle_matches = re.findall(r"<(.*?)>", full_text)
+            for match in all_angle_matches:
+                key_lower = match.lower().strip()
+                val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                if val:
+                    placeholder = f"<{match}>"
+                    if placeholder in full_text:
+                        # Log replacements for global metadata
+                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                            current_app.logger.info(f"🔄 ANGLE REPLACEMENT (multi-run): <{match}> -> {val}")
+                        
                         # Clear all runs and recreate with replacement
                         for run in paragraph.runs:
                             run.text = ""
@@ -264,6 +495,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         break  # Only process one placeholder at a time to avoid conflicts
 
         def replace_text_in_tables():
+            nonlocal doc, flat_data_map, text_map  # Access variables from outer scope
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
@@ -271,6 +503,416 @@ def _generate_report(project_id, template_path, data_file_path):
                             replace_text_in_paragraph(para)
             
             # Table processing completed silently
+
+        def process_entire_document():
+            """Process the entire document comprehensively to catch all placeholders"""
+            nonlocal doc, flat_data_map, text_map  # Access variables from outer scope
+            current_app.logger.info("🔄 PROCESSING ENTIRE DOCUMENT COMPREHENSIVELY")
+            
+            # Find ALL placeholders in the entire document first
+            current_app.logger.info("🔍 SEARCHING FOR ALL PLACEHOLDERS IN ENTIRE DOCUMENT")
+            
+            all_placeholders_found = set()
+            
+            # Search through ALL paragraphs, tables, headers, footers, etc.
+            def search_for_placeholders(container):
+                """Search for placeholders in any container (document, table, header, footer)"""
+                if hasattr(container, 'paragraphs'):
+                    for para in container.paragraphs:
+                        if para.text:
+                            current_app.logger.debug(f"🔍 Searching paragraph: '{para.text}'")
+                            # Find ${} placeholders
+                            dollar_matches = re.findall(r"\$\{(.*?)\}", para.text)
+                            for match in dollar_matches:
+                                all_placeholders_found.add(f"${{{match}}}")
+                                current_app.logger.debug(f"  ✅ Found $ placeholder: ${{{match}}}")
+                            
+                            # Find <> placeholders
+                            angle_matches = re.findall(r"<(.*?)>", para.text)
+                            for match in angle_matches:
+                                all_placeholders_found.add(f"<{match}>")
+                                current_app.logger.debug(f"  ✅ Found <> placeholder: <{match}>")
+                
+                if hasattr(container, 'tables'):
+                    for table in container.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                search_for_placeholders(cell)
+            
+            # Search in main document
+            search_for_placeholders(doc)
+            
+            # Search in headers and footers
+            for section in doc.sections:
+                if section.header:
+                    search_for_placeholders(section.header)
+                if section.footer:
+                    search_for_placeholders(section.footer)
+            
+            # Additional search: Look at raw XML for any missed placeholders
+            current_app.logger.info("🔍 ADDITIONAL SEARCH: Looking at raw XML for missed placeholders")
+            try:
+                for element in doc.element.iter():
+                    if hasattr(element, 'text') and element.text:
+                        # Find ${} placeholders
+                        dollar_matches = re.findall(r"\$\{(.*?)\}", element.text)
+                        for match in dollar_matches:
+                            all_placeholders_found.add(f"${{{match}}}")
+                            current_app.logger.debug(f"  ✅ Found $ placeholder in XML: ${{{match}}}")
+                        
+                        # Find <> placeholders
+                        angle_matches = re.findall(r"<(.*?)>", element.text)
+                        for match in angle_matches:
+                            all_placeholders_found.add(f"<{match}>")
+                            current_app.logger.debug(f"  ✅ Found <> placeholder in XML: <{match}>")
+            except Exception as e:
+                current_app.logger.warning(f"⚠️ Error in additional XML search: {e}")
+            
+            current_app.logger.info(f"🔍 Found {len(all_placeholders_found)} unique placeholders: {list(all_placeholders_found)}")
+            
+            # Log specific global metadata placeholders found
+            global_placeholders_found = [p for p in all_placeholders_found if any(key in p.lower() for key in ['country', 'report_name', 'report_code', 'currency'])]
+            current_app.logger.info(f"🔍 Global metadata placeholders found: {global_placeholders_found}")
+            
+            # Verify that we have data for all found global metadata placeholders
+            for placeholder in global_placeholders_found:
+                if placeholder.startswith('${'):
+                    key = placeholder[2:-1].lower()
+                elif placeholder.startswith('<') and placeholder.endswith('>'):
+                    key = placeholder[1:-1].lower()
+                else:
+                    continue
+                
+                if key in ['country', 'report_name', 'report_code', 'currency']:
+                    if key in flat_data_map:
+                        current_app.logger.info(f"✅ Data available for {placeholder}: {flat_data_map[key]}")
+                    else:
+                        current_app.logger.error(f"❌ NO DATA AVAILABLE for {placeholder} (key: {key})")
+                        current_app.logger.error(f"❌ Available keys: {list(flat_data_map.keys())}")
+            
+            # Now replace ALL placeholders everywhere they appear
+            current_app.logger.info("🔄 REPLACING ALL PLACEHOLDERS EVERYWHERE")
+            
+            # Multiple passes to ensure we catch everything
+            for pass_num in range(3):
+                current_app.logger.info(f"🔄 Pass {pass_num + 1}/3: Processing all document elements...")
+                
+                # Process main document
+                for para in doc.paragraphs:
+                    replace_text_in_paragraph(para)
+                
+                # Process tables
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for para in cell.paragraphs:
+                                replace_text_in_paragraph(para)
+                
+                # Process headers and footers
+                for section in doc.sections:
+                    if section.header:
+                        for para in section.header.paragraphs:
+                            replace_text_in_paragraph(para)
+                        for table in section.header.tables:
+                            for row in table.rows:
+                                for cell in row.cells:
+                                    for para in cell.paragraphs:
+                                        replace_text_in_paragraph(para)
+                    
+                    if section.footer:
+                        for para in section.footer.paragraphs:
+                            replace_text_in_paragraph(para)
+                        for table in section.footer.tables:
+                            for row in table.rows:
+                                for cell in row.cells:
+                                    for para in cell.paragraphs:
+                                        replace_text_in_paragraph(para)
+                
+                # Process XML elements that might contain placeholders (like cover page content)
+                current_app.logger.info(f"🔄 Pass {pass_num + 1}/3: Processing XML elements for special content...")
+                try:
+                    for element in doc.element.iter():
+                        if hasattr(element, 'text') and element.text:
+                            # Check if this element contains any placeholders we need to replace
+                            original_text = element.text
+                            modified_text = original_text
+                            
+                            # Replace ${} placeholders
+                            for placeholder in all_placeholders_found:
+                                if placeholder.startswith('${'):
+                                    key = placeholder[2:-1].lower()  # Remove ${} and convert to lowercase
+                                    if key in flat_data_map:
+                                        value = flat_data_map[key]
+                                        modified_text = modified_text.replace(placeholder, str(value))
+                                        current_app.logger.info(f"🔄 XML REPLACEMENT: {placeholder} -> {value} (in XML element)")
+                            
+                            # Replace <> placeholders
+                            for placeholder in all_placeholders_found:
+                                if placeholder.startswith('<') and placeholder.endswith('>'):
+                                    key = placeholder[1:-1].lower()  # Remove <> and convert to lowercase
+                                    if key in flat_data_map:
+                                        value = flat_data_map[key]
+                                        modified_text = modified_text.replace(placeholder, str(value))
+                                        current_app.logger.info(f"🔄 XML REPLACEMENT: {placeholder} -> {value} (in XML element)")
+                            
+                            # Update the element text if it was modified
+                            if modified_text != original_text:
+                                element.text = modified_text
+                                current_app.logger.info(f"🔄 XML ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
+                except Exception as e:
+                    current_app.logger.warning(f"⚠️ Error processing XML elements: {e}")
+            
+            current_app.logger.info("✅ COMPREHENSIVE DOCUMENT PROCESSING COMPLETED")
+            
+            # Additional pass: Handle special Word elements that might contain placeholders
+            current_app.logger.info("🔄 FINAL PASS: Processing special Word elements...")
+            
+            # Process text boxes and other special elements
+            try:
+                for shape in doc.inline_shapes:
+                    if hasattr(shape, 'text_frame'):
+                        for para in shape.text_frame.paragraphs:
+                            replace_text_in_paragraph(para)
+            except Exception as e:
+                current_app.logger.warning(f"⚠️ Error processing inline shapes: {e}")
+            
+            # Process any remaining XML elements that might contain placeholders
+            try:
+                for element in doc.element.iter():
+                    if hasattr(element, 'text') and element.text:
+                        original_text = element.text
+                        modified_text = original_text
+                        
+                        # Replace all known placeholders in this element
+                        for key, value in flat_data_map.items():
+                            if key in ['country', 'report_name', 'report_code', 'currency']:
+                                # Try both ${} and <> formats
+                                dollar_placeholder = f"${{{key}}}"
+                                angle_placeholder = f"<{key}>"
+                                
+                                if dollar_placeholder in modified_text:
+                                    modified_text = modified_text.replace(dollar_placeholder, str(value))
+                                    current_app.logger.info(f"🔄 FINAL XML REPLACEMENT: {dollar_placeholder} -> {value}")
+                                
+                                if angle_placeholder in modified_text:
+                                    modified_text = modified_text.replace(angle_placeholder, str(value))
+                                    current_app.logger.info(f"🔄 FINAL XML REPLACEMENT: {angle_placeholder} -> {value}")
+                        
+                        # Update the element if modified
+                        if modified_text != original_text:
+                            element.text = modified_text
+                            current_app.logger.info(f"🔄 FINAL XML ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
+            except Exception as e:
+                current_app.logger.warning(f"⚠️ Error in final XML processing: {e}")
+            
+            current_app.logger.info("✅ FINAL PASS COMPLETED")
+            
+            # ULTIMATE PASS: Force replacement of all global metadata placeholders anywhere in the document
+            current_app.logger.info("🔄 ULTIMATE PASS: Force replacement of all global metadata placeholders...")
+            
+            # Get all global metadata values
+            global_metadata_values = {
+                'country': flat_data_map.get('country', ''),
+                'report_name': flat_data_map.get('report_name', ''),
+                'report_code': flat_data_map.get('report_code', ''),
+                'currency': flat_data_map.get('currency', '')
+            }
+            
+            current_app.logger.info(f"📋 Global metadata values for ultimate replacement: {global_metadata_values}")
+            
+            # Force replacement in ALL possible locations
+            def force_replace_in_element(element):
+                """Force replace placeholders in any element that has text"""
+                if hasattr(element, 'text') and element.text:
+                    original_text = element.text
+                    modified_text = original_text
+                    
+                    # Replace all possible formats of global metadata placeholders
+                    for key, value in global_metadata_values.items():
+                        if value:  # Only replace if we have a value
+                            # Try all possible case variations
+                            variations = [
+                                f"${{{key}}}",
+                                f"${{{key.upper()}}}",
+                                f"${{{key.title()}}}",
+                                f"<{key}>",
+                                f"<{key.upper()}>",
+                                f"<{key.title()}>",
+                                f"<{key.replace('_', '')}>",
+                                f"<{key.replace('_', '').upper()}>",
+                                f"<{key.replace('_', '').title()}>"
+                            ]
+                            
+                            for variation in variations:
+                                if variation in modified_text:
+                                    modified_text = modified_text.replace(variation, str(value))
+                                    current_app.logger.info(f"🔄 ULTIMATE REPLACEMENT: {variation} -> {value}")
+                    
+                    # Update the element if modified
+                    if modified_text != original_text:
+                        element.text = modified_text
+                        current_app.logger.info(f"🔄 ULTIMATE ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
+            
+            # Process ALL possible document elements
+            try:
+                # Process main document paragraphs
+                for para in doc.paragraphs:
+                    force_replace_in_element(para)
+                
+                # Process tables
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            force_replace_in_element(cell)
+                            for para in cell.paragraphs:
+                                force_replace_in_element(para)
+                
+                # Process headers and footers
+                for section in doc.sections:
+                    if section.header:
+                        force_replace_in_element(section.header)
+                        for para in section.header.paragraphs:
+                            force_replace_in_element(para)
+                        for table in section.header.tables:
+                            for row in table.rows:
+                                for cell in row.cells:
+                                    force_replace_in_element(cell)
+                                    for para in cell.paragraphs:
+                                        force_replace_in_element(para)
+                    
+                    if section.footer:
+                        force_replace_in_element(section.footer)
+                        for para in section.footer.paragraphs:
+                            force_replace_in_element(para)
+                        for table in section.footer.tables:
+                            for row in table.rows:
+                                for cell in row.cells:
+                                    force_replace_in_element(cell)
+                                    for para in cell.paragraphs:
+                                        force_replace_in_element(para)
+                
+                # Process inline shapes (text boxes, etc.)
+                for shape in doc.inline_shapes:
+                    if hasattr(shape, 'text_frame'):
+                        force_replace_in_element(shape.text_frame)
+                        for para in shape.text_frame.paragraphs:
+                            force_replace_in_element(para)
+                
+                # Process ALL XML elements recursively
+                def process_xml_element(element):
+                    """Recursively process all XML elements"""
+                    force_replace_in_element(element)
+                    
+                    # Process child elements
+                    for child in element:
+                        process_xml_element(child)
+                
+                # Process the entire document XML
+                process_xml_element(doc.element)
+                
+            except Exception as e:
+                current_app.logger.error(f"❌ Error in ultimate pass: {e}")
+                import traceback
+                current_app.logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            
+            current_app.logger.info("✅ ULTIMATE PASS COMPLETED")
+            
+            # NUCLEAR OPTION: Direct XML manipulation to catch everything
+            current_app.logger.info("🔄 NUCLEAR OPTION: Direct XML manipulation...")
+            
+            try:
+                # Convert document to XML string
+                xml_content = doc._element.xml
+                original_xml = xml_content
+                
+                # Replace all possible variations in the XML directly
+                for key, value in global_metadata_values.items():
+                    if value:
+                        # Create all possible variations
+                        variations = [
+                            f"${{{key}}}",
+                            f"${{{key.upper()}}}",
+                            f"${{{key.title()}}}",
+                            f"<{key}>",
+                            f"<{key.upper()}>",
+                            f"<{key.title()}>",
+                            f"<{key.replace('_', '')}>",
+                            f"<{key.replace('_', '').upper()}>",
+                            f"<{key.replace('_', '').title()}>",
+                            # Add more variations for common naming patterns
+                            f"<{key.replace('_', ' ')}>",
+                            f"<{key.replace('_', ' ').title()}>",
+                            f"<{key.replace('_', ' ').upper()}>"
+                        ]
+                        
+                        for variation in variations:
+                            if variation in xml_content:
+                                xml_content = xml_content.replace(variation, str(value))
+                                current_app.logger.info(f"🔄 NUCLEAR XML REPLACEMENT: {variation} -> {value}")
+                
+                # If XML was modified, reload the document
+                if xml_content != original_xml:
+                    current_app.logger.info("🔄 XML was modified, reloading document...")
+                    # Create a temporary file with the modified XML
+                    import tempfile
+                    import os
+                    
+                    with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp:
+                        tmp_path = tmp.name
+                    
+                    # Save the current document
+                    doc.save(tmp_path)
+                    
+                    # Reload the document to ensure changes are applied
+                    doc = Document(tmp_path)
+                    
+                    # Clean up temp file
+                    os.unlink(tmp_path)
+                    
+                    current_app.logger.info("✅ Document reloaded with XML modifications")
+                else:
+                    current_app.logger.info("ℹ️ No XML modifications needed")
+                    
+            except Exception as e:
+                current_app.logger.error(f"❌ Error in nuclear XML manipulation: {e}")
+                import traceback
+                current_app.logger.error(f"❌ Traceback: {traceback.format_exc()}")
+            
+            current_app.logger.info("✅ NUCLEAR OPTION COMPLETED")
+            
+            # FINAL VERIFICATION: Search for any remaining placeholders
+            current_app.logger.info("🔍 FINAL VERIFICATION: Checking for any remaining placeholders...")
+            
+            def search_for_remaining_placeholders(element, path=""):
+                """Recursively search for any remaining placeholders"""
+                if hasattr(element, 'text') and element.text:
+                    text = element.text
+                    
+                    # Check for any remaining ${} placeholders
+                    dollar_matches = re.findall(r"\$\{(.*?)\}", text)
+                    for match in dollar_matches:
+                        key_lower = match.lower().strip()
+                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                            current_app.logger.error(f"❌ REMAINING PLACEHOLDER FOUND: ${{{match}}} in {path}")
+                            current_app.logger.error(f"❌ Available data for {key_lower}: {flat_data_map.get(key_lower, 'NOT FOUND')}")
+                    
+                    # Check for any remaining <> placeholders
+                    angle_matches = re.findall(r"<(.*?)>", text)
+                    for match in angle_matches:
+                        key_lower = match.lower().strip()
+                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                            current_app.logger.error(f"❌ REMAINING PLACEHOLDER FOUND: <{match}> in {path}")
+                            current_app.logger.error(f"❌ Available data for {key_lower}: {flat_data_map.get(key_lower, 'NOT FOUND')}")
+                
+                # Recursively check child elements
+                for i, child in enumerate(element):
+                    child_path = f"{path}.{i}" if path else str(i)
+                    search_for_remaining_placeholders(child, child_path)
+            
+            # Search the entire document
+            search_for_remaining_placeholders(doc.element, "document")
+            
+            current_app.logger.info("✅ FINAL VERIFICATION COMPLETED")
 
 
                             
@@ -345,6 +987,42 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION COMPLETED")
 
+                # --- Define chart type mappings for Matplotlib ---
+                chart_type_mapping_mpl = {
+                    # Bar charts
+                    "bar": "bar",
+                    "column": "bar", 
+                    "stacked_column": "bar",
+                    "horizontal_bar": "barh",
+                    
+                    # Line charts
+                    "line": "plot",
+                    "scatter": "scatter",
+                    "scatter_line": "plot",
+                    
+                    # Area charts
+                    "area": "fill_between",
+                    "filled_area": "fill_between",
+                    
+                    # Statistical charts
+                    "histogram": "hist",
+                    "box": "boxplot",
+                    "violin": "violinplot",
+                    
+                    # Other charts
+                    "bubble": "scatter",
+                    "heatmap": "imshow",
+                    "contour": "contour",
+                    "waterfall": "bar",
+                    "funnel": "bar",
+                    "sunburst": "pie",
+                    "treemap": "bar",
+                    "icicle": "bar",
+                    "sankey": "bar",
+                    "table": "table",
+                    "indicator": "bar"
+                }
+
                 # --- Extract custom fields from chart_config ---
                 bar_colors = chart_config.get("bar_colors")
                 bar_width = data_dict.get("bar_width") or chart_config.get("bar_width") or chart_meta.get("bar_width")
@@ -374,10 +1052,25 @@ def _generate_report(project_id, template_path, data_file_path):
                 current_app.logger.debug(f"Y-axis min/max from config: {y_axis_min_max}")
                 secondary_y_axis_format = data_dict.get("secondary_y_axis_format") or chart_config.get("secondary_y_axis_format") or chart_meta.get("secondary_y_axis_format")
                 secondary_y_axis_min_max = data_dict.get("secondary_y_axis_min_max") or chart_config.get("secondary_y_axis_min_max") or chart_meta.get("secondary_y_axis_min_max")
+                disable_secondary_y = data_dict.get("disable_secondary_y") or chart_config.get("disable_secondary_y") or chart_meta.get("disable_secondary_y", False)
+                current_app.logger.info(f"🔧 disable_secondary_y setting: {disable_secondary_y}")
                 sort_order = data_dict.get("sort_order") or chart_config.get("sort_order") or chart_meta.get("sort_order")
                 data_grouping = data_dict.get("data_grouping") or chart_config.get("data_grouping") or chart_meta.get("data_grouping")
                 annotations = data_dict.get("annotations", []) or chart_config.get("annotations", []) or chart_meta.get("annotations", [])
                 axis_tick_font_size = data_dict.get("axis_tick_font_size") or chart_config.get("axis_tick_font_size") or chart_meta.get("axis_tick_font_size")
+                
+                # --- Extract tick mark control settings ---
+                show_x_ticks = data_dict.get("show_x_ticks") if "show_x_ticks" in data_dict else (chart_config.get("show_x_ticks") if "show_x_ticks" in chart_config else chart_meta.get("show_x_ticks"))
+                show_y_ticks = data_dict.get("show_y_ticks") if "show_y_ticks" in data_dict else (chart_config.get("show_y_ticks") if "show_y_ticks" in chart_config else chart_meta.get("show_y_ticks"))
+                # Ensure tick settings are boolean
+                if isinstance(show_x_ticks, str):
+                    show_x_ticks = show_x_ticks.strip().lower() == "true"
+                elif show_x_ticks is None:
+                    show_x_ticks = True  # Default to showing ticks if not specified
+                if isinstance(show_y_ticks, str):
+                    show_y_ticks = show_y_ticks.strip().lower() == "true"
+                elif show_y_ticks is None:
+                    show_y_ticks = True  # Default to showing ticks if not specified
                 
                 # --- Extract margin settings ---
                 margin = data_dict.get("margin") or chart_config.get("margin") or chart_meta.get("margin")
@@ -435,8 +1128,33 @@ def _generate_report(project_id, template_path, data_file_path):
                     wb.close()
                 
                 # Use updated values from series_meta after extraction
-                    series_data = series_meta.get("data", [])
-                    x_values = series_meta.get("x_axis", [])
+                series_data = series_meta.get("data", [])
+                if not series_data and "series" in series_meta:
+                    # Handle case where data is directly in series object
+                    series_data = series_meta.get("series", [])
+                
+                # Extract x_values from the correct location
+                x_values = series_meta.get("x_axis", [])
+                if not x_values and "series" in series_meta:
+                    # Try to get x_axis from the series object
+                    x_values = series_meta.get("series", {}).get("x_axis", [])
+                
+                # If still no x_values, try to get from the first series data item
+                if not x_values and series_data and len(series_data) > 0:
+                    # Check if x_axis is in the first series
+                    first_series = series_data[0]
+                    if isinstance(first_series, dict) and "x_axis" in first_series:
+                        x_values = first_series["x_axis"]
+                    # Also check if there's a separate x_axis in the series object
+                    elif "series" in series_meta and isinstance(series_meta["series"], dict):
+                        x_values = series_meta["series"].get("x_axis", [])
+                
+                current_app.logger.info(f"🔍 Extracted x_values: {x_values}")
+                
+                # Ensure x_values is always defined to prevent "cannot access local variable" error
+                if not x_values:
+                    x_values = []
+                    current_app.logger.warning(f"⚠️ No x_values found, using empty list as fallback")
                 
                 colors = series_meta.get("colors", [])
                 
@@ -444,6 +1162,9 @@ def _generate_report(project_id, template_path, data_file_path):
                 current_app.logger.info(f"🔍 SERIES ATTRIBUTE DETECTION STARTED")
                 current_app.logger.info(f"📊 Number of series: {len(series_data)}")
                 current_app.logger.info(f"📋 Series meta keys: {list(series_data.keys()) if isinstance(series_data, dict) else 'N/A'}")
+                current_app.logger.info(f"📋 Series meta structure: {series_meta}")
+                current_app.logger.info(f"📋 Series data: {series_data}")
+                current_app.logger.info(f"📋 X values extracted: {x_values}")
                 
                 # Define all possible series attributes
                 all_possible_series_attributes = [
@@ -505,6 +1226,35 @@ def _generate_report(project_id, template_path, data_file_path):
                             current_app.logger.debug(f"Extracted other_values from {chart_meta.get('other_values')}: {other_values}")
                         except Exception as e:
                             current_app.logger.warning(f"Failed to extract other_values from {other_values}: {e}")
+                    
+                    # Log the extracted data for debugging
+                    current_app.logger.info(f"🔍 Bar of Pie Chart Data:")
+                    current_app.logger.info(f"   Other Labels: {other_labels}")
+                    current_app.logger.info(f"   Other Values: {other_values}")
+                    current_app.logger.info(f"   Other Colors: {other_colors}")
+                    
+                    # Check for empty/null values
+                    if other_labels and other_values:
+                        empty_count = sum(1 for label, value in zip(other_labels, other_values) 
+                                        if (label is None or str(label).strip() == "" or 
+                                            value is None or str(value).strip() == "" or 
+                                            str(value).strip() == "0"))
+                        if empty_count > 0:
+                            current_app.logger.warning(f"⚠️ Found {empty_count} empty/null values in bar chart data")
+                            current_app.logger.warning(f"   This will cause missing bars in the chart")
+                        
+                        # Log data types and values for debugging
+                        current_app.logger.info(f"🔍 Data Analysis:")
+                        for i, (label, value) in enumerate(zip(other_labels, other_values)):
+                            current_app.logger.info(f"   Data point {i+1}: Label='{label}' (type: {type(label).__name__}), Value={value} (type: {type(value).__name__})")
+                            if isinstance(value, (int, float)):
+                                current_app.logger.info(f"      Numeric value: {value}")
+                            elif isinstance(value, str):
+                                try:
+                                    numeric_val = float(value)
+                                    current_app.logger.info(f"      String converted to numeric: {numeric_val}")
+                                except ValueError:
+                                    current_app.logger.warning(f"      Non-numeric string value: '{value}'")
                     
                     value_format = chart_meta.get("value_format", "")
                     labels = series_meta.get("labels", x_values)
@@ -621,11 +1371,11 @@ def _generate_report(project_id, template_path, data_file_path):
                         label = series.get("name", f"Series {i+1}")
                         series_type = series.get("type", "bar").lower()
                         
-                        # Special handling for heatmap charts - skip standard data processing
+                        # Map heatmap to imshow for Matplotlib
                         if series_type == "heatmap":
-                            # Heatmap data is already in the correct format (x, y, z, text)
-                            # Skip the standard y_vals extraction and processing
-                            continue
+                            mpl_chart_type = "imshow"
+                        else:
+                            mpl_chart_type = chart_type_mapping_mpl.get(series_type, "scatter")
                         
                         color = None
                         if "marker" in series and isinstance(series["marker"], dict) and "color" in series["marker"]:
@@ -1124,6 +1874,17 @@ def _generate_report(project_id, template_path, data_file_path):
                             layout_updates["xaxis"]["ticklen"] = axis_tick_distance
                             layout_updates["yaxis"]["ticklen"] = axis_tick_distance
 
+                # Tick mark control for Plotly
+                if show_x_ticks is not None or show_y_ticks is not None:
+                    layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                    layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                    if show_x_ticks is not None:
+                        layout_updates["xaxis"]["showticklabels"] = bool(show_x_ticks)
+                        layout_updates["xaxis"]["ticks"] = "" if not show_x_ticks else "outside"
+                    if show_y_ticks is not None:
+                        layout_updates["yaxis"]["showticklabels"] = bool(show_y_ticks)
+                        layout_updates["yaxis"]["ticks"] = "" if not show_y_ticks else "outside"
+
                 fig.update_layout(**layout_updates)
 
                 # --- Matplotlib static chart for DOCX ---
@@ -1242,8 +2003,8 @@ def _generate_report(project_id, template_path, data_file_path):
                         
                 elif chart_type in ["bar of pie", "bar_of_pie"]:
                     # Matplotlib version of bar of pie
-                    mpl_figsize = figsize if figsize else (15, 8)
-                    fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=mpl_figsize, dpi=200)
+                    mpl_figsize = figsize if figsize else (10, 5)
+                    fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=mpl_figsize, dpi=200, gridspec_kw={'width_ratios': [2, 1]})
                     
                     # Apply background colors to Matplotlib figure
                     if chart_background:
@@ -1272,36 +2033,70 @@ def _generate_report(project_id, template_path, data_file_path):
                         autotext.set_color('white')
                         autotext.set_fontweight('bold')
                     ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
-                    # Bar chart
-                    if other_colors:
-                        ax2.bar(other_labels, other_values, color=other_colors, alpha=0.7)
-                    else:
-                        ax2.bar(other_labels, other_values, color=colors if colors else None, alpha=0.7)
-                    ax2.set_title("Breakdown of 'Other'", fontsize=font_size or 12, weight='bold')
-                    ax2.set_ylabel("Value")
-                    for i, v in enumerate(other_values):
-                        ax2.text(i, v, f"{v}", ha='center', va='bottom', fontweight='bold')
-                    
-                    # Add legend for bar of pie chart
+                    # Move legend outside
                     show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                    legend_font_size = chart_meta.get("legend_font_size", 8)
                     if show_legend:
-                        # Initialize legend_loc for bar of pie charts
-                        legend_loc = 'best'  # default
-                        if legend_position:
-                            loc_map = {
-                                "top": "upper center",
-                                "bottom": "lower center", 
-                                "left": "center left",
-                                "right": "center right"
-                            }
-                            legend_loc = loc_map.get(legend_position, 'best')
+                        ax1.legend(wedges, labels, loc='center left', bbox_to_anchor=(1, 0.5), fontsize=legend_font_size)
+                    
+                    # Bar chart - Filter out empty/null values first
+                    filtered_data = []
+                    for label, value in zip(other_labels, other_values):
+                        if (label is not None and str(label).strip() != "" and 
+                            value is not None and str(value).strip() != "" and 
+                            str(value).strip() != "0"):
+                            filtered_data.append((label, value))
+                    
+                    if filtered_data:
+                        filtered_labels, filtered_values = zip(*filtered_data)
+                    else:
+                        filtered_labels, filtered_values = [], []
+                    
+                    # Create individual bars (not stacked)
+                    if filtered_labels and filtered_values:
+                        # Use individual colors for each bar
+                        bar_colors = []
+                        for i in range(len(filtered_labels)):
+                            if other_colors and i < len(other_colors):
+                                bar_colors.append(other_colors[i])
+                            elif colors and i < len(colors):
+                                bar_colors.append(colors[i])
+                            else:
+                                bar_colors.append('#1f77b4')  # Default blue
                         
-                        # Force legend to bottom if specified
-                        if legend_position == "bottom":
-                            ax1.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                        bars = ax2.bar(range(len(filtered_labels)), filtered_values, color=bar_colors, alpha=0.7)
+                    else:
+                        bars = []
+                    
+                    expanded_segment = chart_meta.get("expanded_segment", "Other")
+                    ax2.set_title(f"Breakdown of '{expanded_segment}'", fontsize=font_size or 12, weight='bold')
+                    # Use proper Y-axis label from configuration
+                    y_axis_title = chart_meta.get("y_axis_title", "Value")
+                    ax2.set_ylabel(y_axis_title, fontsize=label_fontsize if 'label_fontsize' in locals() else 10)
+                    # Set X-axis label
+                    x_axis_title = chart_meta.get("x_axis_title", "Categories")
+                    ax2.set_xlabel(x_axis_title, fontsize=label_fontsize if 'label_fontsize' in locals() else 10)
+                    # Set x-tick labels for filtered data
+                    if filtered_labels:
+                        ax2.set_xticks(range(len(filtered_labels)))
+                        ax2.set_xticklabels(filtered_labels, rotation=0)
+                    # Add data labels with proper formatting
+                    value_format = chart_meta.get("value_format", ".2f")
+                    data_label_font_size = chart_meta.get("data_label_font_size", 10)
+                    data_label_color = chart_meta.get("data_label_color", "#000000")
+                    for bar, v in zip(bars, filtered_values):
+                        if value_format == "value":
+                            formatted_value = str(v)
+                        elif value_format == ".2f":
+                            formatted_value = f"{v:.2f}"
+                        elif value_format == ".1f":
+                            formatted_value = f"{v:.1f}"
+                        elif value_format == ".0f":
+                            formatted_value = f"{v:.0f}"
                         else:
-                            ax1.legend(wedges, labels, loc=legend_loc, fontsize=legend_font_size)
-                
+                            formatted_value = f"{v:{value_format}}"
+                        ax2.text(bar.get_x() + bar.get_width()/2, v, formatted_value, ha='center', va='bottom', fontweight='bold', fontsize=data_label_font_size, color=data_label_color)
+
                 else:
                     # Bar, line, area charts
                     mpl_figsize = figsize if figsize else (10, 6)
@@ -1320,11 +2115,11 @@ def _generate_report(project_id, template_path, data_file_path):
                         label = series.get("name", f"Series {i+1}")
                         series_type = series.get("type", "bar").lower()
                         
-                        # Special handling for heatmap charts - skip standard data processing
+                        # Map heatmap to imshow for Matplotlib
                         if series_type == "heatmap":
-                            # Heatmap data is already in the correct format (x, y, z, text)
-                            # Skip the standard y_vals extraction and processing
-                            continue
+                            mpl_chart_type = "imshow"
+                        else:
+                            mpl_chart_type = chart_type_mapping_mpl.get(series_type, "scatter")
                         
                         color = None
                         if "marker" in series and isinstance(series["marker"], dict) and "color" in series["marker"]:
@@ -1861,6 +2656,17 @@ def _generate_report(project_id, template_path, data_file_path):
                             layout_updates["xaxis"]["ticklen"] = axis_tick_distance
                             layout_updates["yaxis"]["ticklen"] = axis_tick_distance
 
+                # Tick mark control for Plotly
+                if show_x_ticks is not None or show_y_ticks is not None:
+                    layout_updates["xaxis"] = layout_updates.get("xaxis", {})
+                    layout_updates["yaxis"] = layout_updates.get("yaxis", {})
+                    if show_x_ticks is not None:
+                        layout_updates["xaxis"]["showticklabels"] = bool(show_x_ticks)
+                        layout_updates["xaxis"]["ticks"] = "" if not show_x_ticks else "outside"
+                    if show_y_ticks is not None:
+                        layout_updates["yaxis"]["showticklabels"] = bool(show_y_ticks)
+                        layout_updates["yaxis"]["ticks"] = "" if not show_y_ticks else "outside"
+
                 fig.update_layout(**layout_updates)
 
                 # --- Matplotlib static chart for DOCX ---
@@ -1979,8 +2785,8 @@ def _generate_report(project_id, template_path, data_file_path):
                         
                 elif chart_type in ["bar of pie", "bar_of_pie"]:
                     # Matplotlib version of bar of pie
-                    mpl_figsize = figsize if figsize else (15, 8)
-                    fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=mpl_figsize, dpi=200)
+                    mpl_figsize = figsize if figsize else (10, 5)
+                    fig_mpl, (ax1, ax2) = plt.subplots(1, 2, figsize=mpl_figsize, dpi=200, gridspec_kw={'width_ratios': [2, 1]})
                     
                     # Apply background colors to Matplotlib figure
                     if chart_background:
@@ -2009,36 +2815,70 @@ def _generate_report(project_id, template_path, data_file_path):
                         autotext.set_color('white')
                         autotext.set_fontweight('bold')
                     ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
-                    # Bar chart
-                    if other_colors:
-                        ax2.bar(other_labels, other_values, color=other_colors, alpha=0.7)
-                    else:
-                        ax2.bar(other_labels, other_values, color=colors if colors else None, alpha=0.7)
-                    ax2.set_title("Breakdown of 'Other'", fontsize=font_size or 12, weight='bold')
-                    ax2.set_ylabel("Value")
-                    for i, v in enumerate(other_values):
-                        ax2.text(i, v, f"{v}", ha='center', va='bottom', fontweight='bold')
-                    
-                    # Add legend for bar of pie chart
+                    # Move legend outside
                     show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                    legend_font_size = chart_meta.get("legend_font_size", 8)
                     if show_legend:
-                        # Initialize legend_loc for bar of pie charts
-                        legend_loc = 'best'  # default
-                        if legend_position:
-                            loc_map = {
-                                "top": "upper center",
-                                "bottom": "lower center", 
-                                "left": "center left",
-                                "right": "center right"
-                            }
-                            legend_loc = loc_map.get(legend_position, 'best')
+                        ax1.legend(wedges, labels, loc='center left', bbox_to_anchor=(1, 0.5), fontsize=legend_font_size)
+                    
+                    # Bar chart - Filter out empty/null values first
+                    filtered_data = []
+                    for label, value in zip(other_labels, other_values):
+                        if (label is not None and str(label).strip() != "" and 
+                            value is not None and str(value).strip() != "" and 
+                            str(value).strip() != "0"):
+                            filtered_data.append((label, value))
+                    
+                    if filtered_data:
+                        filtered_labels, filtered_values = zip(*filtered_data)
+                    else:
+                        filtered_labels, filtered_values = [], []
+                    
+                    # Create individual bars (not stacked)
+                    if filtered_labels and filtered_values:
+                        # Use individual colors for each bar
+                        bar_colors = []
+                        for i in range(len(filtered_labels)):
+                            if other_colors and i < len(other_colors):
+                                bar_colors.append(other_colors[i])
+                            elif colors and i < len(colors):
+                                bar_colors.append(colors[i])
+                            else:
+                                bar_colors.append('#1f77b4')  # Default blue
                         
-                        # Force legend to bottom if specified
-                        if legend_position == "bottom":
-                            ax1.legend(wedges, labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                        bars = ax2.bar(range(len(filtered_labels)), filtered_values, color=bar_colors, alpha=0.7)
+                    else:
+                        bars = []
+                    
+                    expanded_segment = chart_meta.get("expanded_segment", "Other")
+                    ax2.set_title(f"Breakdown of '{expanded_segment}'", fontsize=font_size or 12, weight='bold')
+                    # Use proper Y-axis label from configuration
+                    y_axis_title = chart_meta.get("y_axis_title", "Value")
+                    ax2.set_ylabel(y_axis_title, fontsize=label_fontsize if 'label_fontsize' in locals() else 10)
+                    # Set X-axis label
+                    x_axis_title = chart_meta.get("x_axis_title", "Categories")
+                    ax2.set_xlabel(x_axis_title, fontsize=label_fontsize if 'label_fontsize' in locals() else 10)
+                    # Set x-tick labels for filtered data
+                    if filtered_labels:
+                        ax2.set_xticks(range(len(filtered_labels)))
+                        ax2.set_xticklabels(filtered_labels, rotation=0)
+                    # Add data labels with proper formatting
+                    value_format = chart_meta.get("value_format", ".2f")
+                    data_label_font_size = chart_meta.get("data_label_font_size", 10)
+                    data_label_color = chart_meta.get("data_label_color", "#000000")
+                    for bar, v in zip(bars, filtered_values):
+                        if value_format == "value":
+                            formatted_value = str(v)
+                        elif value_format == ".2f":
+                            formatted_value = f"{v:.2f}"
+                        elif value_format == ".1f":
+                            formatted_value = f"{v:.1f}"
+                        elif value_format == ".0f":
+                            formatted_value = f"{v:.0f}"
                         else:
-                            ax1.legend(wedges, labels, loc=legend_loc, fontsize=legend_font_size)
-                
+                            formatted_value = f"{v:{value_format}}"
+                        ax2.text(bar.get_x() + bar.get_width()/2, v, formatted_value, ha='center', va='bottom', fontweight='bold', fontsize=data_label_font_size, color=data_label_color)
+
                 else:
                     # Bar, line, area charts
                     mpl_figsize = figsize if figsize else (10, 6)
@@ -2057,11 +2897,11 @@ def _generate_report(project_id, template_path, data_file_path):
                         label = series.get("name", f"Series {i+1}")
                         series_type = series.get("type", "bar").lower()
                         
-                        # Special handling for heatmap charts - skip standard data processing
+                        # Map heatmap to imshow for Matplotlib
                         if series_type == "heatmap":
-                            # Heatmap data is already in the correct format (x, y, z, text)
-                            # Skip the standard y_vals extraction and processing
-                            continue
+                            mpl_chart_type = "imshow"
+                        else:
+                            mpl_chart_type = chart_type_mapping_mpl.get(series_type, "scatter")
                         
                         color = None
                         if "marker" in series and isinstance(series["marker"], dict) and "color" in series["marker"]:
@@ -2081,40 +2921,6 @@ def _generate_report(project_id, template_path, data_file_path):
                                 y_vals = extract_values_from_range(value_range)
 
                         # Generic chart type handling for Matplotlib
-                        chart_type_mapping_mpl = {
-                            # Bar charts
-                            "bar": "bar",
-                            "column": "bar", 
-                            "stacked_column": "bar",
-                            "horizontal_bar": "barh",
-                            
-                            # Line charts
-                            "line": "plot",
-                            "scatter": "scatter",
-                            "scatter_line": "plot",
-                            
-                            # Area charts
-                            "area": "fill_between",
-                            "filled_area": "fill_between",
-                            
-                            # Statistical charts
-                            "histogram": "hist",
-                            "box": "boxplot",
-                            "violin": "violinplot",
-                            
-                            # Other charts
-                            "bubble": "scatter",
-                            "heatmap": "imshow",
-                            "contour": "contour",
-                            "waterfall": "bar",
-                            "funnel": "bar",
-                            "sunburst": "pie",
-                            "treemap": "bar",
-                            "icicle": "bar",
-                            "sankey": "bar",
-                            "table": "table",
-                            "indicator": "bar"
-                        }
                         
                         mpl_chart_type = chart_type_mapping_mpl.get(series_type, "scatter")
                         
@@ -2147,20 +2953,244 @@ def _generate_report(project_id, template_path, data_file_path):
                         elif mpl_chart_type == "plot":
                             # Line chart
                             marker = 'o' if series_type == "scatter_line" else None
-                            ax2.plot(x_values, y_vals, label=label, color=color, marker=marker, linewidth=2)
+                            if ax2:
+                                ax2.plot(x_values, y_vals, label=label, color=color, marker=marker, linewidth=2)
+                            else:
+                                ax1.plot(x_values, y_vals, label=label, color=color, marker=marker, linewidth=2)
                             
                         elif mpl_chart_type == "scatter":
-                            # Scatter plot
-                            if series_type == "bubble" and "size" in series:
+                            # Scatter plot and Bubble chart
+                            if series_type == "bubble":
+                                # Enhanced bubble chart with better styling
+                                current_app.logger.info(f"🎈 Creating bubble chart for series: {label}")
+                                
+                                # Get sizes from the series data structure
                                 sizes = series.get("size", [20] * len(y_vals))
-                                ax1.scatter(x_values, y_vals, s=sizes, label=label, color=color, alpha=0.7)
+                                current_app.logger.info(f"   Sizes: {sizes}")
+                                current_app.logger.info(f"   X values: {x_values}")
+                                current_app.logger.info(f"   Y values: {y_vals}")
+                                current_app.logger.info(f"   Colors: {color}")
+                                current_app.logger.info(f"   Length check - X: {len(x_values)}, Y: {len(y_vals)}, Sizes: {len(sizes)}")
+                                
+                                # Ensure all arrays have the same length
+                                min_length = min(len(x_values), len(y_vals), len(sizes))
+                                if min_length < len(x_values) or min_length < len(y_vals) or min_length < len(sizes):
+                                    current_app.logger.warning(f"⚠️ Array length mismatch! Truncating to {min_length}")
+                                    x_values = x_values[:min_length]
+                                    y_vals = y_vals[:min_length]
+                                    sizes = sizes[:min_length]
+                                    if isinstance(color, list):
+                                        color = color[:min_length]
+                                
+                                # Scale sizes for better visual impact (bubble charts need much larger sizes)
+                                scaled_sizes = [s * 20 for s in sizes]  # Much larger scale for better visibility
+                                current_app.logger.info(f"   Scaled sizes: {scaled_sizes}")
+                                
+                                # Get colors - support both single color and color list
+                                bubble_colors = color
+                                if isinstance(color, list):
+                                    # Use provided colors
+                                    bubble_colors = color
+                                elif color:
+                                    # Single color - create gradient based on size
+                                    import matplotlib.cm as cm
+                                    import numpy as np
+                                    size_array = np.array(sizes)
+                                    normalized_sizes = (size_array - size_array.min()) / (size_array.max() - size_array.min() + 1e-8)
+                                    cmap = cm.viridis if color == 'auto' else cm.get_cmap('viridis')
+                                    bubble_colors = [cmap(norm_size) for norm_size in normalized_sizes]
+                                else:
+                                    # Default color scheme
+                                    bubble_colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F']
+                                
+                                # Create bubble chart with enhanced styling
+                                scatter = ax1.scatter(x_values, y_vals, 
+                                                     s=scaled_sizes, 
+                                                     c=bubble_colors, 
+                                                     alpha=0.8,  # Increased opacity
+                                                     edgecolors='white',  # White borders
+                                                     linewidth=2,  # Border thickness
+                                                     label=label,
+                                                     zorder=3)  # Higher z-order for better layering
+                                
+                                # Add subtle shadow effect for depth
+                                ax1.scatter(x_values, y_vals, 
+                                          s=scaled_sizes, 
+                                          c='black', 
+                                          alpha=0.1, 
+                                          zorder=1)
+                                
+                                # Add data labels for bubble chart if enabled
+                                if show_data_labels:
+                                    for j, (x, y, size_val) in enumerate(zip(x_values, y_vals, sizes)):
+                                        if j < len(x_values):
+                                            # Format size value for label
+                                            try:
+                                                if value_format == ".1f":
+                                                    formatted_size = f"{float(size_val):.1f}"
+                                                elif value_format == ".0f":
+                                                    formatted_size = f"{float(size_val):.0f}"
+                                                else:
+                                                    formatted_size = f"{float(size_val):.0f}"
+                                            except:
+                                                formatted_size = str(size_val)
+                                            
+                                            # Add size label on bubble with better positioning
+                                            label_color = data_label_color or '#000000'
+                                            ax1.text(x, y, formatted_size, 
+                                                    ha='center', va='center', 
+                                                    fontsize=data_label_font_size or 10,
+                                                    color=label_color,
+                                                    fontweight='bold',
+                                                    zorder=5)  # Higher z-order to ensure visibility
                             else:
-                                ax1.scatter(x_values, y_vals, label=label, color=color, alpha=0.7)
+                                # Enhanced scatter plot with custom styling
+                                # Extract marker properties from series
+                                marker_size = series.get("marker", {}).get("size", 50)
+                                marker_color = series.get("marker", {}).get("color", color)
+                                marker_symbol = series.get("marker", {}).get("symbol", "o")
+                                marker_opacity = series.get("marker", {}).get("opacity", 0.8)
+                                text_labels = series.get("text", [])
+                                text_position = series.get("textposition", "top center")
+                                
+                                # Handle marker size (can be single value or list)
+                                if isinstance(marker_size, list):
+                                    sizes = marker_size
+                                else:
+                                    sizes = [marker_size] * len(y_vals)
+                                
+                                # Scale sizes for better visibility
+                                scaled_sizes = [s * 2 for s in sizes]
+                                
+                                # Create enhanced scatter plot
+                                scatter = ax1.scatter(x_values, y_vals, 
+                                                     s=scaled_sizes, 
+                                                     c=marker_color, 
+                                                     alpha=marker_opacity,
+                                                     edgecolors='white',
+                                                     linewidth=1.5,
+                                                     label=label,
+                                                     zorder=3)
+                                
+                                # Add subtle shadow effect for depth
+                                ax1.scatter(x_values, y_vals, 
+                                          s=scaled_sizes, 
+                                          c='black', 
+                                          alpha=0.1, 
+                                          zorder=1)
+                                
+                                # Add data labels if text is provided
+                                if text_labels and len(text_labels) == len(y_vals):
+                                    for j, (x, y, text) in enumerate(zip(x_values, y_vals, text_labels)):
+                                        if j < len(text_labels):
+                                            # Determine label position based on textposition
+                                            if "top" in text_position:
+                                                y_offset = 2
+                                            elif "bottom" in text_position:
+                                                y_offset = -2
+                                            else:
+                                                y_offset = 0
+                                            
+                                            if "center" in text_position:
+                                                ha = 'center'
+                                            elif "left" in text_position:
+                                                ha = 'left'
+                                            elif "right" in text_position:
+                                                ha = 'right'
+                                            else:
+                                                ha = 'center'
+                                            
+                                            # Add text label
+                                            label_color = data_label_color or '#000000'
+                                            ax1.text(x, y + y_offset, str(text), 
+                                                    ha=ha, va='bottom' if y_offset > 0 else 'top',
+                                                    fontsize=data_label_font_size or 10,
+                                                    color=label_color,
+                                                    fontweight='bold',
+                                                    bbox=dict(boxstyle="round,pad=0.3", 
+                                                             facecolor='white', 
+                                                             alpha=0.9,
+                                                             edgecolor='gray',
+                                                             linewidth=0.5))
                                 
                         elif mpl_chart_type == "fill_between":
-                            # Area chart
-                            ax1.fill_between(x_values, y_vals, alpha=0.6, label=label, color=color)
-                            ax1.plot(x_values, y_vals, color=color, linewidth=2)
+                            # Enhanced Area chart
+                            current_app.logger.debug(f"Processing area chart for series: {label}")
+                            current_app.logger.debug(f"X values: {x_vals}")
+                            current_app.logger.debug(f"Y values: {y_vals}")
+                            
+                            # Extract area-specific properties from series
+                            fill_type = series.get("fill", "tozeroy")
+                            line_color = series.get("line", {}).get("color", color)
+                            line_width = series.get("line", {}).get("width", 2)
+                            marker_symbol = series.get("marker", {}).get("symbol", "o")
+                            marker_size = series.get("marker", {}).get("size", 6)
+                            marker_color = series.get("marker", {}).get("color", line_color)
+                            area_opacity = series.get("opacity", 0.6)
+                            text_labels = series.get("text", [])
+                            text_position = series.get("textposition", "top center")
+                            
+                            # Create area fill based on fill type
+                            if fill_type == "tozeroy":
+                                # Fill from zero to y values
+                                ax1.fill_between(x_vals, y_vals, alpha=area_opacity, label=label, color=line_color)
+                            elif fill_type == "tonexty":
+                                # Fill to next y values (for stacked areas)
+                                if i == 0:
+                                    # First series - fill from zero
+                                    ax1.fill_between(x_vals, y_vals, alpha=area_opacity, label=label, color=line_color)
+                                    bottom_vals = y_vals
+                                else:
+                                    # Subsequent series - fill from previous series
+                                    ax1.fill_between(x_vals, bottom_vals, [b + y for b, y in zip(bottom_vals, y_vals)], 
+                                                   alpha=area_opacity, label=label, color=line_color)
+                                    bottom_vals = [b + y for b, y in zip(bottom_vals, y_vals)]
+                            else:
+                                # Default fill
+                                ax1.fill_between(x_vals, y_vals, alpha=area_opacity, label=label, color=line_color)
+                            
+                            # Add line on top of area
+                            ax1.plot(x_vals, y_vals, color=line_color, linewidth=line_width, zorder=3)
+                            
+                            # Add markers if specified
+                            if marker_symbol != "none":
+                                ax1.scatter(x_vals, y_vals, color=marker_color, s=marker_size*20, 
+                                          zorder=4, edgecolors='white', linewidth=1)
+                            
+                            # Add data labels if text is provided
+                            if text_labels and len(text_labels) == len(y_vals):
+                                for j, (x, y, text) in enumerate(zip(x_vals, y_vals, text_labels)):
+                                    if j < len(text_labels):
+                                        # Determine label position based on textposition
+                                        if "top" in text_position:
+                                            y_offset = 5
+                                        elif "bottom" in text_position:
+                                            y_offset = -5
+                                        else:
+                                            y_offset = 0
+                                        
+                                        if "center" in text_position:
+                                            ha = 'center'
+                                        elif "left" in text_position:
+                                            ha = 'left'
+                                        elif "right" in text_position:
+                                            ha = 'right'
+                                        else:
+                                            ha = 'center'
+                                        
+                                        # Add text label
+                                        label_color = data_label_color or '#000000'
+                                        ax1.text(x, y + y_offset, str(text), 
+                                               ha=ha, va='bottom' if y_offset > 0 else 'top',
+                                               fontsize=data_label_font_size or 10,
+                                               color=label_color,
+                                               fontweight='bold',
+                                               bbox=dict(boxstyle="round,pad=0.3", 
+                                                        facecolor='white', 
+                                                        alpha=0.9,
+                                                        edgecolor='gray',
+                                                        linewidth=0.5),
+                                               zorder=5)
                             
                         elif mpl_chart_type == "hist":
                             # Histogram
@@ -2177,10 +3207,89 @@ def _generate_report(project_id, template_path, data_file_path):
                             ax1.violinplot(y_vals, positions=[i])
                             
                         elif mpl_chart_type == "imshow":
-                            # Heatmap (simplified)
-                            heatmap_data = series.get("z", [])
-                            if len(heatmap_data) > 0:
-                                ax1.imshow(heatmap_data, cmap='viridis', aspect='auto')
+                            # Enhanced heatmap implementation
+                            heatmap_data = series.get("z", series.get("values", []))
+                            current_app.logger.debug(f"Heatmap data found: {heatmap_data}")
+                            
+                            # Ensure we have valid heatmap data
+                            if not heatmap_data or len(heatmap_data) == 0:
+                                current_app.logger.warning(f"⚠️ No heatmap data found in series: {series}")
+                                # Create a default heatmap for testing
+                                heatmap_data = [[1, 0, 1, 1], [1, 1, 1, 0], [0, 1, 1, 1]]
+                                current_app.logger.debug(f"Using default heatmap data: {heatmap_data}")
+                            
+                            # Ensure heatmap_data is a 2D array
+                            if isinstance(heatmap_data[0], (int, float)):
+                                # Flat list - reshape based on x_axis length
+                                cols = len(x_values) if x_values else 4
+                                rows = len(heatmap_data) // cols
+                                if len(heatmap_data) % cols != 0:
+                                    rows += 1
+                                # Pad with zeros if needed
+                                padded_data = heatmap_data + [0] * (rows * cols - len(heatmap_data))
+                                heatmap_data = [padded_data[i:i+cols] for i in range(0, len(padded_data), cols)]
+                                current_app.logger.debug(f"Reshaped heatmap data: {heatmap_data}")
+                                current_app.logger.debug(f"X values: {x_values}")
+                                current_app.logger.debug(f"Cols: {cols}, Rows: {rows}")
+                            
+                            # Get colorscale from series or use default
+                            colorscale = series.get("colorscale", "RdYlGn")
+                            current_app.logger.debug(f"Using colorscale: {colorscale}")
+                            
+                            # Create heatmap with enhanced styling
+                            im = ax1.imshow(heatmap_data, cmap=colorscale, aspect='auto', 
+                                           interpolation='nearest', alpha=0.8)
+                            
+                            # Set axis labels
+                            if x_values:
+                                ax1.set_xticks(range(len(x_values)))
+                                ax1.set_xticklabels(x_values, rotation=0, ha='center')
+                            
+                            # Create employee labels (Y-axis) - use series labels if available
+                            y_labels = series.get("y", [])
+                            if not y_labels:
+                                num_employees = len(heatmap_data)
+                                y_labels = [f"Employee {i+1}" for i in range(num_employees)]
+                            
+                            ax1.set_yticks(range(len(y_labels)))
+                            ax1.set_yticklabels(y_labels)
+                            
+                            # Add colorbar
+                            cbar = plt.colorbar(im, ax=ax1, shrink=0.8)
+                            cbar.set_label(series.get("name", "Value"), rotation=270, labelpad=15)
+                            
+                            # Add text annotations on heatmap cells
+                            for i in range(len(heatmap_data)):
+                                for j in range(len(heatmap_data[0])):
+                                    value = heatmap_data[i][j]
+                                    # Determine text color based on background
+                                    if colorscale == "RdYlGn":
+                                        text_color = 'white' if value > 0.5 else 'black'
+                                    else:
+                                        text_color = 'white' if value == 1 else 'black'
+                                    
+                                    # Show actual value or custom text
+                                    if "text" in series and i < len(series["text"]) and j < len(series["text"][i]):
+                                        cell_text = str(series["text"][i][j])
+                                    else:
+                                        cell_text = str(value)
+                                    
+                                    ax1.text(j, i, cell_text, 
+                                           ha='center', va='center', color=text_color, 
+                                           fontweight='bold', fontsize=10)
+                            
+                            # Set title
+                            ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                            
+                            # Remove grid for cleaner look
+                            ax1.grid(False)
+                            
+                            # Set axis labels
+                            ax1.set_xlabel(chart_meta.get("x_label", "Week"), fontsize=label_fontsize if 'label_fontsize' in locals() else 12)
+                            ax1.set_ylabel(chart_meta.get("primary_y_label", "Employee"), fontsize=label_fontsize if 'label_fontsize' in locals() else 12)
+                            
+                            # Skip other chart processing for heatmap
+                            continue
                                 
                         elif mpl_chart_type == "contour":
                             # Contour plot (simplified)
@@ -2194,8 +3303,8 @@ def _generate_report(project_id, template_path, data_file_path):
                             current_app.logger.warning(f"⚠️ Unknown matplotlib chart type '{series_type}', falling back to scatter")
                             ax1.scatter(x_values, y_vals, label=label, color=color, alpha=0.7)
 
-                    # Add data labels to Matplotlib chart if enabled
-                    if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color):
+                    # Add data labels to Matplotlib chart if enabled (skip for area charts as they have custom label handling)
+                    if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color) and chart_type != "area":
                         current_app.logger.debug(f"Adding data labels to Matplotlib chart")
                         for i, series in enumerate(series_data):
                             series_type = series.get("type", "bar").lower()
@@ -2234,7 +3343,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                             label_color = data_label_color or '#000000'
                                             ax1.text(j, val, formatted_val, 
                                                     ha='center', va='bottom', 
-                                                    fontsize=data_label_font_size or 18,  # Increased default size
+                                                    fontsize=data_label_font_size or int(title_fontsize * 0.9),  # Improved scaling
                                                     color=label_color,
                                                     fontweight='bold',
                                                     bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
@@ -2267,29 +3376,65 @@ def _generate_report(project_id, template_path, data_file_path):
                                             label_color = data_label_color or '#000000'
                                             ax2.text(j, val, formatted_val, 
                                                     ha='center', va='bottom', 
-                                                    fontsize=data_label_font_size or 18,  # Increased default size
+                                                    fontsize=data_label_font_size or int(title_fontsize * 0.9),  # Improved scaling
                                                     color=label_color,
                                                     fontweight='bold',
                                                     bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
                                             current_app.logger.debug(f"Added line data label with color: {label_color}")
 
-                    # Set labels and styling
-                    if chart_type != "pie":
-                        label_fontsize = int((font_size or 11) * 0.8)
-                        ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), fontsize=label_fontsize, color=font_color)
-                        ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Primary Y")), fontsize=label_fontsize, color=font_color)
-                        if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
-                            ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), fontsize=label_fontsize, color=font_color)
+                                            # Set labels and styling
+                        if chart_type != "pie":
+                            # Improved font size scaling for Matplotlib
+                            title_fontsize = font_size or 52  # Increased default title size
+                            label_fontsize = int((font_size or 52) * 0.9)  # Increased relative size for labels
+                            
+                            # Apply axis label distances using labelpad parameter
+                            x_labelpad = x_axis_label_distance / 10.0 if x_axis_label_distance else 5.0  # Convert to points
+                            y_labelpad = y_axis_label_distance / 10.0 if y_axis_label_distance else 5.0  # Convert to points
+                            
+                            ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), 
+                                         fontsize=label_fontsize, color=font_color, labelpad=x_labelpad)
+                            ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Primary Y")), 
+                                         fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
+                            if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
+                                ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), 
+                                             fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
 
-                        # Set axis tick font size if provided
+                        # Determine if this is a bubble chart early
+                        is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
+
+                        # Set axis tick font size and control tick visibility
+                        tick_fontsize = axis_tick_font_size or int(title_fontsize * 0.8)  # Improved tick size calculation
                         if axis_tick_font_size:
-                            ax1.tick_params(axis='x', labelsize=axis_tick_font_size, rotation=45, colors=font_color)
+                            ax1.tick_params(axis='x', labelsize=axis_tick_font_size, colors=font_color)  # Removed rotation
                             ax1.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
-                            ax2.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
+                            if ax2 and not is_bubble_chart:
+                                ax2.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
                         else:
-                            ax1.tick_params(axis='x', rotation=45, colors=font_color)
-                            ax1.tick_params(axis='y', colors=font_color)
-                            ax2.tick_params(axis='y', colors=font_color)
+                            ax1.tick_params(axis='x', labelsize=tick_fontsize, colors=font_color)  # Removed rotation
+                            ax1.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
+                            if ax2 and not is_bubble_chart:
+                                ax2.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
+                        
+                        # Tick mark control for Matplotlib
+                        if show_x_ticks is not None or show_y_ticks is not None:
+                            if show_x_ticks is not None:
+                                if not show_x_ticks:
+                                    ax1.tick_params(axis='x', length=0)  # Hide tick marks
+                                    ax1.set_xticklabels([])  # Hide tick labels
+                                else:
+                                    ax1.tick_params(axis='x', length=5)  # Show tick marks
+                            if show_y_ticks is not None:
+                                if not show_y_ticks:
+                                    ax1.tick_params(axis='y', length=0)  # Hide tick marks
+                                    ax1.set_yticklabels([])  # Hide tick labels
+                                    if ax2 and not is_bubble_chart:
+                                        ax2.tick_params(axis='y', length=0)  # Hide secondary y-axis tick marks
+                                        ax2.set_yticklabels([])  # Hide secondary y-axis tick labels
+                                else:
+                                    ax1.tick_params(axis='y', length=5)  # Show tick marks
+                                    if ax2 and not is_bubble_chart:
+                                     ax2.tick_params(axis='y', length=5)  # Show secondary y-axis tick marks
                         
                         # Apply X-axis label distance using tick parameters
                         if x_axis_label_distance:
@@ -2298,11 +3443,12 @@ def _generate_report(project_id, template_path, data_file_path):
                             current_app.logger.debug(f"Applied X-axis tick padding: {x_axis_label_distance}")
                         
                         # Apply secondary y-axis formatting for Matplotlib
-                        if secondary_y_axis_format:
-                            from matplotlib.ticker import FuncFormatter
-                            def percentage_formatter(x, pos):
-                                return f'{x:.0%}'
-                            ax2.yaxis.set_major_formatter(FuncFormatter(percentage_formatter))
+                        if ax2 and not is_bubble_chart:
+                            if secondary_y_axis_format:
+                                from matplotlib.ticker import FuncFormatter
+                                def percentage_formatter(x, pos):
+                                    return f'{x:.0%}'
+                                ax2.yaxis.set_major_formatter(FuncFormatter(percentage_formatter))
                         if secondary_y_axis_min_max:
                             # Handle "auto" value for secondary y-axis min/max
                             if secondary_y_axis_min_max == "auto":
@@ -2312,6 +3458,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                 ax2.set_ylim(secondary_y_axis_min_max)
                             else:
                                 current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
+                        elif is_bubble_chart:
+                            current_app.logger.info(f"🎈 Skipping secondary Y-axis formatting for bubble chart")
+                            # Explicitly hide secondary Y-axis for bubble charts
+                            if ax2:
+                                ax2.set_visible(False)
+                                current_app.logger.info(f"🎈 Secondary Y-axis hidden for bubble chart")
                         
                         # Gridlines
                         current_app.logger.debug(f"Gridlines setting: {show_gridlines}")
@@ -2328,10 +3480,12 @@ def _generate_report(project_id, template_path, data_file_path):
                             }
                             mapped_linestyle = matplotlib_linestyle_map.get(gridline_style, "--")
                             ax1.grid(True, linestyle=mapped_linestyle, color=gridline_color or '#ccc', alpha=0.6)
-                            ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color or '#ccc', alpha=0.6)
+                            if ax2 and not is_bubble_chart:
+                             ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color or '#ccc', alpha=0.6)
                         else:
                             ax1.grid(False)
-                            ax2.grid(False)
+                            if ax2:
+                             ax2.grid(False)
                         
                         # Apply primary y-axis formatting for Matplotlib
                         if axis_tick_format:
@@ -2344,14 +3498,49 @@ def _generate_report(project_id, template_path, data_file_path):
                             current_app.logger.debug(f"Setting Matplotlib Y-axis range to: {y_axis_min_max}")
                             # Ensure the range is properly applied
                             if isinstance(y_axis_min_max, list) and len(y_axis_min_max) == 2:
-                                ax1.set_ylim(y_axis_min_max[0], y_axis_min_max[1])
-                                current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
+                                # Check if the provided range is appropriate for the data
+                                all_y_values = []
+                                for series in series_data:
+                                    y_vals = series.get("values", [])
+                                    if y_vals:
+                                        all_y_values.extend(y_vals)
+                                
+                                if all_y_values:
+                                    data_min = min(all_y_values)
+                                    data_max = max(all_y_values)
+                                    data_range = data_max - data_min
+                                    
+                                    # Check if the provided range is reasonable (within 10x of data range)
+                                    provided_range = y_axis_min_max[1] - y_axis_min_max[0]
+                                    if provided_range > data_range * 10:
+                                        # Auto-calculate appropriate range
+                                        padding = data_range * 0.1  # 10% padding
+                                        auto_min = max(0, data_min - padding)
+                                        auto_max = data_max + padding
+                                        ax1.set_ylim(auto_min, auto_max)
+                                        current_app.logger.debug(f"Auto-adjusted Y-axis range from {y_axis_min_max} to {[auto_min, auto_max]} (data range: {data_min}-{data_max})")
+                                    else:
+                                        # Use provided range
+                                        ax1.set_ylim(y_axis_min_max[0], y_axis_min_max[1])
+                                        current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
+                                else:
+                                    # No data available, use provided range
+                                    ax1.set_ylim(y_axis_min_max[0], y_axis_min_max[1])
+                                    current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
                             else:
                                 current_app.logger.warning(f"Invalid Y-axis range format: {y_axis_min_max}")
+                        
+                        # Set title with improved font size
+                        ax1.set_title(title, fontsize=title_fontsize, weight='bold', pad=20)
                         
                         # Legend
                         show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
                         current_app.logger.debug(f"Matplotlib legend setting: {show_legend}")
+                        
+                        # Disable legend for bubble charts to avoid the orange bubble marker
+                        if is_bubble_chart:
+                            show_legend = False
+                            current_app.logger.info(f"🎈 Disabled legend for bubble chart to avoid extra bubble marker")
                         
                         # Initialize legend_loc outside the if block to fix scope issue
                         legend_loc = 'best'  # default
@@ -2379,11 +3568,15 @@ def _generate_report(project_id, template_path, data_file_path):
                                 ax1.legend(lines1 + lines2, labels1 + labels2, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
                                 current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at forced bottom position")
                             else:
-                                ax1.legend(lines1 + lines2, labels1 + labels2, loc=legend_loc, fontsize=legend_font_size)
-                                current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at position: {legend_loc}")
+                                # Skip legend for bubble charts to avoid the orange bubble marker
+                                if is_bubble_chart:
+                                    current_app.logger.info(f"🎈 Skipping legend for bubble chart to avoid extra bubble marker")
+                                else:
+                                    ax1.legend(lines1 + lines2, labels1 + labels2, loc=legend_loc, fontsize=legend_font_size)
+                                    current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at position: {legend_loc}")
                         
                         # Set title with proper font attributes (ENHANCED VERSION)
-                        title_fontsize = font_size or 28  # Increased default size
+                        title_fontsize = font_size or 52  # Increased default size
                         if font_color:
                             ax1.set_title(title, fontsize=title_fontsize, weight='bold', color=font_color, 
                                          bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
@@ -2397,17 +3590,21 @@ def _generate_report(project_id, template_path, data_file_path):
                         primary_y_label_text = chart_meta.get("primary_y_label", "Y")
                         label_fontsize = int(title_fontsize * 0.9)  # Increased relative size
                         
+                        # Apply axis label distances using labelpad parameter
+                        x_labelpad = x_axis_label_distance / 10.0 if x_axis_label_distance else 5.0  # Convert to points
+                        y_labelpad = y_axis_label_distance / 10.0 if y_axis_label_distance else 5.0  # Convert to points
+                        
                         if font_color:
                             ax1.set_xlabel(x_label_text, fontsize=label_fontsize, weight='bold', color=font_color,
-                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=x_labelpad)
                             ax1.set_ylabel(primary_y_label_text, fontsize=label_fontsize, weight='bold', color=font_color,
-                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
                             current_app.logger.debug(f"Applied axis labels with color: {font_color}")
                         else:
                             ax1.set_xlabel(x_label_text, fontsize=label_fontsize, weight='bold',
-                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=x_labelpad)
                             ax1.set_ylabel(primary_y_label_text, fontsize=label_fontsize, weight='bold',
-                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
                         
                         # Apply font size and color to tick labels (ENHANCED VERSION)
                         tick_fontsize = axis_tick_font_size or int(title_fontsize * 0.8)  # Increased relative size
@@ -2417,17 +3614,42 @@ def _generate_report(project_id, template_path, data_file_path):
                         else:
                             ax1.tick_params(axis='both', labelsize=tick_fontsize)
                         
+                        # Tick mark control for Matplotlib (additional section)
+                        if show_x_ticks is not None or show_y_ticks is not None:
+                            if show_x_ticks is not None:
+                                if not show_x_ticks:
+                                    ax1.tick_params(axis='x', length=0)  # Hide tick marks
+                                    ax1.set_xticklabels([])  # Hide tick labels
+                                else:
+                                    ax1.tick_params(axis='x', length=5)  # Show tick marks
+                            if show_y_ticks is not None:
+                                if not show_y_ticks:
+                                    ax1.tick_params(axis='y', length=0)  # Hide tick marks
+                                    ax1.set_yticklabels([])  # Hide tick labels
+                                    if 'ax2' in locals():
+                                        ax2.tick_params(axis='y', length=0)  # Hide secondary y-axis tick marks
+                                        ax2.set_yticklabels([])  # Hide secondary y-axis tick labels
+                                else:
+                                    ax1.tick_params(axis='y', length=5)  # Show tick marks
+                                    if 'ax2' in locals():
+                                        ax2.tick_params(axis='y', length=5)  # Show secondary y-axis tick marks
+                        
                         # Also apply font color to secondary y-axis (ENHANCED VERSION)
-                        if 'ax2' in locals():
-                            if font_color:
-                                ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold', color=font_color,
-                                             bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
-                                ax2.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
-                                current_app.logger.debug(f"Applied secondary axis with color: {font_color}")
-                            else:
-                                ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold',
-                                             bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8))
+                        if 'ax2' in locals() and ax2 is not None:
+                            # Skip secondary Y-axis for bubble charts
+                            is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
+                            if not is_bubble_chart:
+                                if font_color:
+                                    ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold', color=font_color,
+                                                bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
+                                    ax2.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
+                                    current_app.logger.debug(f"Applied secondary axis with color: {font_color}")
+                                else:
+                                    ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold',
+                                                bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
                                 ax2.tick_params(axis='y', labelsize=tick_fontsize)
+                        else:
+                            current_app.logger.info(f"🎈 Skipping secondary Y-axis for bubble chart")
                 
                 # Apply axis label distances for Matplotlib
                 current_app.logger.debug(f"X-axis label distance: {x_axis_label_distance}")
@@ -2489,9 +3711,29 @@ def _generate_report(project_id, template_path, data_file_path):
                             # For heatmaps, look in the heatmap x values
                             if x_value in heatmap_x_values:
                                 x_pos = heatmap_x_values.index(x_value)
-                        elif x_value in x_values:
+                        elif x_values and x_value in x_values:
                             # For other charts, look in the standard x_values
                             x_pos = x_values.index(x_value)
+                        elif isinstance(x_value, str) and x_values:
+                            # Try to find string value in x_values
+                            try:
+                                x_pos = x_values.index(x_value)
+                            except ValueError:
+                                # If not found, use first position
+                                x_pos = 0
+                                current_app.logger.warning(f"Annotation x_value '{x_value}' not found in x_values: {x_values}")
+                        elif isinstance(x_value, (int, float)) and x_values:
+                            # For numeric x_value, use the actual value for bubble charts
+                            if chart_type == "bubble":
+                                x_pos = x_value  # Use actual x value for bubble charts
+                            else:
+                                # For other charts, find closest position
+                                try:
+                                    x_pos = int(x_value)
+                                    if x_pos >= len(x_values):
+                                        x_pos = len(x_values) - 1
+                                except (ValueError, TypeError):
+                                    x_pos = 0
                         
                         # Find y position based on y_value
                         y_pos = y_value
@@ -2500,8 +3742,36 @@ def _generate_report(project_id, template_path, data_file_path):
                             if y_value in heatmap_y_values:
                                 y_pos = heatmap_y_values.index(y_value)
                         
-                        # Add annotation text
-                        ax1.annotate(text, xy=(x_pos, y_pos), xytext=(x_pos, y_pos + 50),
+                        # Auto-adjust Y position if it's outside the data range
+                        all_y_values = []
+                        for series in series_data:
+                            y_vals = series.get("values", [])
+                            if y_vals:
+                                all_y_values.extend(y_vals)
+                        
+                        if all_y_values:
+                            data_min = min(all_y_values)
+                            data_max = max(all_y_values)
+                            data_range = data_max - data_min
+                            
+                            # If annotation Y value is way outside data range, adjust it
+                            if y_pos > data_max * 2 or y_pos < data_min * 0.5:
+                                # Position annotation above the highest data point
+                                y_pos = data_max + (data_range * 0.1)  # 10% above max
+                                current_app.logger.debug(f"Auto-adjusted annotation Y position from {y_value} to {y_pos} (data range: {data_min}-{data_max})")
+                        
+                        # Add annotation text with better positioning for bubble charts
+                        if chart_type == "bubble":
+                            # For bubble charts, position annotation above the bubble
+                            annotation_y_offset = 2000  # Fixed offset for bubble charts
+                            ax1.annotate(text, xy=(x_pos, y_pos), xytext=(x_pos, y_pos + annotation_y_offset),
+                                       arrowprops=dict(arrowstyle='->', color='red', lw=1.5),
+                                       fontsize=12, color='red', weight='bold',
+                                       ha='center', va='bottom',
+                                       bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.9, edgecolor='red'))
+                        else:
+                            # For other charts, use original positioning
+                         ax1.annotate(text, xy=(x_pos, y_pos), xytext=(x_pos, y_pos + (data_range * 0.05) if 'data_range' in locals() else y_pos + 50),
                                    arrowprops=dict(arrowstyle='->', color='red'),
                                    fontsize=12, color='red', weight='bold',
                                    ha='center', va='bottom')
@@ -2511,20 +3781,38 @@ def _generate_report(project_id, template_path, data_file_path):
                 if margin:
                     current_app.logger.debug(f"Applying margin to Matplotlib: {margin}")
                     # Use figure padding instead of subplot adjustments
-                    # Convert margin values to inches (assuming 100 DPI)
-                    left_margin_inches = margin.get("l", 0) / 100.0
-                    right_margin_inches = margin.get("r", 0) / 100.0
-                    top_margin_inches = margin.get("t", 0) / 100.0
-                    bottom_margin_inches = margin.get("b", 0) / 100.0
+                    # Convert margin values to fractions of figure size (more appropriate scaling)
+                    # Use a smaller conversion factor to avoid invalid subplot parameters
+                    conversion_factor = 1000.0  # Larger denominator for smaller values
+                    left_margin_fraction = margin.get("l", 0) / conversion_factor
+                    right_margin_fraction = margin.get("r", 0) / conversion_factor
+                    top_margin_fraction = margin.get("t", 0) / conversion_factor
+                    bottom_margin_fraction = margin.get("b", 0) / conversion_factor
+                    
+                    # Calculate subplot parameters with validation
+                    left_pos = max(0.1, left_margin_fraction)  # Minimum 0.1 to avoid edge
+                    right_pos = min(0.9, 1.0 - right_margin_fraction)  # Maximum 0.9 to avoid edge
+                    top_pos = min(0.9, 1.0 - top_margin_fraction)  # Maximum 0.9 to avoid edge
+                    bottom_pos = max(0.1, bottom_margin_fraction)  # Minimum 0.1 to avoid edge
+                    
+                    # Ensure left < right and bottom < top
+                    if left_pos >= right_pos:
+                        left_pos = 0.1
+                        right_pos = 0.9
+                        current_app.logger.warning(f"Invalid margin: left >= right, using default values")
+                    if bottom_pos >= top_pos:
+                        bottom_pos = 0.1
+                        top_pos = 0.9
+                        current_app.logger.warning(f"Invalid margin: bottom >= top, using default values")
                     
                     # Apply margins using figure padding
                     fig_mpl.subplots_adjust(
-                        left=left_margin_inches,
-                        right=1.0 - right_margin_inches,
-                        top=1.0 - top_margin_inches,
-                        bottom=bottom_margin_inches
+                        left=left_pos,
+                        right=right_pos,
+                        top=top_pos,
+                        bottom=bottom_pos
                     )
-                    current_app.logger.debug(f"Applied margins (inches): left={left_margin_inches}, right={right_margin_inches}, top={top_margin_inches}, bottom={bottom_margin_inches}")
+                    current_app.logger.debug(f"Applied margins (fractions): left={left_pos}, right={right_pos}, top={top_pos}, bottom={bottom_pos}")
                 
                 # Adjust layout to accommodate legend position
                 if show_legend and legend_position == "bottom":
@@ -2612,10 +3900,9 @@ def _generate_report(project_id, template_path, data_file_path):
 
         # Insert charts into paragraphs
         chart_errors = []
-        for para_idx, para in enumerate(doc.paragraphs):
-            replace_text_in_paragraph(para)
         
-        # Paragraph processing completed silently
+        # COMPREHENSIVE TEXT REPLACEMENT - Process ALL document elements
+        process_entire_document()
         
         # Process charts in paragraphs
         for para_idx, para in enumerate(doc.paragraphs):
@@ -2907,6 +4194,55 @@ def download_chart_html(chart_filename):
     # Charts are embedded in Word documents, no separate HTML files needed
     return jsonify({'error': 'Chart HTML files are not available - charts are embedded in Word documents'}), 404
 
+@projects_bp.route('/api/reports/batch_reports_<project_id>.zip', methods=['GET'])
+@login_required
+def download_batch_reports(project_id):
+    """Download batch reports ZIP file"""
+    try:
+        # Validate project ID
+        project_id_obj = ObjectId(project_id)
+        
+        # Check if project exists and belongs to user
+        project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
+        if not project:
+            return jsonify({'error': 'Project not found or unauthorized'}), 404
+        
+        # Construct the ZIP file path
+        zip_filename = f'batch_reports_{project_id}.zip'
+        zip_path = os.path.join(tempfile.gettempdir(), zip_filename)
+        
+        # Check if file exists
+        if not os.path.exists(zip_path):
+            return jsonify({'error': 'Batch reports file not found. Please regenerate the reports.'}), 404
+        
+        # Send file
+        def cleanup_after_response(response):
+            try:
+                # Clean up the ZIP file after sending
+                if os.path.exists(zip_path):
+                    os.remove(zip_path)
+                    current_app.logger.info(f"Cleaned up batch reports ZIP: {zip_path}")
+            except Exception as e:
+                current_app.logger.warning(f"Failed to clean up batch reports ZIP {zip_path}: {e}")
+            return response
+        
+        response = send_file(
+            zip_path,
+            as_attachment=True,
+            download_name=zip_filename,
+            mimetype='application/zip'
+        )
+        
+        # Add cleanup callback
+        response.call_on_close(lambda: cleanup_after_response(response))
+        
+        current_app.logger.info(f"Downloading batch reports ZIP: {zip_filename}")
+        return response
+        
+    except Exception as e:
+        current_app.logger.error(f"Error downloading batch reports: {e}")
+        return jsonify({'error': 'Failed to download batch reports'}), 500
+
 @projects_bp.route('/api/projects/<project_id>/chart_errors', methods=['GET'])
 @login_required
 def get_chart_errors(project_id):
@@ -2995,34 +4331,45 @@ def upload_zip_and_generate_reports(project_id):
     current_app.logger.info(f"Starting batch processing of {total_files} Excel files")
     
     for idx, excel_path in enumerate(excel_files, 1):
-        # You may want to extract report name/code from the Excel file or filename
-        report_name = os.path.splitext(os.path.basename(excel_path))[0]
-        report_code = f"{project_id}_{idx}"
-
-        current_app.logger.info(f"Processing file {idx}/{total_files}: {report_name}")
+        # Extract report name and code from Excel file
+        report_name, report_code = extract_report_info_from_excel(excel_path)
+        
+        current_app.logger.info(f"Processing file {idx}/{total_files}: {report_name} (Code: {report_code})")
 
         # Generate report
         template_file_path = current_app.mongo.db.projects.find_one({'_id': ObjectId(project_id)})['file_path']
         abs_template_file_path = get_abs_path_from_db_path(template_file_path)
         output_path = _generate_report(f"{project_id}_{idx}", abs_template_file_path, excel_path)
         if output_path:
-            # Save in both folders
-            shutil.copy(output_path, os.path.join(output_folder_name, f"{report_name}.docx"))
-            shutil.copy(output_path, os.path.join(output_folder_code, f"{report_code}.docx"))
+            # Save in both folders with proper naming
+            name_file_path = os.path.join(output_folder_name, f"{report_name}.docx")
+            code_file_path = os.path.join(output_folder_code, f"{report_code}.docx")
+            
+            shutil.copy(output_path, name_file_path)
+            shutil.copy(output_path, code_file_path)
+            
             generated_files.append({'name': report_name, 'code': report_code})
-            current_app.logger.info(f"✅ Successfully generated report {idx}/{total_files}: {report_name}")
+            current_app.logger.info(f"✅ Successfully generated report {idx}/{total_files}: {report_name} -> {report_code}")
         else:
             current_app.logger.error(f"❌ Failed to generate report {idx}/{total_files}: {report_name}")
         
         # Log progress
         current_app.logger.info(f"Progress: {idx}/{total_files} reports processed")
 
-    # Create zip file in temporary location
+    # Create zip file in temporary location with both folder structures
     zip_output_path = os.path.join(temp_dir, f'batch_reports_{project_id}.zip')
     with zipfile.ZipFile(zip_output_path, 'w') as zipf:
+        # Add files from both folders to maintain the folder structure
         for file_info in generated_files:
-            file_path = os.path.join(output_folder_name, f"{file_info['name']}.docx")
-            zipf.write(file_path, arcname=f"{file_info['name']}.docx")
+            # Add file from reports_by_name folder
+            name_file_path = os.path.join(output_folder_name, f"{file_info['name']}.docx")
+            if os.path.exists(name_file_path):
+                zipf.write(name_file_path, arcname=f"reports_by_name/{file_info['name']}.docx")
+            
+            # Add file from reports_by_code folder
+            code_file_path = os.path.join(output_folder_code, f"{file_info['code']}.docx")
+            if os.path.exists(code_file_path):
+                zipf.write(code_file_path, arcname=f"reports_by_code/{file_info['code']}.docx")
 
     # Move zip to a temporary location that will be cleaned up after download
     final_zip_path = os.path.join(tempfile.gettempdir(), f'batch_reports_{project_id}.zip')
@@ -3041,3 +4388,118 @@ def upload_zip_and_generate_reports(project_id):
         'processed_files': len(generated_files),
         'success_rate': f"{len(generated_files)}/{total_files}"
     })
+
+@projects_bp.route('/api/projects/<project_id>', methods=['PUT'])
+@login_required
+def update_project(project_id):
+    try:
+        project_id_obj = ObjectId(project_id)
+    except Exception as e:
+        return jsonify({'error': 'Invalid project ID'}), 400
+
+    # Check if project exists and belongs to user
+    project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
+    if not project:
+        return jsonify({'error': 'Project not found or unauthorized'}), 404
+
+    # Get form data
+    name = request.form.get('name')
+    description = request.form.get('description')
+    file = request.files.get('file')
+
+    # Validate required fields
+    if not name or not description:
+        return jsonify({'error': 'Missing required fields (name or description)'}), 400
+
+    # Prepare update data
+    update_data = {
+        'name': name,
+        'description': description,
+        'updated_at': datetime.utcnow().isoformat()
+    }
+
+    # Handle file upload if provided
+    if file:
+        if not allowed_file(file.filename):
+            return jsonify({'error': 'File type not allowed. Only .doc or .docx files are accepted.'}), 400
+        
+        # Delete old file if it exists
+        if project.get('file_path'):
+            old_file_path = get_abs_path_from_db_path(project['file_path'])
+            if os.path.exists(old_file_path):
+                try:
+                    os.remove(old_file_path)
+                except Exception as e:
+                    current_app.logger.warning(f"Could not delete old file {old_file_path}: {e}")
+
+        # Save new file
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        filename = secure_filename(file.filename)
+        file_path = os.path.join('uploads', filename)
+        abs_file_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), file_path)
+        file.save(abs_file_path)
+        update_data['file_path'] = file_path
+
+    # Update project in database
+    result = current_app.mongo.db.projects.update_one(
+        {'_id': project_id_obj, 'user_id': current_user.get_id()},
+        {'$set': update_data}
+    )
+
+    if result.modified_count == 0:
+        return jsonify({'error': 'Failed to update project'}), 500
+
+    # Get updated project
+    updated_project = current_app.mongo.db.projects.find_one({'_id': project_id_obj})
+    updated_project['id'] = str(updated_project['_id'])
+    del updated_project['_id']
+
+    return jsonify({'message': 'Project updated successfully', 'project': updated_project})
+
+@projects_bp.route('/api/projects/<project_id>', methods=['DELETE'])
+@login_required
+def delete_project(project_id):
+    try:
+        project_id_obj = ObjectId(project_id)
+    except Exception as e:
+        return jsonify({'error': 'Invalid project ID'}), 400
+
+    # Check if project exists and belongs to user
+    project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
+    if not project:
+        return jsonify({'error': 'Project not found or unauthorized'}), 404
+
+    # Delete associated file if it exists
+    if project.get('file_path'):
+        file_path = get_abs_path_from_db_path(project['file_path'])
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception as e:
+                current_app.logger.warning(f"Could not delete file {file_path}: {e}")
+
+    # Delete project from database
+    result = current_app.mongo.db.projects.delete_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
+
+    if result.deleted_count == 0:
+        return jsonify({'error': 'Failed to delete project'}), 500
+
+    return jsonify({'message': 'Project deleted successfully'})
+
+@projects_bp.route('/api/projects/<project_id>', methods=['GET'])
+@login_required
+def get_project(project_id):
+    try:
+        project_id_obj = ObjectId(project_id)
+    except Exception as e:
+        return jsonify({'error': 'Invalid project ID'}), 400
+
+    # Check if project exists and belongs to user
+    project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
+    if not project:
+        return jsonify({'error': 'Project not found or unauthorized'}), 404
+
+    project['id'] = str(project['_id'])
+    del project['_id']
+    
+    return jsonify({'project': project})
