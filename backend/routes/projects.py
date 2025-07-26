@@ -212,7 +212,7 @@ def _generate_report(project_id, template_path, data_file_path):
     plt.style.use('ggplot')  # 👈 Apply a cleaner visual style
 
     try:
-        current_app.logger.debug(f"Generating report for project: {project_id}")
+        # Report generation started
 
         # Try to read Excel with original formatting preserved
         try:
@@ -223,12 +223,7 @@ def _generate_report(project_id, template_path, data_file_path):
         df.columns = df.columns.str.strip().str.replace(" ", "_").str.replace("__", "_")
         
         # Log the raw data to see what pandas is reading
-        current_app.logger.info("🔍 RAW EXCEL DATA (first few rows):")
-        for col in df.columns:
-            if 'growth' in col.lower() or 'cagr' in col.lower():
-                current_app.logger.info(f"  {col}: {df[col].head().tolist()}")
-                # Also log the data types
-                current_app.logger.info(f"  {col} dtype: {df[col].dtype}")
+        # Excel data loaded successfully
 
         # Excel structure loaded silently
         
@@ -262,7 +257,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         global_metadata[col_lower] = str(value).strip()
                         # Also add to flat_data_map with the column name as key
                         flat_data_map[col_lower] = str(value).strip()
-                        current_app.logger.debug(f"📋 Global metadata: {col_lower} -> {value}")
+                        # Global metadata processed
                     else:
                         current_app.logger.warning(f"⚠️ Empty or null value for global metadata column: {col} (value: {value})")
         
@@ -316,11 +311,11 @@ def _generate_report(project_id, template_path, data_file_path):
                         # Convert percentage values from Excel to decimal format for table display
                         try:
                             # Log the raw value and its type
-                            current_app.logger.info(f"🔍 RAW GROWTH VALUE: {value} (type: {type(value)}) for {key}")
+                            # Processing growth value
                             
                             # Convert to float first to handle any numeric format
                             float_val = float(value)
-                            current_app.logger.debug(f"Processing growth value: {value} -> {float_val} for key {key}")
+                            # Growth value processed
                             
                             # Check if the original value string contains '%' (Excel percentage format)
                             original_str = str(value).strip()
@@ -330,17 +325,17 @@ def _generate_report(project_id, template_path, data_file_path):
                                 float_val = float(clean_val)
                                 decimal_val = f"{float_val / 100:.3f}"
                                 flat_data_map[key] = decimal_val
-                                current_app.logger.debug(f"Converted Excel percentage {original_str} to decimal {decimal_val}")
+                                # Excel percentage converted
                             elif float_val > 1:
                                 # Convert percentage to decimal (e.g., 20% -> 0.2)
                                 decimal_val = f"{float_val / 100:.3f}"
                                 flat_data_map[key] = decimal_val
-                                current_app.logger.debug(f"Converted percentage {float_val}% to decimal {decimal_val}")
+                                # Percentage converted to decimal
                             else:
                                 # If it's already a decimal, format it properly
                                 decimal_val = f"{float_val:.3f}"
                                 flat_data_map[key] = decimal_val
-                                current_app.logger.debug(f"Formatted decimal {float_val} to {decimal_val}")
+                                # Decimal formatted
                         except (ValueError, TypeError):
                             # If conversion fails, use the original value as string
                             flat_data_map[key] = str(value).strip()
@@ -357,7 +352,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     try:
                         # Convert to float first to handle any numeric format
                         float_val = float(value)
-                        current_app.logger.debug(f"Processing CAGR value: {value} -> {float_val} for key {key}")
+                        # CAGR value processed
                         
                         # Check if the original value string contains '%' (Excel percentage format)
                         original_str = str(value).strip()
@@ -367,17 +362,17 @@ def _generate_report(project_id, template_path, data_file_path):
                             float_val = float(clean_val)
                             decimal_val = f"{float_val / 100:.3f}"
                             flat_data_map[key] = decimal_val
-                            current_app.logger.debug(f"Converted Excel CAGR percentage {original_str} to decimal {decimal_val}")
+                            # Excel CAGR percentage converted
                         elif float_val > 1:
                             # Convert percentage to decimal (e.g., 10.5% -> 0.105)
                             decimal_val = f"{float_val / 100:.3f}"
                             flat_data_map[key] = decimal_val
-                            current_app.logger.debug(f"Converted CAGR percentage {float_val}% to decimal {decimal_val}")
+                            # CAGR percentage converted to decimal
                         else:
                             # If it's already a decimal, format it properly
                             decimal_val = f"{float_val:.3f}"
                             flat_data_map[key] = decimal_val
-                            current_app.logger.debug(f"Formatted CAGR decimal {float_val} to {decimal_val}")
+                            # CAGR decimal formatted
                     except (ValueError, TypeError):
                         # If conversion fails, use the original value as string
                         flat_data_map[key] = str(value).strip()
@@ -389,10 +384,7 @@ def _generate_report(project_id, template_path, data_file_path):
         flat_data_map = {k.lower(): v for k, v in flat_data_map.items()}
         
         # Log the final data map for debugging
-        current_app.logger.info("🔍 FINAL DATA MAP FOR TABLE REPLACEMENT:")
-        for key, value in flat_data_map.items():
-            if 'kpi2' in key or 'cgrp' in key or key in ['country', 'report_name', 'report_code', 'currency']:  # Log growth rates, CAGR, and global metadata
-                current_app.logger.info(f"  {key}: {value} (type: {type(value)})")
+        # Data map prepared for replacement
         
         # Data mapping completed silently
 
@@ -507,10 +499,10 @@ def _generate_report(project_id, template_path, data_file_path):
         def process_entire_document():
             """Process the entire document comprehensively to catch all placeholders"""
             nonlocal doc, flat_data_map, text_map  # Access variables from outer scope
-            current_app.logger.info("🔄 PROCESSING ENTIRE DOCUMENT COMPREHENSIVELY")
+            # current_app.logger.info("🔄 PROCESSING ENTIRE DOCUMENT COMPREHENSIVELY")
             
             # Find ALL placeholders in the entire document first
-            current_app.logger.info("🔍 SEARCHING FOR ALL PLACEHOLDERS IN ENTIRE DOCUMENT")
+            # current_app.logger.info("🔍 SEARCHING FOR ALL PLACEHOLDERS IN ENTIRE DOCUMENT")
             
             all_placeholders_found = set()
             
@@ -550,7 +542,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     search_for_placeholders(section.footer)
             
             # Additional search: Look at raw XML for any missed placeholders
-            current_app.logger.info("🔍 ADDITIONAL SEARCH: Looking at raw XML for missed placeholders")
+            # current_app.logger.info("🔍 ADDITIONAL SEARCH: Looking at raw XML for missed placeholders")
             try:
                 for element in doc.element.iter():
                     if hasattr(element, 'text') and element.text:
@@ -568,11 +560,11 @@ def _generate_report(project_id, template_path, data_file_path):
             except Exception as e:
                 current_app.logger.warning(f"⚠️ Error in additional XML search: {e}")
             
-            current_app.logger.info(f"🔍 Found {len(all_placeholders_found)} unique placeholders: {list(all_placeholders_found)}")
+            # current_app.logger.info(f"🔍 Found {len(all_placeholders_found)} unique placeholders: {list(all_placeholders_found)}")
             
             # Log specific global metadata placeholders found
             global_placeholders_found = [p for p in all_placeholders_found if any(key in p.lower() for key in ['country', 'report_name', 'report_code', 'currency'])]
-            current_app.logger.info(f"🔍 Global metadata placeholders found: {global_placeholders_found}")
+            # current_app.logger.info(f"🔍 Global metadata placeholders found: {global_placeholders_found}")
             
             # Verify that we have data for all found global metadata placeholders
             for placeholder in global_placeholders_found:
@@ -584,11 +576,11 @@ def _generate_report(project_id, template_path, data_file_path):
                     continue
                 
                 if key in ['country', 'report_name', 'report_code', 'currency']:
-                    if key in flat_data_map:
-                        current_app.logger.info(f"✅ Data available for {placeholder}: {flat_data_map[key]}")
-                    else:
-                        current_app.logger.error(f"❌ NO DATA AVAILABLE for {placeholder} (key: {key})")
-                        current_app.logger.error(f"❌ Available keys: {list(flat_data_map.keys())}")
+                      if key in flat_data_map:
+                          current_app.logger.info(f"✅ Data available for {placeholder}: {flat_data_map[key]}")
+                      else:
+                          current_app.logger.error(f"❌ NO DATA AVAILABLE for {placeholder} (key: {key})")
+                          current_app.logger.error(f"❌ Available keys: {list(flat_data_map.keys())}")
             
             # Now replace ALL placeholders everywhere they appear
             current_app.logger.info("🔄 REPLACING ALL PLACEHOLDERS EVERYWHERE")
@@ -660,12 +652,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                 element.text = modified_text
                                 current_app.logger.info(f"🔄 XML ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
                 except Exception as e:
-                    current_app.logger.warning(f"⚠️ Error processing XML elements: {e}")
+                    #current_app.logger.warning(f"⚠️ Error processing XML elements: {e}")
             
-            current_app.logger.info("✅ COMPREHENSIVE DOCUMENT PROCESSING COMPLETED")
+            #current_app.logger.info("✅ COMPREHENSIVE DOCUMENT PROCESSING COMPLETED")
             
             # Additional pass: Handle special Word elements that might contain placeholders
-            current_app.logger.info("🔄 FINAL PASS: Processing special Word elements...")
+                    current_app.logger.info("🔄 FINAL PASS: Processing special Word elements...")
             
             # Process text boxes and other special elements
             try:
@@ -692,23 +684,23 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 if dollar_placeholder in modified_text:
                                     modified_text = modified_text.replace(dollar_placeholder, str(value))
-                                    current_app.logger.info(f"🔄 FINAL XML REPLACEMENT: {dollar_placeholder} -> {value}")
+                                    #current_app.logger.info(f"🔄 FINAL XML REPLACEMENT: {dollar_placeholder} -> {value}")
                                 
                                 if angle_placeholder in modified_text:
                                     modified_text = modified_text.replace(angle_placeholder, str(value))
-                                    current_app.logger.info(f"🔄 FINAL XML REPLACEMENT: {angle_placeholder} -> {value}")
+                                    #current_app.logger.info(f"🔄 FINAL XML REPLACEMENT: {angle_placeholder} -> {value}")
                         
                         # Update the element if modified
                         if modified_text != original_text:
                             element.text = modified_text
-                            current_app.logger.info(f"🔄 FINAL XML ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
+                            #current_app.logger.info(f"🔄 FINAL XML ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
             except Exception as e:
                 current_app.logger.warning(f"⚠️ Error in final XML processing: {e}")
             
             current_app.logger.info("✅ FINAL PASS COMPLETED")
             
             # ULTIMATE PASS: Force replacement of all global metadata placeholders anywhere in the document
-            current_app.logger.info("🔄 ULTIMATE PASS: Force replacement of all global metadata placeholders...")
+            #current_app.logger.info("🔄 ULTIMATE PASS: Force replacement of all global metadata placeholders...")
             
             # Get all global metadata values
             global_metadata_values = {
@@ -718,7 +710,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 'currency': flat_data_map.get('currency', '')
             }
             
-            current_app.logger.info(f"📋 Global metadata values for ultimate replacement: {global_metadata_values}")
+            #current_app.logger.info(f"📋 Global metadata values for ultimate replacement: {global_metadata_values}")
             
             # Force replacement in ALL possible locations
             def force_replace_in_element(element):
@@ -746,12 +738,12 @@ def _generate_report(project_id, template_path, data_file_path):
                             for variation in variations:
                                 if variation in modified_text:
                                     modified_text = modified_text.replace(variation, str(value))
-                                    current_app.logger.info(f"🔄 ULTIMATE REPLACEMENT: {variation} -> {value}")
+                                    #current_app.logger.info(f"🔄 ULTIMATE REPLACEMENT: {variation} -> {value}")
                     
                     # Update the element if modified
                     if modified_text != original_text:
                         element.text = modified_text
-                        current_app.logger.info(f"🔄 ULTIMATE ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
+                        #current_app.logger.info(f"🔄 ULTIMATE ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
             
             # Process ALL possible document elements
             try:
@@ -815,10 +807,10 @@ def _generate_report(project_id, template_path, data_file_path):
                 import traceback
                 current_app.logger.error(f"❌ Traceback: {traceback.format_exc()}")
             
-            current_app.logger.info("✅ ULTIMATE PASS COMPLETED")
+            #current_app.logger.info("✅ ULTIMATE PASS COMPLETED")
             
             # NUCLEAR OPTION: Direct XML manipulation to catch everything
-            current_app.logger.info("🔄 NUCLEAR OPTION: Direct XML manipulation...")
+            #current_app.logger.info("🔄 NUCLEAR OPTION: Direct XML manipulation...")
             
             try:
                 # Convert document to XML string
@@ -848,11 +840,11 @@ def _generate_report(project_id, template_path, data_file_path):
                         for variation in variations:
                             if variation in xml_content:
                                 xml_content = xml_content.replace(variation, str(value))
-                                current_app.logger.info(f"🔄 NUCLEAR XML REPLACEMENT: {variation} -> {value}")
+                                #current_app.logger.info(f"🔄 NUCLEAR XML REPLACEMENT: {variation} -> {value}")
                 
                 # If XML was modified, reload the document
                 if xml_content != original_xml:
-                    current_app.logger.info("🔄 XML was modified, reloading document...")
+                    #current_app.logger.info("🔄 XML was modified, reloading document...")
                     # Create a temporary file with the modified XML
                     import tempfile
                     import os
@@ -869,7 +861,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Clean up temp file
                     os.unlink(tmp_path)
                     
-                    current_app.logger.info("✅ Document reloaded with XML modifications")
+                    #current_app.logger.info("✅ Document reloaded with XML modifications")
                 else:
                     current_app.logger.info("ℹ️ No XML modifications needed")
                     
@@ -878,10 +870,10 @@ def _generate_report(project_id, template_path, data_file_path):
                 import traceback
                 current_app.logger.error(f"❌ Traceback: {traceback.format_exc()}")
             
-            current_app.logger.info("✅ NUCLEAR OPTION COMPLETED")
+            #current_app.logger.info("✅ NUCLEAR OPTION COMPLETED")
             
             # FINAL VERIFICATION: Search for any remaining placeholders
-            current_app.logger.info("🔍 FINAL VERIFICATION: Checking for any remaining placeholders...")
+            #current_app.logger.info("🔍 FINAL VERIFICATION: Checking for any remaining placeholders...")
             
             def search_for_remaining_placeholders(element, path=""):
                 """Recursively search for any remaining placeholders"""
@@ -912,7 +904,7 @@ def _generate_report(project_id, template_path, data_file_path):
             # Search the entire document
             search_for_remaining_placeholders(doc.element, "document")
             
-            current_app.logger.info("✅ FINAL VERIFICATION COMPLETED")
+            #current_app.logger.info("✅ FINAL VERIFICATION COMPLETED")
 
 
                             
@@ -943,11 +935,11 @@ def _generate_report(project_id, template_path, data_file_path):
                 title = chart_meta.get("chart_title", chart_tag)
 
                 # --- Comprehensive attribute detection logging ---
-                current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION STARTED")
-                current_app.logger.info(f"📊 Chart Type: {chart_type}")
-                current_app.logger.info(f"📋 Chart Meta Keys Found: {list(chart_meta.keys())}")
-                current_app.logger.info(f"📋 Chart Config Keys Found: {list(chart_config.keys())}")
-                current_app.logger.info(f"📋 Top-level Keys Found: {list(data_dict.keys())}")
+                #current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION STARTED")
+                #current_app.logger.info(f"📊 Chart Type: {chart_type}")
+                #current_app.logger.info(f"📋 Chart Meta Keys Found: {list(chart_meta.keys())}")
+                #current_app.logger.info(f"📋 Chart Config Keys Found: {list(chart_config.keys())}")
+                #current_app.logger.info(f"📋 Top-level Keys Found: {list(data_dict.keys())}")
                 
                 # Define all possible chart attributes
                 all_possible_attributes = [
@@ -978,14 +970,14 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 # Only log missing attributes if there are any
                 if missing_attributes:
-                    current_app.logger.warning(f"❌ MISSING ATTRIBUTES for {chart_tag} (Not being read by system):")
-                    for attr in missing_attributes:
-                        current_app.logger.warning(f"   ❌ {attr}")
-                    current_app.logger.warning(f"📊 Total missing: {len(missing_attributes)} attributes")
+                            current_app.logger.warning(f"❌ MISSING ATTRIBUTES for {chart_tag} (Not being read by system):")
+                            for attr in missing_attributes:
+                                current_app.logger.warning(f"   ❌ {attr}")
+                            current_app.logger.warning(f"📊 Total missing: {len(missing_attributes)} attributes")
                 else:
                     current_app.logger.info(f"✅ All possible attributes found for {chart_tag}")
                 
-                current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION COMPLETED")
+                    current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION COMPLETED")
 
                 # --- Define chart type mappings for Matplotlib ---
                 chart_type_mapping_mpl = {
@@ -1049,11 +1041,11 @@ def _generate_report(project_id, template_path, data_file_path):
                 data_label_color = data_dict.get("data_label_color") or chart_config.get("data_label_color") or chart_meta.get("data_label_color")
                 axis_tick_format = data_dict.get("axis_tick_format") or chart_config.get("axis_tick_format") or chart_meta.get("axis_tick_format")
                 y_axis_min_max = data_dict.get("y_axis_min_max") or chart_config.get("y_axis_min_max") or chart_meta.get("y_axis_min_max")
-                current_app.logger.debug(f"Y-axis min/max from config: {y_axis_min_max}")
+                # current_app.logger.debug(f"Y-axis min/max from config: {y_axis_min_max}")
                 secondary_y_axis_format = data_dict.get("secondary_y_axis_format") or chart_config.get("secondary_y_axis_format") or chart_meta.get("secondary_y_axis_format")
                 secondary_y_axis_min_max = data_dict.get("secondary_y_axis_min_max") or chart_config.get("secondary_y_axis_min_max") or chart_meta.get("secondary_y_axis_min_max")
                 disable_secondary_y = data_dict.get("disable_secondary_y") or chart_config.get("disable_secondary_y") or chart_meta.get("disable_secondary_y", False)
-                current_app.logger.info(f"🔧 disable_secondary_y setting: {disable_secondary_y}")
+                # current_app.logger.info(f"🔧 disable_secondary_y setting: {disable_secondary_y}")
                 sort_order = data_dict.get("sort_order") or chart_config.get("sort_order") or chart_meta.get("sort_order")
                 data_grouping = data_dict.get("data_grouping") or chart_config.get("data_grouping") or chart_meta.get("data_grouping")
                 annotations = data_dict.get("annotations", []) or chart_config.get("annotations", []) or chart_meta.get("annotations", [])
@@ -1149,7 +1141,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     elif "series" in series_meta and isinstance(series_meta["series"], dict):
                         x_values = series_meta["series"].get("x_axis", [])
                 
-                current_app.logger.info(f"🔍 Extracted x_values: {x_values}")
+                # current_app.logger.info(f"🔍 Extracted x_values: {x_values}")
                 
                 # Ensure x_values is always defined to prevent "cannot access local variable" error
                 if not x_values:
@@ -1159,12 +1151,12 @@ def _generate_report(project_id, template_path, data_file_path):
                 colors = series_meta.get("colors", [])
                 
                 # --- SERIES ATTRIBUTE DETECTION LOGGING ---
-                current_app.logger.info(f"🔍 SERIES ATTRIBUTE DETECTION STARTED")
-                current_app.logger.info(f"📊 Number of series: {len(series_data)}")
-                current_app.logger.info(f"📋 Series meta keys: {list(series_data.keys()) if isinstance(series_data, dict) else 'N/A'}")
-                current_app.logger.info(f"📋 Series meta structure: {series_meta}")
-                current_app.logger.info(f"📋 Series data: {series_data}")
-                current_app.logger.info(f"📋 X values extracted: {x_values}")
+                #current_app.logger.info(f"🔍 SERIES ATTRIBUTE DETECTION STARTED")
+                #current_app.logger.info(f"📊 Number of series: {len(series_data)}")
+                #current_app.logger.info(f"📋 Series meta keys: {list(series_data.keys()) if isinstance(series_data, dict) else 'N/A'}")
+                #current_app.logger.info(f"📋 Series meta structure: {series_meta}")
+                #current_app.logger.info(f"📋 Series data: {series_data}")
+                #current_app.logger.info(f"📋 X values extracted: {x_values}")
                 
                 # Define all possible series attributes
                 all_possible_series_attributes = [
@@ -1176,8 +1168,8 @@ def _generate_report(project_id, template_path, data_file_path):
                 for i, series in enumerate(series_data):
                     series_name = series.get("name", f"Series {i+1}")
                     series_type = series.get("type", "unknown")
-                    current_app.logger.info(f"📈 SERIES {i+1}: {series_name}")
-                    current_app.logger.info(f"   Type: {series_type}")
+                    #current_app.logger.info(f"📈 SERIES {i+1}: {series_name}")
+                    #current_app.logger.info(f"   Type: {series_type}")
                     
                     # Check which series attributes are missing
                     missing_series_attributes = []
@@ -1194,7 +1186,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     else:
                         current_app.logger.info(f"   ✅ All possible series attributes found for {series_name}")
                 
-                current_app.logger.info(f"🔍 SERIES ATTRIBUTE DETECTION COMPLETED")
+                #current_app.logger.info(f"🔍 SERIES ATTRIBUTE DETECTION COMPLETED")
 
                 # --- Plotly interactive chart generation ---
                 fig = go.Figure()
@@ -1228,10 +1220,10 @@ def _generate_report(project_id, template_path, data_file_path):
                             current_app.logger.warning(f"Failed to extract other_values from {other_values}: {e}")
                     
                     # Log the extracted data for debugging
-                    current_app.logger.info(f"🔍 Bar of Pie Chart Data:")
-                    current_app.logger.info(f"   Other Labels: {other_labels}")
-                    current_app.logger.info(f"   Other Values: {other_values}")
-                    current_app.logger.info(f"   Other Colors: {other_colors}")
+                    #current_app.logger.info(f"🔍 Bar of Pie Chart Data:")
+                    #current_app.logger.info(f"   Other Labels: {other_labels}")
+                    #current_app.logger.info(f"   Other Values: {other_values}")
+                    #current_app.logger.info(f"   Other Colors: {other_colors}")
                     
                     # Check for empty/null values
                     if other_labels and other_values:
@@ -1666,12 +1658,12 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 # Legend configuration
                 show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
-                current_app.logger.debug(f"Legend setting: {chart_meta.get('legend')}")
-                current_app.logger.debug(f"Showlegend setting: {chart_meta.get('showlegend')}")
-                current_app.logger.debug(f"Final show_legend: {show_legend}")
+                # current_app.logger.debug(f"Legend setting: {chart_meta.get('legend')}")
+                # current_app.logger.debug(f"Showlegend setting: {chart_meta.get('showlegend')}")
+                # current_app.logger.debug(f"Final show_legend: {show_legend}")
                 
                 if show_legend:
-                    current_app.logger.debug("Configuring legend for Plotly")
+                    # current_app.logger.debug("Configuring legend for Plotly")
                     if legend_position:
                         # Map 'top', 'bottom', 'left', 'right' to valid Plotly legend positions
                         pos_map = {
@@ -1682,13 +1674,13 @@ def _generate_report(project_id, template_path, data_file_path):
                         }
                         if legend_position in pos_map:
                             layout_updates["legend"] = pos_map[legend_position]
-                            current_app.logger.debug(f"Set legend position: {legend_position}")
+                            # current_app.logger.debug(f"Set legend position: {legend_position}")
                     if legend_font_size:
                         layout_updates.setdefault("legend", {})["font"] = {"size": legend_font_size}
-                        current_app.logger.debug(f"Set legend font size: {legend_font_size}")
+                        # current_app.logger.debug(f"Set legend font size: {legend_font_size}")
                 else:
                     layout_updates["showlegend"] = False
-                    current_app.logger.debug("Legend disabled for Plotly")
+                    # current_app.logger.debug("Legend disabled for Plotly")
                 
                 # Bar mode for stacked charts
                 if barmode:
@@ -1711,7 +1703,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             # Force the range to be applied
                             layout_updates["yaxis"]["fixedrange"] = False
                             # Ensure the range is properly set
-                            current_app.logger.debug(f"Setting Y-axis range to: {y_axis_min_max}")
+                            # current_app.logger.debug(f"Setting Y-axis range to: {y_axis_min_max}")
                     if axis_tick_format:
                         layout_updates["yaxis"] = layout_updates.get("yaxis", {})
                         layout_updates["yaxis"]["tickformat"] = axis_tick_format
@@ -1781,19 +1773,19 @@ def _generate_report(project_id, template_path, data_file_path):
                     show_data_labels = False
                 
                 # Debug logging for data labels
-                current_app.logger.debug(f"Original data_labels setting: {chart_meta.get('data_labels')}")
-                current_app.logger.debug(f"Final show_data_labels: {show_data_labels}")
-                current_app.logger.debug(f"Data label format: {data_label_format}")
-                current_app.logger.debug(f"Data label font size: {data_label_font_size}")
-                current_app.logger.debug(f"Data label color: {data_label_color}")
-                current_app.logger.debug(f"Value format: {value_format}")
-                current_app.logger.debug(f"Chart config keys: {list(chart_config.keys())}")
-                current_app.logger.debug(f"Chart meta keys: {list(chart_meta.keys())}")
+                # current_app.logger.debug(f"Original data_labels setting: {chart_meta.get('data_labels')}")
+                # current_app.logger.debug(f"Final show_data_labels: {show_data_labels}")
+                # current_app.logger.debug(f"Data label format: {data_label_format}")
+                # current_app.logger.debug(f"Data label font size: {data_label_font_size}")
+                # current_app.logger.debug(f"Data label color: {data_label_color}")
+                # current_app.logger.debug(f"Value format: {value_format}")
+                # current_app.logger.debug(f"Chart config keys: {list(chart_config.keys())}")
+                # current_app.logger.debug(f"Chart meta keys: {list(chart_meta.keys())}")
                 
                 if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color):
-                    current_app.logger.debug(f"Processing {len(fig.data)} traces for data labels")
+                    # current_app.logger.debug(f"Processing {len(fig.data)} traces for data labels")
                     for i, trace in enumerate(fig.data):
-                        current_app.logger.debug(f"Trace {i}: type={trace.type}, mode={getattr(trace, 'mode', 'N/A')}")
+                        # current_app.logger.debug(f"Trace {i}: type={trace.type}, mode={getattr(trace, 'mode', 'N/A')}")
                         # Handle both bar and line charts (line charts are scatter with mode='lines')
                         if trace.type in ['bar', 'scatter']:
                             # Use value_format from chart_meta if available, otherwise use data_label_format
@@ -1852,7 +1844,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 if figsize:
                     layout_updates["width"] = figsize[0] * 100  # Convert to pixels
                     layout_updates["height"] = figsize[1] * 100  # Convert to pixels
-                    current_app.logger.debug(f"Applied Plotly figsize: {figsize} -> width={figsize[0]*100}, height={figsize[1]*100}")
+                    # current_app.logger.debug(f"Applied Plotly figsize: {figsize} -> width={figsize[0]*100}, height={figsize[1]*100}")
                 
                 # Apply axis label distances
                 if chart_type != "pie":
@@ -2100,7 +2092,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 else:
                     # Bar, line, area charts
                     mpl_figsize = figsize if figsize else (10, 6)
-                    current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
+                    # current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
                     fig_mpl, ax1 = plt.subplots(figsize=mpl_figsize, dpi=200)
                     ax2 = ax1.twinx()
                     
@@ -2448,12 +2440,12 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 # Legend configuration
                 show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
-                current_app.logger.debug(f"Legend setting: {chart_meta.get('legend')}")
-                current_app.logger.debug(f"Showlegend setting: {chart_meta.get('showlegend')}")
-                current_app.logger.debug(f"Final show_legend: {show_legend}")
+                # current_app.logger.debug(f"Legend setting: {chart_meta.get('legend')}")
+                # current_app.logger.debug(f"Showlegend setting: {chart_meta.get('showlegend')}")
+                # current_app.logger.debug(f"Final show_legend: {show_legend}")
                 
                 if show_legend:
-                    current_app.logger.debug("Configuring legend for Plotly")
+                    # current_app.logger.debug("Configuring legend for Plotly")
                     if legend_position:
                         # Map 'top', 'bottom', 'left', 'right' to valid Plotly legend positions
                         pos_map = {
@@ -2464,13 +2456,13 @@ def _generate_report(project_id, template_path, data_file_path):
                         }
                         if legend_position in pos_map:
                             layout_updates["legend"] = pos_map[legend_position]
-                            current_app.logger.debug(f"Set legend position: {legend_position}")
+                            # current_app.logger.debug(f"Set legend position: {legend_position}")
                     if legend_font_size:
                         layout_updates.setdefault("legend", {})["font"] = {"size": legend_font_size}
-                        current_app.logger.debug(f"Set legend font size: {legend_font_size}")
+                        # current_app.logger.debug(f"Set legend font size: {legend_font_size}")
                 else:
                     layout_updates["showlegend"] = False
-                    current_app.logger.debug("Legend disabled for Plotly")
+                    # current_app.logger.debug("Legend disabled for Plotly")
                 
                 # Bar mode for stacked charts
                 if barmode:
@@ -2493,7 +2485,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             # Force the range to be applied
                             layout_updates["yaxis"]["fixedrange"] = False
                             # Ensure the range is properly set
-                            current_app.logger.debug(f"Setting Y-axis range to: {y_axis_min_max}")
+                            # current_app.logger.debug(f"Setting Y-axis range to: {y_axis_min_max}")
                     if axis_tick_format:
                         layout_updates["yaxis"] = layout_updates.get("yaxis", {})
                         layout_updates["yaxis"]["tickformat"] = axis_tick_format
@@ -2563,19 +2555,19 @@ def _generate_report(project_id, template_path, data_file_path):
                     show_data_labels = False
                 
                 # Debug logging for data labels
-                current_app.logger.debug(f"Original data_labels setting: {chart_meta.get('data_labels')}")
-                current_app.logger.debug(f"Final show_data_labels: {show_data_labels}")
-                current_app.logger.debug(f"Data label format: {data_label_format}")
-                current_app.logger.debug(f"Data label font size: {data_label_font_size}")
-                current_app.logger.debug(f"Data label color: {data_label_color}")
-                current_app.logger.debug(f"Value format: {value_format}")
-                current_app.logger.debug(f"Chart config keys: {list(chart_config.keys())}")
-                current_app.logger.debug(f"Chart meta keys: {list(chart_meta.keys())}")
+                # current_app.logger.debug(f"Original data_labels setting: {chart_meta.get('data_labels')}")
+                # current_app.logger.debug(f"Final show_data_labels: {show_data_labels}")
+                # current_app.logger.debug(f"Data label format: {data_label_format}")
+                # current_app.logger.debug(f"Data label font size: {data_label_font_size}")
+                # current_app.logger.debug(f"Data label color: {data_label_color}")
+                # current_app.logger.debug(f"Value format: {value_format}")
+                # current_app.logger.debug(f"Chart config keys: {list(chart_config.keys())}")
+                # current_app.logger.debug(f"Chart meta keys: {list(chart_meta.keys())}")
                 
                 if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color):
-                    current_app.logger.debug(f"Processing {len(fig.data)} traces for data labels")
+                    # current_app.logger.debug(f"Processing {len(fig.data)} traces for data labels")
                     for i, trace in enumerate(fig.data):
-                        current_app.logger.debug(f"Trace {i}: type={trace.type}, mode={getattr(trace, 'mode', 'N/A')}")
+                        # current_app.logger.debug(f"Trace {i}: type={trace.type}, mode={getattr(trace, 'mode', 'N/A')}")
                         # Handle both bar and line charts (line charts are scatter with mode='lines')
                         if trace.type in ['bar', 'scatter']:
                             # Use value_format from chart_meta if available, otherwise use data_label_format
@@ -2634,7 +2626,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 if figsize:
                     layout_updates["width"] = figsize[0] * 100  # Convert to pixels
                     layout_updates["height"] = figsize[1] * 100  # Convert to pixels
-                    current_app.logger.debug(f"Applied Plotly figsize: {figsize} -> width={figsize[0]*100}, height={figsize[1]*100}")
+                    # current_app.logger.debug(f"Applied Plotly figsize: {figsize} -> width={figsize[0]*100}, height={figsize[1]*100}")
                 
                 # Apply axis label distances
                 if chart_type != "pie":
@@ -2882,7 +2874,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 else:
                     # Bar, line, area charts
                     mpl_figsize = figsize if figsize else (10, 6)
-                    current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
+                    # current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
                     fig_mpl, ax1 = plt.subplots(figsize=mpl_figsize, dpi=200)
                     ax2 = ax1.twinx()
                     
@@ -2962,15 +2954,11 @@ def _generate_report(project_id, template_path, data_file_path):
                             # Scatter plot and Bubble chart
                             if series_type == "bubble":
                                 # Enhanced bubble chart with better styling
-                                current_app.logger.info(f"🎈 Creating bubble chart for series: {label}")
+                                # Creating bubble chart for series: {label}
                                 
                                 # Get sizes from the series data structure
                                 sizes = series.get("size", [20] * len(y_vals))
-                                current_app.logger.info(f"   Sizes: {sizes}")
-                                current_app.logger.info(f"   X values: {x_values}")
-                                current_app.logger.info(f"   Y values: {y_vals}")
-                                current_app.logger.info(f"   Colors: {color}")
-                                current_app.logger.info(f"   Length check - X: {len(x_values)}, Y: {len(y_vals)}, Sizes: {len(sizes)}")
+                                # Bubble chart data processed
                                 
                                 # Ensure all arrays have the same length
                                 min_length = min(len(x_values), len(y_vals), len(sizes))
@@ -2984,7 +2972,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 # Scale sizes for better visual impact (bubble charts need much larger sizes)
                                 scaled_sizes = [s * 20 for s in sizes]  # Much larger scale for better visibility
-                                current_app.logger.info(f"   Scaled sizes: {scaled_sizes}")
+                                # Scaled sizes calculated
                                 
                                 # Get colors - support both single color and color list
                                 bubble_colors = color
@@ -3115,9 +3103,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                         elif mpl_chart_type == "fill_between":
                             # Enhanced Area chart
-                            current_app.logger.debug(f"Processing area chart for series: {label}")
-                            current_app.logger.debug(f"X values: {x_vals}")
-                            current_app.logger.debug(f"Y values: {y_vals}")
+                            # current_app.logger.debug(f"Processing area chart for series: {label}")
+                            # current_app.logger.debug(f"X values: {x_vals}")
+                            # current_app.logger.debug(f"Y values: {y_vals}")
                             
                             # Extract area-specific properties from series
                             fill_type = series.get("fill", "tozeroy")
@@ -3209,14 +3197,14 @@ def _generate_report(project_id, template_path, data_file_path):
                         elif mpl_chart_type == "imshow":
                             # Enhanced heatmap implementation
                             heatmap_data = series.get("z", series.get("values", []))
-                            current_app.logger.debug(f"Heatmap data found: {heatmap_data}")
+                            # current_app.logger.debug(f"Heatmap data found: {heatmap_data}")
                             
                             # Ensure we have valid heatmap data
                             if not heatmap_data or len(heatmap_data) == 0:
                                 current_app.logger.warning(f"⚠️ No heatmap data found in series: {series}")
                                 # Create a default heatmap for testing
                                 heatmap_data = [[1, 0, 1, 1], [1, 1, 1, 0], [0, 1, 1, 1]]
-                                current_app.logger.debug(f"Using default heatmap data: {heatmap_data}")
+                                # current_app.logger.debug(f"Using default heatmap data: {heatmap_data}")
                             
                             # Ensure heatmap_data is a 2D array
                             if isinstance(heatmap_data[0], (int, float)):
@@ -3228,13 +3216,13 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # Pad with zeros if needed
                                 padded_data = heatmap_data + [0] * (rows * cols - len(heatmap_data))
                                 heatmap_data = [padded_data[i:i+cols] for i in range(0, len(padded_data), cols)]
-                                current_app.logger.debug(f"Reshaped heatmap data: {heatmap_data}")
-                                current_app.logger.debug(f"X values: {x_values}")
-                                current_app.logger.debug(f"Cols: {cols}, Rows: {rows}")
+                                # current_app.logger.debug(f"Reshaped heatmap data: {heatmap_data}")
+                                # current_app.logger.debug(f"X values: {x_values}")
+                                # current_app.logger.debug(f"Cols: {cols}, Rows: {rows}")
                             
                             # Get colorscale from series or use default
                             colorscale = series.get("colorscale", "RdYlGn")
-                            current_app.logger.debug(f"Using colorscale: {colorscale}")
+                            # current_app.logger.debug(f"Using colorscale: {colorscale}")
                             
                             # Create heatmap with enhanced styling
                             im = ax1.imshow(heatmap_data, cmap=colorscale, aspect='auto', 
@@ -3305,7 +3293,7 @@ def _generate_report(project_id, template_path, data_file_path):
 
                     # Add data labels to Matplotlib chart if enabled (skip for area charts as they have custom label handling)
                     if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color) and chart_type != "area":
-                        current_app.logger.debug(f"Adding data labels to Matplotlib chart")
+                        # current_app.logger.debug(f"Adding data labels to Matplotlib chart")
                         for i, series in enumerate(series_data):
                             series_type = series.get("type", "bar").lower()
                             y_vals = series.get("values")
@@ -3347,7 +3335,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                                     color=label_color,
                                                     fontweight='bold',
                                                     bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
-                                            current_app.logger.debug(f"Added bar data label with color: {label_color}")
+                                            # current_app.logger.debug(f"Added bar data label with color: {label_color}")
                                 
                                 elif series_type == "line":
                                     for j, val in enumerate(y_vals):
@@ -3380,7 +3368,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                                     color=label_color,
                                                     fontweight='bold',
                                                     bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
-                                            current_app.logger.debug(f"Added line data label with color: {label_color}")
+                                            # current_app.logger.debug(f"Added line data label with color: {label_color}")
 
                                             # Set labels and styling
                         if chart_type != "pie":
@@ -3440,7 +3428,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         if x_axis_label_distance:
                             # Use tick label padding to control distance
                             ax1.tick_params(axis='x', pad=x_axis_label_distance)
-                            current_app.logger.debug(f"Applied X-axis tick padding: {x_axis_label_distance}")
+                            # current_app.logger.debug(f"Applied X-axis tick padding: {x_axis_label_distance}")
                         
                         # Apply secondary y-axis formatting for Matplotlib
                         if ax2 and not is_bubble_chart:
@@ -3459,14 +3447,14 @@ def _generate_report(project_id, template_path, data_file_path):
                             else:
                                 current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
                         elif is_bubble_chart:
-                            current_app.logger.info(f"🎈 Skipping secondary Y-axis formatting for bubble chart")
+                            # current_app.logger.info(f"🎈 Skipping secondary Y-axis formatting for bubble chart")
                             # Explicitly hide secondary Y-axis for bubble charts
                             if ax2:
                                 ax2.set_visible(False)
-                                current_app.logger.info(f"🎈 Secondary Y-axis hidden for bubble chart")
+                                # current_app.logger.info(f"🎈 Secondary Y-axis hidden for bubble chart")
                         
                         # Gridlines
-                        current_app.logger.debug(f"Gridlines setting: {show_gridlines}")
+                        # current_app.logger.debug(f"Gridlines setting: {show_gridlines}")
                         if show_gridlines:
                             # Map gridline styles to valid Matplotlib linestyles
                             matplotlib_linestyle_map = {
@@ -3495,7 +3483,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     return f'${x:,.0f}'
                                 ax1.yaxis.set_major_formatter(FuncFormatter(currency_formatter))
                         if y_axis_min_max:
-                            current_app.logger.debug(f"Setting Matplotlib Y-axis range to: {y_axis_min_max}")
+                            # current_app.logger.debug(f"Setting Matplotlib Y-axis range to: {y_axis_min_max}")
                             # Ensure the range is properly applied
                             if isinstance(y_axis_min_max, list) and len(y_axis_min_max) == 2:
                                 # Check if the provided range is appropriate for the data
@@ -3518,15 +3506,15 @@ def _generate_report(project_id, template_path, data_file_path):
                                         auto_min = max(0, data_min - padding)
                                         auto_max = data_max + padding
                                         ax1.set_ylim(auto_min, auto_max)
-                                        current_app.logger.debug(f"Auto-adjusted Y-axis range from {y_axis_min_max} to {[auto_min, auto_max]} (data range: {data_min}-{data_max})")
+                                        # current_app.logger.debug(f"Auto-adjusted Y-axis range from {y_axis_min_max} to {[auto_min, auto_max]} (data range: {data_min}-{data_max})")
                                     else:
                                         # Use provided range
                                         ax1.set_ylim(y_axis_min_max[0], y_axis_min_max[1])
-                                        current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
+                                        # current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
                                 else:
                                     # No data available, use provided range
                                     ax1.set_ylim(y_axis_min_max[0], y_axis_min_max[1])
-                                    current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
+                                    # current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
                             else:
                                 current_app.logger.warning(f"Invalid Y-axis range format: {y_axis_min_max}")
                         
@@ -3535,12 +3523,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         
                         # Legend
                         show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
-                        current_app.logger.debug(f"Matplotlib legend setting: {show_legend}")
+                        # current_app.logger.debug(f"Matplotlib legend setting: {show_legend}")
                         
                         # Disable legend for bubble charts to avoid the orange bubble marker
                         if is_bubble_chart:
                             show_legend = False
-                            current_app.logger.info(f"🎈 Disabled legend for bubble chart to avoid extra bubble marker")
+                            # current_app.logger.info(f"🎈 Disabled legend for bubble chart to avoid extra bubble marker")
                         
                         # Initialize legend_loc outside the if block to fix scope issue
                         legend_loc = 'best'  # default
@@ -3550,7 +3538,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             lines2, labels2 = ax2.get_legend_handles_labels()
                             
                             # Map legend position for Matplotlib
-                            current_app.logger.debug(f"Legend position from config: {legend_position}")
+                            # current_app.logger.debug(f"Legend position from config: {legend_position}")
                             if legend_position:
                                 loc_map = {
                                     "top": "upper center",
@@ -3559,28 +3547,28 @@ def _generate_report(project_id, template_path, data_file_path):
                                     "right": "center right"
                                 }
                                 legend_loc = loc_map.get(legend_position, 'best')
-                                current_app.logger.debug(f"Matplotlib legend position mapping: {legend_position} -> {legend_loc}")
+                                # current_app.logger.debug(f"Matplotlib legend position mapping: {legend_position} -> {legend_loc}")
                             else:
-                                current_app.logger.debug("No legend position specified, using default 'best'")
+                                # current_app.logger.debug("No legend position specified, using default 'best'")
                             
                             # Force legend to bottom if specified
-                            if legend_position == "bottom":
-                                ax1.legend(lines1 + lines2, labels1 + labels2, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
-                                current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at forced bottom position")
-                            else:
-                                # Skip legend for bubble charts to avoid the orange bubble marker
-                                if is_bubble_chart:
-                                    current_app.logger.info(f"🎈 Skipping legend for bubble chart to avoid extra bubble marker")
+                                if legend_position == "bottom":
+                                    ax1.legend(lines1 + lines2, labels1 + labels2, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                                    # current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at forced bottom position")
                                 else:
-                                    ax1.legend(lines1 + lines2, labels1 + labels2, loc=legend_loc, fontsize=legend_font_size)
-                                    current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at position: {legend_loc}")
+                                    # Skip legend for bubble charts to avoid the orange bubble marker
+                                    if is_bubble_chart:
+                                        current_app.logger.info(f"🎈 Skipping legend for bubble chart to avoid extra bubble marker")
+                                    else:
+                                        ax1.legend(lines1 + lines2, labels1 + labels2, loc=legend_loc, fontsize=legend_font_size)
+                                        # current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at position: {legend_loc}")
                         
                         # Set title with proper font attributes (ENHANCED VERSION)
                         title_fontsize = font_size or 52  # Increased default size
                         if font_color:
                             ax1.set_title(title, fontsize=title_fontsize, weight='bold', color=font_color, 
                                          bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
-                            current_app.logger.debug(f"Applied title with color: {font_color}, size: {title_fontsize}")
+                            # current_app.logger.debug(f"Applied title with color: {font_color}, size: {title_fontsize}")
                         else:
                             ax1.set_title(title, fontsize=title_fontsize, weight='bold',
                                          bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
@@ -3599,7 +3587,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                          bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=x_labelpad)
                             ax1.set_ylabel(primary_y_label_text, fontsize=label_fontsize, weight='bold', color=font_color,
                                          bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
-                            current_app.logger.debug(f"Applied axis labels with color: {font_color}")
+                            # current_app.logger.debug(f"Applied axis labels with color: {font_color}")
                         else:
                             ax1.set_xlabel(x_label_text, fontsize=label_fontsize, weight='bold',
                                          bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=x_labelpad)
@@ -3610,7 +3598,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         tick_fontsize = axis_tick_font_size or int(title_fontsize * 0.8)  # Increased relative size
                         if font_color:
                             ax1.tick_params(axis='both', labelsize=tick_fontsize, colors=font_color)
-                            current_app.logger.debug(f"Applied tick labels with color: {font_color}, size: {tick_fontsize}")
+                            # current_app.logger.debug(f"Applied tick labels with color: {font_color}, size: {tick_fontsize}")
                         else:
                             ax1.tick_params(axis='both', labelsize=tick_fontsize)
                         
@@ -3643,35 +3631,35 @@ def _generate_report(project_id, template_path, data_file_path):
                                     ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold', color=font_color,
                                                 bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
                                     ax2.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
-                                    current_app.logger.debug(f"Applied secondary axis with color: {font_color}")
+                                    # current_app.logger.debug(f"Applied secondary axis with color: {font_color}")
                                 else:
                                     ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold',
                                                 bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
                                 ax2.tick_params(axis='y', labelsize=tick_fontsize)
                         else:
-                            current_app.logger.info(f"🎈 Skipping secondary Y-axis for bubble chart")
+                            # current_app.logger.info(f"🎈 Skipping secondary Y-axis for bubble chart")
                 
                 # Apply axis label distances for Matplotlib
-                current_app.logger.debug(f"X-axis label distance: {x_axis_label_distance}")
-                current_app.logger.debug(f"Y-axis label distance: {y_axis_label_distance}")
+                # current_app.logger.debug(f"X-axis label distance: {x_axis_label_distance}")
+                # current_app.logger.debug(f"Y-axis label distance: {y_axis_label_distance}")
                 
-                if x_axis_label_distance or y_axis_label_distance:
-                    # Get current subplot parameters
-                    current_bottom = fig_mpl.subplotpars.bottom
-                    current_left = fig_mpl.subplotpars.left
-                    
-                    if x_axis_label_distance:
-                        # Convert the distance to a fraction of the figure height
-                        # Higher x_axis_label_distance values will push labels further down
-                        adjustment = x_axis_label_distance / 500.0  # Increased conversion factor for more visible effect
-                        fig_mpl.subplots_adjust(bottom=current_bottom - adjustment)
-                        current_app.logger.debug(f"Applied X-axis adjustment: {adjustment}")
-                    
-                    if y_axis_label_distance:
-                        # Convert the distance to a fraction of the figure width
-                        adjustment = y_axis_label_distance / 500.0  # Increased conversion factor
-                        fig_mpl.subplots_adjust(left=current_left - adjustment)
-                        current_app.logger.debug(f"Applied Y-axis adjustment: {adjustment}")
+                            if x_axis_label_distance or y_axis_label_distance:
+                                # Get current subplot parameters
+                                current_bottom = fig_mpl.subplotpars.bottom
+                                current_left = fig_mpl.subplotpars.left
+                                
+                                if x_axis_label_distance:
+                                    # Convert the distance to a fraction of the figure height
+                                    # Higher x_axis_label_distance values will push labels further down
+                                    adjustment = x_axis_label_distance / 500.0  # Increased conversion factor for more visible effect
+                                    fig_mpl.subplots_adjust(bottom=current_bottom - adjustment)
+                                    # current_app.logger.debug(f"Applied X-axis adjustment: {adjustment}")
+                                
+                                if y_axis_label_distance:
+                                    # Convert the distance to a fraction of the figure width
+                                    adjustment = y_axis_label_distance / 500.0  # Increased conversion factor
+                                    fig_mpl.subplots_adjust(left=current_left - adjustment)
+                                    # current_app.logger.debug(f"Applied Y-axis adjustment: {adjustment}")
                 
                 # Apply tight_layout but preserve manual adjustments
                 fig_mpl.tight_layout()
@@ -3681,16 +3669,16 @@ def _generate_report(project_id, template_path, data_file_path):
                     if x_axis_label_distance:
                         adjustment = x_axis_label_distance / 300.0  # Even larger effect after tight_layout
                         fig_mpl.subplots_adjust(bottom=fig_mpl.subplotpars.bottom - adjustment)
-                        current_app.logger.debug(f"Re-applied X-axis adjustment: {adjustment}")
+                        # current_app.logger.debug(f"Re-applied X-axis adjustment: {adjustment}")
                     
                     if y_axis_label_distance:
                         adjustment = y_axis_label_distance / 300.0  # Even larger effect after tight_layout
                         fig_mpl.subplots_adjust(left=fig_mpl.subplotpars.left - adjustment)
-                        current_app.logger.debug(f"Re-applied Y-axis adjustment: {adjustment}")
+                        # current_app.logger.debug(f"Re-applied Y-axis adjustment: {adjustment}")
 
                 # Add annotations if specified
                 if annotations:
-                    current_app.logger.debug(f"Adding {len(annotations)} annotations to chart")
+                    # current_app.logger.debug(f"Adding {len(annotations)} annotations to chart")
                     
                     # For heatmaps, extract x and y values from series data
                     if chart_type == "heatmap" and series_data:
@@ -3758,7 +3746,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             if y_pos > data_max * 2 or y_pos < data_min * 0.5:
                                 # Position annotation above the highest data point
                                 y_pos = data_max + (data_range * 0.1)  # 10% above max
-                                current_app.logger.debug(f"Auto-adjusted annotation Y position from {y_value} to {y_pos} (data range: {data_min}-{data_max})")
+                                # current_app.logger.debug(f"Auto-adjusted annotation Y position from {y_value} to {y_pos} (data range: {data_min}-{data_max})")
                         
                         # Add annotation text with better positioning for bubble charts
                         if chart_type == "bubble":
@@ -3775,11 +3763,11 @@ def _generate_report(project_id, template_path, data_file_path):
                                    arrowprops=dict(arrowstyle='->', color='red'),
                                    fontsize=12, color='red', weight='bold',
                                    ha='center', va='bottom')
-                        current_app.logger.debug(f"Added annotation: '{text}' at position ({x_pos}, {y_pos})")
+                        # current_app.logger.debug(f"Added annotation: '{text}' at position ({x_pos}, {y_pos})")
 
                 # Apply margin settings to Matplotlib (FIXED VERSION)
                 if margin:
-                    current_app.logger.debug(f"Applying margin to Matplotlib: {margin}")
+                    # current_app.logger.debug(f"Applying margin to Matplotlib: {margin}")
                     # Use figure padding instead of subplot adjustments
                     # Convert margin values to fractions of figure size (more appropriate scaling)
                     # Use a smaller conversion factor to avoid invalid subplot parameters
@@ -3812,29 +3800,29 @@ def _generate_report(project_id, template_path, data_file_path):
                         top=top_pos,
                         bottom=bottom_pos
                     )
-                    current_app.logger.debug(f"Applied margins (fractions): left={left_pos}, right={right_pos}, top={top_pos}, bottom={bottom_pos}")
+                    # current_app.logger.debug(f"Applied margins (fractions): left={left_pos}, right={right_pos}, top={top_pos}, bottom={bottom_pos}")
                 
                 # Adjust layout to accommodate legend position
                 if show_legend and legend_position == "bottom":
                     # Add extra space at bottom for legend
                     fig_mpl.subplots_adjust(bottom=fig_mpl.subplotpars.bottom + 0.15)
-                    current_app.logger.debug("Added extra bottom space for legend")
+                    # current_app.logger.debug("Added extra bottom space for legend")
 
                 tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
                 # Use different bbox_inches parameter based on legend position
                 if show_legend and legend_position == "bottom":
                     # For bottom legend, use 'tight' but with extra padding
                     plt.savefig(tmpfile.name, bbox_inches='tight', pad_inches=0.3, dpi=200)
-                    current_app.logger.debug(f"Saved Matplotlib chart with bottom legend using extra padding")
+                    # current_app.logger.debug(f"Saved Matplotlib chart with bottom legend using extra padding")
                 else:
                     # For other positions, use standard tight layout
                     plt.savefig(tmpfile.name, bbox_inches='tight', dpi=200)
                     # Only log legend position if legend_loc is defined (for charts that have legends)
                     if 'legend_loc' in locals():
-                        current_app.logger.debug(f"Saved Matplotlib chart with legend at position: {legend_loc}")
+                         current_app.logger.debug(f"Saved Matplotlib chart with legend at position: {legend_loc}")
                     else:
-                        current_app.logger.debug(f"Saved Matplotlib chart without legend")
-                plt.close(fig_mpl)
+                        # current_app.logger.debug(f"Saved Matplotlib chart without legend")
+                        plt.close(fig_mpl)
 
                 return tmpfile.name
 
