@@ -16,6 +16,7 @@ import {
   Stepper,
   Step,
   StepLabel,
+  CircularProgress,
 } from '@mui/material';
 import axios from 'axios';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
@@ -364,7 +365,11 @@ function Register() {
                   },
                 }}
               >
-                {isLoading ? 'Creating Account...' : 'Create Account'}
+                {isLoading ? (
+                  <CircularProgress size={20} sx={{ color: '#fff' }} />
+                ) : (
+                  'Create Account'
+                )}
               </Button>
             </form>
 

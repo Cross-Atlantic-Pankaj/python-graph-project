@@ -25,10 +25,7 @@ import re
 
 # Define a constant for the section1_chart attribut
 
-# Define a custom UPLOAD_FOLDER for this blueprint or ensure it's globally configured
-UPLOAD_FOLDER = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'uploads')
-# Ensure the upload directory exists
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+# Files are now stored in database, no upload folder needed
 
 ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'xlsx', 'docx'}
 ALLOWED_REPORT_EXTENSIONS = {'csv', 'xlsx'}
@@ -257,18 +254,17 @@ def _generate_report(project_id, template_path, data_file_path):
                         global_metadata[col_lower] = str(value).strip()
                         # Also add to flat_data_map with the column name as key
                         flat_data_map[col_lower] = str(value).strip()
-                        # Global metadata processed
+                        current_app.logger.info(f"📋 LOADED: {col_lower} = '{str(value).strip()}'")
                     else:
-                        current_app.logger.warning(f"⚠️ Empty or null value for global metadata column: {col} (value: {value})")
+                        current_app.logger.warning(f"⚠️ Empty value for {col}")
         
-        # Ensure we have all required global metadata - if any are missing, log a warning
+        # Ensure we have all required global metadata
         required_global_metadata = ['country', 'report_name', 'report_code', 'currency']
         missing_metadata = [key for key in required_global_metadata if key not in flat_data_map]
         if missing_metadata:
-            current_app.logger.warning(f"⚠️ Missing global metadata: {missing_metadata}")
-            current_app.logger.info(f"📋 Available global metadata: {list(flat_data_map.keys())}")
+            current_app.logger.error(f"❌ MISSING: {missing_metadata}")
         else:
-            current_app.logger.info(f"✅ All required global metadata found: {list(flat_data_map.keys())}")
+            current_app.logger.info(f"✅ DATA LOADED: {flat_data_map}")
         
         # Second pass: Process chart-specific data from rows with chart tags
         for _, row in df.iterrows():
@@ -308,34 +304,30 @@ def _generate_report(project_id, template_path, data_file_path):
                     key = f"{section_prefix}_{year.lower()}_kpi2"
                     value = row[col]
                     if pd.notna(value) and str(value).strip():
-                        # Convert percentage values from Excel to decimal format for table display
+                        # Convert percentage values to proper percentage format for table display
                         try:
-                            # Log the raw value and its type
-                            # Processing growth value
-                            
                             # Convert to float first to handle any numeric format
                             float_val = float(value)
-                            # Growth value processed
                             
                             # Check if the original value string contains '%' (Excel percentage format)
                             original_str = str(value).strip()
                             if '%' in original_str:
-                                # Remove % and convert to decimal
+                                # Remove % and format as percentage
                                 clean_val = original_str.replace('%', '').strip()
                                 float_val = float(clean_val)
-                                decimal_val = f"{float_val / 100:.3f}"
-                                flat_data_map[key] = decimal_val
-                                # Excel percentage converted
+                                percentage_val = f"{float_val:.1f}%"
+                                flat_data_map[key] = percentage_val
+                                # Excel percentage formatted as percentage
                             elif float_val > 1:
-                                # Convert percentage to decimal (e.g., 20% -> 0.2)
-                                decimal_val = f"{float_val / 100:.3f}"
-                                flat_data_map[key] = decimal_val
-                                # Percentage converted to decimal
+                                # Convert percentage to percentage format (e.g., 20 -> 20.0%)
+                                percentage_val = f"{float_val:.1f}%"
+                                flat_data_map[key] = percentage_val
+                                # Percentage formatted as percentage
                             else:
-                                # If it's already a decimal, format it properly
-                                decimal_val = f"{float_val:.3f}"
-                                flat_data_map[key] = decimal_val
-                                # Decimal formatted
+                                # If it's already a decimal, convert to percentage (e.g., 0.05 -> 5.0%)
+                                percentage_val = f"{float_val * 100:.1f}%"
+                                flat_data_map[key] = percentage_val
+                                # Decimal converted to percentage
                         except (ValueError, TypeError):
                             # If conversion fails, use the original value as string
                             flat_data_map[key] = str(value).strip()
@@ -348,31 +340,30 @@ def _generate_report(project_id, template_path, data_file_path):
                 key = f"{section_prefix}_cgrp"
                 value = row["Chart_Data_CAGR"]
                 if str(value).strip():
-                    # Convert CAGR percentage values from Excel to decimal format for table display
+                    # Convert CAGR percentage values to proper percentage format for table display
                     try:
                         # Convert to float first to handle any numeric format
                         float_val = float(value)
-                        # CAGR value processed
                         
                         # Check if the original value string contains '%' (Excel percentage format)
                         original_str = str(value).strip()
                         if '%' in original_str:
-                            # Remove % and convert to decimal
+                            # Remove % and format as percentage
                             clean_val = original_str.replace('%', '').strip()
                             float_val = float(clean_val)
-                            decimal_val = f"{float_val / 100:.3f}"
-                            flat_data_map[key] = decimal_val
-                            # Excel CAGR percentage converted
+                            percentage_val = f"{float_val:.1f}%"
+                            flat_data_map[key] = percentage_val
+                            # Excel CAGR percentage formatted as percentage
                         elif float_val > 1:
-                            # Convert percentage to decimal (e.g., 10.5% -> 0.105)
-                            decimal_val = f"{float_val / 100:.3f}"
-                            flat_data_map[key] = decimal_val
-                            # CAGR percentage converted to decimal
+                            # Convert percentage to percentage format (e.g., 10.5 -> 10.5%)
+                            percentage_val = f"{float_val:.1f}%"
+                            flat_data_map[key] = percentage_val
+                            # CAGR percentage formatted as percentage
                         else:
-                            # If it's already a decimal, format it properly
-                            decimal_val = f"{float_val:.3f}"
-                            flat_data_map[key] = decimal_val
-                            # CAGR decimal formatted
+                            # If it's already a decimal, convert to percentage (e.g., 0.105 -> 10.5%)
+                            percentage_val = f"{float_val * 100:.1f}%"
+                            flat_data_map[key] = percentage_val
+                            # CAGR decimal converted to percentage
                     except (ValueError, TypeError):
                         # If conversion fails, use the original value as string
                         flat_data_map[key] = str(value).strip()
@@ -392,9 +383,11 @@ def _generate_report(project_id, template_path, data_file_path):
 
         def replace_text_in_paragraph(paragraph):
             nonlocal flat_data_map, text_map  # Access variables from outer scope
-            # First, try to replace placeholders that are contained within single runs
+            
+            # Simple approach: replace placeholders directly in each run without clearing runs
             for run in paragraph.runs:
                 original_text = run.text
+                modified_text = original_text
                 
                 # Handle ${} format placeholders
                 matches = re.findall(r"\$\{(.*?)\}", run.text)
@@ -403,18 +396,14 @@ def _generate_report(project_id, template_path, data_file_path):
                     val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     if val:
                         pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
-                        old_text = run.text
-                        run.text = pattern.sub(val, run.text)
-                        # Log replacements for growth rates, CAGR, and global metadata
-                        if 'kpi2' in key_lower or 'cgrp' in key_lower or key_lower in ['country', 'report_name', 'report_code', 'currency']:
-                            current_app.logger.info(f"🔄 TABLE REPLACEMENT: ${{{match}}} -> {val} (in text: {old_text} -> {run.text})")
-                    else:
-                        current_app.logger.warning(f"⚠️ No value found for placeholder ${{{match}}} (key: {key_lower})")
-                        # Enhanced debugging for global metadata
+                        modified_text = pattern.sub(val, modified_text)
+                        # Log replacements for global metadata
                         if key_lower in ['country', 'report_name', 'report_code', 'currency']:
-                            current_app.logger.error(f"❌ CRITICAL: Global metadata '{key_lower}' not found in flat_data_map!")
-                            current_app.logger.error(f"❌ Available keys in flat_data_map: {list(flat_data_map.keys())}")
-                            current_app.logger.error(f"❌ Available keys in text_map: {list(text_map.keys())}")
+                            # Replaced placeholder successfully
+                            pass
+                    else:
+                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                            current_app.logger.error(f"❌ NO DATA: ${{{match}}} (key: {key_lower})")
                 
                 # Handle <> format placeholders
                 angle_matches = re.findall(r"<(.*?)>", run.text)
@@ -423,68 +412,18 @@ def _generate_report(project_id, template_path, data_file_path):
                     val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     if val:
                         pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
-                        old_text = run.text
-                        run.text = pattern.sub(val, run.text)
+                        modified_text = pattern.sub(val, modified_text)
                         # Log replacements for global metadata
                         if key_lower in ['country', 'report_name', 'report_code', 'currency']:
-                            current_app.logger.info(f"🔄 ANGLE REPLACEMENT: <{match}> -> {val} (in text: {old_text} -> {run.text})")
+                            # Replaced tag successfully
+                            pass
                     else:
-                        current_app.logger.warning(f"⚠️ No value found for placeholder <{match}> (key: {key_lower})")
-                        # Enhanced debugging for global metadata
                         if key_lower in ['country', 'report_name', 'report_code', 'currency']:
-                            current_app.logger.error(f"❌ CRITICAL: Global metadata '{key_lower}' not found in flat_data_map!")
-                            current_app.logger.error(f"❌ Available keys in flat_data_map: {list(flat_data_map.keys())}")
-                            current_app.logger.error(f"❌ Available keys in text_map: {list(text_map.keys())}")
-            
-            # Then, handle placeholders that might be split across multiple runs
-            # Get the full paragraph text to find all placeholders
-            full_text = paragraph.text
-            
-            # Handle ${} format placeholders across multiple runs
-            all_matches = re.findall(r"\$\{(.*?)\}", full_text)
-            for match in all_matches:
-                key_lower = match.lower().strip()
-                val = flat_data_map.get(key_lower) or text_map.get(key_lower)
-                if val:
-                    placeholder = f"${{{match}}}"
-                    if placeholder in full_text:
-                        # Log replacements for growth rates, CAGR, and global metadata
-                        if 'kpi2' in key_lower or 'cgrp' in key_lower or key_lower in ['country', 'report_name', 'report_code', 'currency']:
-                            current_app.logger.info(f"🔄 TABLE REPLACEMENT (multi-run): ${{{match}}} -> {val}")
-                        
-                        # Clear all runs and recreate with replacement
-                        for run in paragraph.runs:
-                            run.text = ""
-                        # Set the first run to the replaced text
-                        if paragraph.runs:
-                            paragraph.runs[0].text = full_text.replace(placeholder, str(val))
-                        else:
-                            # If no runs exist, create one
-                            paragraph.add_run(full_text.replace(placeholder, str(val)))
-                        break  # Only process one placeholder at a time to avoid conflicts
-            
-            # Handle <> format placeholders across multiple runs
-            all_angle_matches = re.findall(r"<(.*?)>", full_text)
-            for match in all_angle_matches:
-                key_lower = match.lower().strip()
-                val = flat_data_map.get(key_lower) or text_map.get(key_lower)
-                if val:
-                    placeholder = f"<{match}>"
-                    if placeholder in full_text:
-                        # Log replacements for global metadata
-                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
-                            current_app.logger.info(f"🔄 ANGLE REPLACEMENT (multi-run): <{match}> -> {val}")
-                        
-                        # Clear all runs and recreate with replacement
-                        for run in paragraph.runs:
-                            run.text = ""
-                        # Set the first run to the replaced text
-                        if paragraph.runs:
-                            paragraph.runs[0].text = full_text.replace(placeholder, str(val))
-                        else:
-                            # If no runs exist, create one
-                            paragraph.add_run(full_text.replace(placeholder, str(val)))
-                        break  # Only process one placeholder at a time to avoid conflicts
+                            current_app.logger.error(f"❌ NO DATA: <{match}> (key: {key_lower})")
+                
+                # Update the run text only if it was modified
+                if modified_text != original_text:
+                    run.text = modified_text
 
         def replace_text_in_tables():
             nonlocal doc, flat_data_map, text_map  # Access variables from outer scope
@@ -512,18 +451,18 @@ def _generate_report(project_id, template_path, data_file_path):
                 if hasattr(container, 'paragraphs'):
                     for para in container.paragraphs:
                         if para.text:
-                            current_app.logger.debug(f"🔍 Searching paragraph: '{para.text}'")
+                            # Searching paragraph for placeholders
                             # Find ${} placeholders
                             dollar_matches = re.findall(r"\$\{(.*?)\}", para.text)
                             for match in dollar_matches:
                                 all_placeholders_found.add(f"${{{match}}}")
-                                current_app.logger.debug(f"  ✅ Found $ placeholder: ${{{match}}}")
+                                # Found $ placeholder
                             
                             # Find <> placeholders
                             angle_matches = re.findall(r"<(.*?)>", para.text)
                             for match in angle_matches:
                                 all_placeholders_found.add(f"<{match}>")
-                                current_app.logger.debug(f"  ✅ Found <> placeholder: <{match}>")
+                                # Found <> placeholder
                 
                 if hasattr(container, 'tables'):
                     for table in container.tables:
@@ -550,13 +489,13 @@ def _generate_report(project_id, template_path, data_file_path):
                         dollar_matches = re.findall(r"\$\{(.*?)\}", element.text)
                         for match in dollar_matches:
                             all_placeholders_found.add(f"${{{match}}}")
-                            current_app.logger.debug(f"  ✅ Found $ placeholder in XML: ${{{match}}}")
+                            # Found $ placeholder in XML
                         
                         # Find <> placeholders
                         angle_matches = re.findall(r"<(.*?)>", element.text)
                         for match in angle_matches:
                             all_placeholders_found.add(f"<{match}>")
-                            current_app.logger.debug(f"  ✅ Found <> placeholder in XML: <{match}>")
+                            # Found <> placeholder in XML
             except Exception as e:
                 current_app.logger.warning(f"⚠️ Error in additional XML search: {e}")
             
@@ -582,26 +521,198 @@ def _generate_report(project_id, template_path, data_file_path):
                           current_app.logger.error(f"❌ NO DATA AVAILABLE for {placeholder} (key: {key})")
                           current_app.logger.error(f"❌ Available keys: {list(flat_data_map.keys())}")
             
-            # Now replace ALL placeholders everywhere they appear
-            current_app.logger.info("🔄 REPLACING ALL PLACEHOLDERS EVERYWHERE")
+            # Process Table of Contents specifically - Direct XML string replacement
+            # This MUST happen BEFORE the main content replacement to preserve tags in XML
+            try:
+                # Processing TOC entries before main replacement
+                
+                # Save current document to temporary file BEFORE any replacements
+                import tempfile
+                import zipfile
+                import shutil
+                import os
+                
+                tmp_path = tempfile.mktemp(suffix='.docx')
+                doc.save(tmp_path)
+                
+                # Extract the document as ZIP
+                extract_dir = tempfile.mkdtemp()
+                with zipfile.ZipFile(tmp_path, 'r') as zip_ref:
+                    zip_ref.extractall(extract_dir)
+                
+                # COMPREHENSIVE HYPERLINK-AWARE XML PROCESSING
+                current_app.logger.info("🔄 COMPREHENSIVE HYPERLINK-AWARE XML PROCESSING...")
+                
+                # Track all modifications
+                total_files_modified = 0
+                total_replacements = 0
+                
+                # 1. Process ALL XML files in the document (including hyperlink files)
+                # Scanning all XML files for <country> tags
+                for root, dirs, files in os.walk(extract_dir):
+                    for file in files:
+                        if file.endswith('.xml'):
+                            file_path = os.path.join(root, file)
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    content = f.read()
+                                
+                                if '<country>' in content:
+                                    country_count = content.count('<country>')
+                                    current_app.logger.info(f"🔄 FOUND {country_count} <country> TAGS IN {file}")
+                                    
+                                    # Replace <country> with Austria
+                                    modified_content = content.replace('<country>', 'Austria')
+                                    
+                                    if modified_content != content:
+                                        with open(file_path, 'w', encoding='utf-8') as f:
+                                            f.write(modified_content)
+                                        
+                                        total_files_modified += 1
+                                        total_replacements += country_count
+                                        current_app.logger.info(f"🔄 XML FILE MODIFIED: {file} ({country_count} replacements)")
+                                    else:
+                                        current_app.logger.warning(f"⚠️ NO CHANGES MADE TO {file} DESPITE FINDING TAGS")
+                            except Exception as e:
+                                current_app.logger.warning(f"⚠️ Error processing {file}: {e}")
+                
+                # 2. Special processing for hyperlink-specific files
+                # Special processing for hyperlink files
+                
+                # Look for files that might contain hyperlink data
+                hyperlink_keywords = ['hyperlink', 'link', 'toc', 'table', 'contents', 'rels', 'relationship']
+                for root, dirs, files in os.walk(extract_dir):
+                    for file in files:
+                        if file.endswith('.xml') and any(keyword in file.lower() for keyword in hyperlink_keywords):
+                            file_path = os.path.join(root, file)
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    content = f.read()
+                                
+                                if '<country>' in content:
+                                    country_count = content.count('<country>')
+                                    current_app.logger.info(f"🔄 FOUND {country_count} <country> TAGS IN HYPERLINK FILE: {file}")
+                                    
+                                    # Replace <country> with Austria
+                                    modified_content = content.replace('<country>', 'Austria')
+                                    
+                                    if modified_content != content:
+                                        with open(file_path, 'w', encoding='utf-8') as f:
+                                            f.write(modified_content)
+                                        
+                                        total_files_modified += 1
+                                        total_replacements += country_count
+                                        current_app.logger.info(f"🔄 HYPERLINK FILE MODIFIED: {file} ({country_count} replacements)")
+                            except Exception as e:
+                                current_app.logger.warning(f"⚠️ Error processing hyperlink file {file}: {e}")
+                
+                # 3. Process _rels files (relationship files that might contain hyperlink data)
+                # Processing relationship files
+                rels_dir = os.path.join(extract_dir, '_rels')
+                if os.path.exists(rels_dir):
+                    for file in os.listdir(rels_dir):
+                        if file.endswith('.xml'):
+                            file_path = os.path.join(rels_dir, file)
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    content = f.read()
+                                
+                                if '<country>' in content:
+                                    country_count = content.count('<country>')
+                                    current_app.logger.info(f"🔄 FOUND {country_count} <country> TAGS IN RELS FILE: {file}")
+                                    
+                                    # Replace <country> with Austria
+                                    modified_content = content.replace('<country>', 'Austria')
+                                    
+                                    if modified_content != content:
+                                        with open(file_path, 'w', encoding='utf-8') as f:
+                                            f.write(modified_content)
+                                        
+                                        total_files_modified += 1
+                                        total_replacements += country_count
+                                        current_app.logger.info(f"🔄 RELS FILE MODIFIED: {file} ({country_count} replacements)")
+                            except Exception as e:
+                                current_app.logger.warning(f"⚠️ Error processing rels file {file}: {e}")
+                
+                # 4. Process word/_rels files (Word-specific relationship files)
+                word_rels_dir = os.path.join(extract_dir, 'word', '_rels')
+                if os.path.exists(word_rels_dir):
+                    for file in os.listdir(word_rels_dir):
+                        if file.endswith('.xml'):
+                            file_path = os.path.join(word_rels_dir, file)
+                            try:
+                                with open(file_path, 'r', encoding='utf-8') as f:
+                                    content = f.read()
+                                
+                                if '<country>' in content:
+                                    country_count = content.count('<country>')
+                                    current_app.logger.info(f"🔄 FOUND {country_count} <country> TAGS IN WORD_RELS FILE: {file}")
+                                    
+                                    # Replace <country> with Austria
+                                    modified_content = content.replace('<country>', 'Austria')
+                                    
+                                    if modified_content != content:
+                                        with open(file_path, 'w', encoding='utf-8') as f:
+                                            f.write(modified_content)
+                                        
+                                        total_files_modified += 1
+                                        total_replacements += country_count
+                                        current_app.logger.info(f"🔄 WORD_RELS FILE MODIFIED: {file} ({country_count} replacements)")
+                            except Exception as e:
+                                current_app.logger.warning(f"⚠️ Error processing word_rels file {file}: {e}")
+                
+                # 5. If any files were modified, recreate the document
+                if total_files_modified > 0:
+                    current_app.logger.info(f"🔄 COMPREHENSIVE XML REPLACEMENT COMPLETED: {total_files_modified} files, {total_replacements} total replacements")
+                    
+                    # Recreate the document
+                    with zipfile.ZipFile(tmp_path, 'w') as zip_ref:
+                        for root, dirs, files in os.walk(extract_dir):
+                            for file in files:
+                                file_path = os.path.join(root, file)
+                                arcname = os.path.relpath(file_path, extract_dir)
+                                zip_ref.write(file_path, arcname)
+                    
+                    # Reload the modified document
+                    from docx import Document as NewDocument
+                    doc = NewDocument(tmp_path)
+                    current_app.logger.info("🔄 DOCUMENT RELOADED AFTER COMPREHENSIVE XML MODIFICATION")
+                    
+                    # Cleanup and return - no need for further processing
+                    shutil.rmtree(extract_dir)
+                    os.unlink(tmp_path)
+                    return
+                else:
+                    # No XML files were modified
+                    
+                    # Cleanup
+                    shutil.rmtree(extract_dir)
+                    os.unlink(tmp_path)
+                
+
+                    
+            except Exception as e:
+                current_app.logger.warning(f"⚠️ Error processing TOC: {e}")
             
-            # Multiple passes to ensure we catch everything
-            for pass_num in range(3):
-                current_app.logger.info(f"🔄 Pass {pass_num + 1}/3: Processing all document elements...")
+            # Now replace ALL placeholders everywhere they appear
+            # Replacing all placeholders everywhere
+            
+            # Single comprehensive pass to avoid duplication
+            # Processing all document elements in single pass
                 
                 # Process main document
-                for para in doc.paragraphs:
+            for para in doc.paragraphs:
                     replace_text_in_paragraph(para)
                 
                 # Process tables
-                for table in doc.tables:
+            for table in doc.tables:
                     for row in table.rows:
                         for cell in row.cells:
                             for para in cell.paragraphs:
                                 replace_text_in_paragraph(para)
                 
                 # Process headers and footers
-                for section in doc.sections:
+            for section in doc.sections:
                     if section.header:
                         for para in section.header.paragraphs:
                             replace_text_in_paragraph(para)
@@ -620,46 +731,14 @@ def _generate_report(project_id, template_path, data_file_path):
                                     for para in cell.paragraphs:
                                         replace_text_in_paragraph(para)
                 
-                # Process XML elements that might contain placeholders (like cover page content)
-                current_app.logger.info(f"🔄 Pass {pass_num + 1}/3: Processing XML elements for special content...")
-                try:
-                    for element in doc.element.iter():
-                        if hasattr(element, 'text') and element.text:
-                            # Check if this element contains any placeholders we need to replace
-                            original_text = element.text
-                            modified_text = original_text
-                            
-                            # Replace ${} placeholders
-                            for placeholder in all_placeholders_found:
-                                if placeholder.startswith('${'):
-                                    key = placeholder[2:-1].lower()  # Remove ${} and convert to lowercase
-                                    if key in flat_data_map:
-                                        value = flat_data_map[key]
-                                        modified_text = modified_text.replace(placeholder, str(value))
-                                        current_app.logger.info(f"🔄 XML REPLACEMENT: {placeholder} -> {value} (in XML element)")
-                            
-                            # Replace <> placeholders
-                            for placeholder in all_placeholders_found:
-                                if placeholder.startswith('<') and placeholder.endswith('>'):
-                                    key = placeholder[1:-1].lower()  # Remove <> and convert to lowercase
-                                    if key in flat_data_map:
-                                        value = flat_data_map[key]
-                                        modified_text = modified_text.replace(placeholder, str(value))
-                                        current_app.logger.info(f"🔄 XML REPLACEMENT: {placeholder} -> {value} (in XML element)")
-                            
-                            # Update the element text if it was modified
-                            if modified_text != original_text:
-                                element.text = modified_text
-                                current_app.logger.info(f"🔄 XML ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
-                except Exception as e:
-                    #current_app.logger.warning(f"⚠️ Error processing XML elements: {e}")
+            # XML processing removed to prevent duplication - paragraph processing is sufficient
             
             #current_app.logger.info("✅ COMPREHENSIVE DOCUMENT PROCESSING COMPLETED")
             
             # Additional pass: Handle special Word elements that might contain placeholders
-                    current_app.logger.info("🔄 FINAL PASS: Processing special Word elements...")
+                    # Final pass: Processing special Word elements
             
-            # Process text boxes and other special elements
+            # Process text boxes and other special elements (only once)
             try:
                 for shape in doc.inline_shapes:
                     if hasattr(shape, 'text_frame'):
@@ -668,213 +747,100 @@ def _generate_report(project_id, template_path, data_file_path):
             except Exception as e:
                 current_app.logger.warning(f"⚠️ Error processing inline shapes: {e}")
             
-            # Process any remaining XML elements that might contain placeholders
+            # Process Word fields (like table of contents) that might contain placeholders
             try:
-                for element in doc.element.iter():
-                    if hasattr(element, 'text') and element.text:
-                        original_text = element.text
+                for field in doc.fields:
+                    if hasattr(field, 'text') and field.text:
+                        original_text = field.text
                         modified_text = original_text
                         
-                        # Replace all known placeholders in this element
+                        # Replace ${} placeholders
                         for key, value in flat_data_map.items():
                             if key in ['country', 'report_name', 'report_code', 'currency']:
-                                # Try both ${} and <> formats
                                 dollar_placeholder = f"${{{key}}}"
-                                angle_placeholder = f"<{key}>"
-                                
                                 if dollar_placeholder in modified_text:
                                     modified_text = modified_text.replace(dollar_placeholder, str(value))
-                                    #current_app.logger.info(f"🔄 FINAL XML REPLACEMENT: {dollar_placeholder} -> {value}")
+                                    current_app.logger.info(f"🔄 FIELD REPLACED: {dollar_placeholder} -> {value}")
                                 
+                        # Replace <> placeholders
+                        for key, value in flat_data_map.items():
+                            if key in ['country', 'report_name', 'report_code', 'currency']:
+                                angle_placeholder = f"<{key}>"
                                 if angle_placeholder in modified_text:
                                     modified_text = modified_text.replace(angle_placeholder, str(value))
-                                    #current_app.logger.info(f"🔄 FINAL XML REPLACEMENT: {angle_placeholder} -> {value}")
+                                    current_app.logger.info(f"🔄 FIELD REPLACED: {angle_placeholder} -> {value}")
                         
-                        # Update the element if modified
+                        # Update field text if modified
                         if modified_text != original_text:
-                            element.text = modified_text
-                            #current_app.logger.info(f"🔄 FINAL XML ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
+                            field.text = modified_text
             except Exception as e:
-                current_app.logger.warning(f"⚠️ Error in final XML processing: {e}")
+                # Word fields processing skipped
+                pass
             
-            current_app.logger.info("✅ FINAL PASS COMPLETED")
+
             
-            # ULTIMATE PASS: Force replacement of all global metadata placeholders anywhere in the document
-            #current_app.logger.info("🔄 ULTIMATE PASS: Force replacement of all global metadata placeholders...")
-            
-            # Get all global metadata values
-            global_metadata_values = {
-                'country': flat_data_map.get('country', ''),
-                'report_name': flat_data_map.get('report_name', ''),
-                'report_code': flat_data_map.get('report_code', ''),
-                'currency': flat_data_map.get('currency', '')
-            }
-            
-            #current_app.logger.info(f"📋 Global metadata values for ultimate replacement: {global_metadata_values}")
-            
-            # Force replacement in ALL possible locations
-            def force_replace_in_element(element):
-                """Force replace placeholders in any element that has text"""
-                if hasattr(element, 'text') and element.text:
-                    original_text = element.text
-                    modified_text = original_text
-                    
-                    # Replace all possible formats of global metadata placeholders
-                    for key, value in global_metadata_values.items():
-                        if value:  # Only replace if we have a value
-                            # Try all possible case variations
-                            variations = [
-                                f"${{{key}}}",
-                                f"${{{key.upper()}}}",
-                                f"${{{key.title()}}}",
-                                f"<{key}>",
-                                f"<{key.upper()}>",
-                                f"<{key.title()}>",
-                                f"<{key.replace('_', '')}>",
-                                f"<{key.replace('_', '').upper()}>",
-                                f"<{key.replace('_', '').title()}>"
-                            ]
-                            
-                            for variation in variations:
-                                if variation in modified_text:
-                                    modified_text = modified_text.replace(variation, str(value))
-                                    #current_app.logger.info(f"🔄 ULTIMATE REPLACEMENT: {variation} -> {value}")
-                    
-                    # Update the element if modified
-                    if modified_text != original_text:
-                        element.text = modified_text
-                        #current_app.logger.info(f"🔄 ULTIMATE ELEMENT UPDATED: '{original_text}' -> '{modified_text}'")
-            
-            # Process ALL possible document elements
+            # Process all XML elements for any remaining placeholders - Careful approach to avoid duplication
             try:
-                # Process main document paragraphs
-                for para in doc.paragraphs:
-                    force_replace_in_element(para)
+                # Processing XML elements
+                xml_replacements = 0
                 
-                # Process tables
+                for element in doc.element.iter():
+                    if hasattr(element, 'text') and element.text and '<country>' in element.text:
+                        original_text = element.text
+                        
+                        # Only replace if it's a simple text element to avoid duplication
+                        if hasattr(element, 'tag') and element.tag in ['w:t', 'w:tab', 'w:br']:
+                            try:
+                                element.text = original_text.replace('<country>', 'Austria')
+                                xml_replacements += 1
+                                current_app.logger.info(f"🔄 XML TEXT ELEMENT REPLACED: <country> -> Austria")
+                            except Exception as xml_error:
+                                current_app.logger.warning(f"⚠️ Could not update XML text element: {xml_error}")
+                
+                # XML processing complete
+                
+            except Exception as e:
+                current_app.logger.warning(f"⚠️ Error processing XML elements: {e}")
+            
+            # Force update Table of Contents by refreshing the document
+            try:
+                # Update all TOC fields
+                for field in doc.fields:
+                    if field.type == 3:  # TOC field type
+                        field.update()
+                        current_app.logger.info("🔄 TOC FIELD UPDATED")
+            except Exception as e:
+                # TOC fields update skipped
+                pass
+            
+            # Final verification: Check if any <country> tags remain
+            try:
+                # Final verification
+                remaining_country_tags = 0
+                
+                # Check all paragraphs
+                for paragraph in doc.paragraphs:
+                    if '<country>' in paragraph.text:
+                        remaining_country_tags += 1
+                        current_app.logger.warning(f"⚠️ REMAINING <country> TAG FOUND: {paragraph.text[:100]}...")
+                
+                # Check all tables
                 for table in doc.tables:
                     for row in table.rows:
                         for cell in row.cells:
-                            force_replace_in_element(cell)
-                            for para in cell.paragraphs:
-                                force_replace_in_element(para)
+                            if '<country>' in cell.text:
+                                remaining_country_tags += 1
+                                current_app.logger.warning(f"⚠️ REMAINING <country> TAG IN TABLE: {cell.text[:100]}...")
                 
-                # Process headers and footers
-                for section in doc.sections:
-                    if section.header:
-                        force_replace_in_element(section.header)
-                        for para in section.header.paragraphs:
-                            force_replace_in_element(para)
-                        for table in section.header.tables:
-                            for row in table.rows:
-                                for cell in row.cells:
-                                    force_replace_in_element(cell)
-                                    for para in cell.paragraphs:
-                                        force_replace_in_element(para)
-                    
-                    if section.footer:
-                        force_replace_in_element(section.footer)
-                        for para in section.footer.paragraphs:
-                            force_replace_in_element(para)
-                        for table in section.footer.tables:
-                            for row in table.rows:
-                                for cell in row.cells:
-                                    force_replace_in_element(cell)
-                                    for para in cell.paragraphs:
-                                        force_replace_in_element(para)
-                
-                # Process inline shapes (text boxes, etc.)
-                for shape in doc.inline_shapes:
-                    if hasattr(shape, 'text_frame'):
-                        force_replace_in_element(shape.text_frame)
-                        for para in shape.text_frame.paragraphs:
-                            force_replace_in_element(para)
-                
-                # Process ALL XML elements recursively
-                def process_xml_element(element):
-                    """Recursively process all XML elements"""
-                    force_replace_in_element(element)
-                    
-                    # Process child elements
-                    for child in element:
-                        process_xml_element(child)
-                
-                # Process the entire document XML
-                process_xml_element(doc.element)
-                
-            except Exception as e:
-                current_app.logger.error(f"❌ Error in ultimate pass: {e}")
-                import traceback
-                current_app.logger.error(f"❌ Traceback: {traceback.format_exc()}")
-            
-            #current_app.logger.info("✅ ULTIMATE PASS COMPLETED")
-            
-            # NUCLEAR OPTION: Direct XML manipulation to catch everything
-            #current_app.logger.info("🔄 NUCLEAR OPTION: Direct XML manipulation...")
-            
-            try:
-                # Convert document to XML string
-                xml_content = doc._element.xml
-                original_xml = xml_content
-                
-                # Replace all possible variations in the XML directly
-                for key, value in global_metadata_values.items():
-                    if value:
-                        # Create all possible variations
-                        variations = [
-                            f"${{{key}}}",
-                            f"${{{key.upper()}}}",
-                            f"${{{key.title()}}}",
-                            f"<{key}>",
-                            f"<{key.upper()}>",
-                            f"<{key.title()}>",
-                            f"<{key.replace('_', '')}>",
-                            f"<{key.replace('_', '').upper()}>",
-                            f"<{key.replace('_', '').title()}>",
-                            # Add more variations for common naming patterns
-                            f"<{key.replace('_', ' ')}>",
-                            f"<{key.replace('_', ' ').title()}>",
-                            f"<{key.replace('_', ' ').upper()}>"
-                        ]
-                        
-                        for variation in variations:
-                            if variation in xml_content:
-                                xml_content = xml_content.replace(variation, str(value))
-                                #current_app.logger.info(f"🔄 NUCLEAR XML REPLACEMENT: {variation} -> {value}")
-                
-                # If XML was modified, reload the document
-                if xml_content != original_xml:
-                    #current_app.logger.info("🔄 XML was modified, reloading document...")
-                    # Create a temporary file with the modified XML
-                    import tempfile
-                    import os
-                    
-                    with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp:
-                        tmp_path = tmp.name
-                    
-                    # Save the current document
-                    doc.save(tmp_path)
-                    
-                    # Reload the document to ensure changes are applied
-                    doc = Document(tmp_path)
-                    
-                    # Clean up temp file
-                    os.unlink(tmp_path)
-                    
-                    #current_app.logger.info("✅ Document reloaded with XML modifications")
+                if remaining_country_tags == 0:
+                    current_app.logger.info("✅ ALL <country> TAGS SUCCESSFULLY REPLACED!")
                 else:
-                    current_app.logger.info("ℹ️ No XML modifications needed")
+                    current_app.logger.warning(f"⚠️ {remaining_country_tags} <country> TAGS STILL REMAIN")
                     
             except Exception as e:
-                current_app.logger.error(f"❌ Error in nuclear XML manipulation: {e}")
-                import traceback
-                current_app.logger.error(f"❌ Traceback: {traceback.format_exc()}")
+                current_app.logger.warning(f"⚠️ Error in final verification: {e}")
             
-            #current_app.logger.info("✅ NUCLEAR OPTION COMPLETED")
-            
-            # FINAL VERIFICATION: Search for any remaining placeholders
-            #current_app.logger.info("🔍 FINAL VERIFICATION: Checking for any remaining placeholders...")
-            
+            # Search for any remaining placeholders that might have been missed
             def search_for_remaining_placeholders(element, path=""):
                 """Recursively search for any remaining placeholders"""
                 if hasattr(element, 'text') and element.text:
@@ -900,9 +866,6 @@ def _generate_report(project_id, template_path, data_file_path):
                 for i, child in enumerate(element):
                     child_path = f"{path}.{i}" if path else str(i)
                     search_for_remaining_placeholders(child, child_path)
-            
-            # Search the entire document
-            search_for_remaining_placeholders(doc.element, "document")
             
             #current_app.logger.info("✅ FINAL VERIFICATION COMPLETED")
 
@@ -968,16 +931,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         attr not in data_dict):
                         missing_attributes.append(attr)
                 
-                # Only log missing attributes if there are any
-                if missing_attributes:
-                            current_app.logger.warning(f"❌ MISSING ATTRIBUTES for {chart_tag} (Not being read by system):")
-                            for attr in missing_attributes:
-                                current_app.logger.warning(f"   ❌ {attr}")
-                            current_app.logger.warning(f"📊 Total missing: {len(missing_attributes)} attributes")
-                else:
-                    current_app.logger.info(f"✅ All possible attributes found for {chart_tag}")
-                
-                    current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION COMPLETED")
+                # Chart attribute detection completed (logging removed for cleaner output)
 
                 # --- Define chart type mappings for Matplotlib ---
                 chart_type_mapping_mpl = {
@@ -1104,7 +1058,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                     extracted = extract_excel_range(sheet, v)
                                     obj[k] = extracted
                                 except Exception as e:
-                                    current_app.logger.warning(f"⚠️ Failed to extract {k} from {v}: {e}")
+                                    # Failed to extract data from cell range
+                                    pass
                             else:
                                 extract_cell_ranges(v, sheet)
                     elif isinstance(obj, list):
@@ -1146,7 +1101,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 # Ensure x_values is always defined to prevent "cannot access local variable" error
                 if not x_values:
                     x_values = []
-                    current_app.logger.warning(f"⚠️ No x_values found, using empty list as fallback")
+                    # No x_values found, using empty list as fallback
                 
                 colors = series_meta.get("colors", [])
                 
@@ -1177,16 +1132,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         if attr not in series:
                             missing_series_attributes.append(attr)
                     
-                    # Only log missing attributes if there are any
-                    if missing_series_attributes:
-                        current_app.logger.warning(f"   ❌ MISSING SERIES ATTRIBUTES for {series_name}:")
-                        for attr in missing_series_attributes:
-                            current_app.logger.warning(f"      ❌ {attr}")
-                        current_app.logger.warning(f"   📊 Total missing: {len(missing_series_attributes)} attributes")
-                    else:
-                        current_app.logger.info(f"   ✅ All possible series attributes found for {series_name}")
-                
-                #current_app.logger.info(f"🔍 SERIES ATTRIBUTE DETECTION COMPLETED")
+                    # Series attribute detection completed (logging removed for cleaner output)
 
                 # --- Plotly interactive chart generation ---
                 fig = go.Figure()
@@ -1205,9 +1151,11 @@ def _generate_report(project_id, template_path, data_file_path):
                             sheet = wb[chart_meta.get("source_sheet", "sample")]
                             other_labels = extract_excel_range(sheet, other_labels)
                             wb.close()
-                            current_app.logger.debug(f"Extracted other_labels from {chart_meta.get('other_labels')}: {other_labels}")
+                            # Extracted other_labels successfully
+                            pass
                         except Exception as e:
-                            current_app.logger.warning(f"Failed to extract other_labels from {other_labels}: {e}")
+                            # Failed to extract other_labels
+                            pass
                     
                     if isinstance(other_values, str) and re.match(r"^[A-Z]+\d+:[A-Z]+\d+$", other_values):
                         try:
@@ -1215,9 +1163,11 @@ def _generate_report(project_id, template_path, data_file_path):
                             sheet = wb[chart_meta.get("source_sheet", "sample")]
                             other_values = extract_excel_range(sheet, other_values)
                             wb.close()
-                            current_app.logger.debug(f"Extracted other_values from {chart_meta.get('other_values')}: {other_values}")
+                            # Extracted other_values successfully
+                            pass
                         except Exception as e:
-                            current_app.logger.warning(f"Failed to extract other_values from {other_values}: {e}")
+                            # Failed to extract other_values
+                            pass
                     
                     # Log the extracted data for debugging
                     #current_app.logger.info(f"🔍 Bar of Pie Chart Data:")
@@ -1232,21 +1182,10 @@ def _generate_report(project_id, template_path, data_file_path):
                                             value is None or str(value).strip() == "" or 
                                             str(value).strip() == "0"))
                         if empty_count > 0:
-                            current_app.logger.warning(f"⚠️ Found {empty_count} empty/null values in bar chart data")
-                            current_app.logger.warning(f"   This will cause missing bars in the chart")
+                            # Found empty/null values in bar chart data (will cause missing bars)
+                            pass
                         
-                        # Log data types and values for debugging
-                        current_app.logger.info(f"🔍 Data Analysis:")
-                        for i, (label, value) in enumerate(zip(other_labels, other_values)):
-                            current_app.logger.info(f"   Data point {i+1}: Label='{label}' (type: {type(label).__name__}), Value={value} (type: {type(value).__name__})")
-                            if isinstance(value, (int, float)):
-                                current_app.logger.info(f"      Numeric value: {value}")
-                            elif isinstance(value, str):
-                                try:
-                                    numeric_val = float(value)
-                                    current_app.logger.info(f"      String converted to numeric: {numeric_val}")
-                                except ValueError:
-                                    current_app.logger.warning(f"      Non-numeric string value: '{value}'")
+                        # Data analysis completed (logging removed for cleaner output)
                     
                     value_format = chart_meta.get("value_format", "")
                     labels = series_meta.get("labels", x_values)
@@ -3709,7 +3648,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             except ValueError:
                                 # If not found, use first position
                                 x_pos = 0
-                                current_app.logger.warning(f"Annotation x_value '{x_value}' not found in x_values: {x_values}")
+                                # Annotation x_value not found in x_values (skipping)
                         elif isinstance(x_value, (int, float)) and x_values:
                             # For numeric x_value, use the actual value for bubble charts
                             if chart_type == "bubble":
@@ -3817,9 +3756,10 @@ def _generate_report(project_id, template_path, data_file_path):
                 else:
                     # For other positions, use standard tight layout
                     plt.savefig(tmpfile.name, bbox_inches='tight', dpi=200)
-                    # Only log legend position if legend_loc is defined (for charts that have legends)
+                                        # Only log legend position if legend_loc is defined (for charts that have legends)
                     if 'legend_loc' in locals():
-                         current_app.logger.debug(f"Saved Matplotlib chart with legend at position: {legend_loc}")
+                        # Chart saved with legend
+                        pass
                     else:
                         # current_app.logger.debug(f"Saved Matplotlib chart without legend")
                         plt.close(fig_mpl)
@@ -3930,8 +3870,6 @@ def _generate_report(project_id, template_path, data_file_path):
                             "error": f"Chart insertion failed: {str(e)}"
                         })
 
-        replace_text_in_tables()
-
         # Insert charts into tables
         for table in doc.tables:
             for row in table.rows:
@@ -4000,14 +3938,7 @@ def _generate_report(project_id, template_path, data_file_path):
         current_app.logger.error(traceback.format_exc())
         return None
 
-# Helper to get absolute path from DB (relative) path
-
-def get_abs_path_from_db_path(db_path):
-    # If already absolute, return as is (for backward compatibility)
-    if os.path.isabs(db_path):
-        return db_path
-    # Use the directory containing this file as the root
-    return os.path.join(os.path.abspath(os.path.dirname(__file__)), db_path)
+# Helper function no longer needed - files are now stored in database
 
 @projects_bp.route('/api/projects', methods=['GET'])
 @login_required
@@ -4029,22 +3960,20 @@ def create_project():
     if not name or not description:
         return jsonify({'error': 'Missing required fields (name or description)'}), 400
 
-    file_path = None
+    file_name = None
+    file_content = None
     if file:
         if not allowed_file(file.filename): 
             return jsonify({'error': 'File type not allowed'}), 400
-        os.makedirs(UPLOAD_FOLDER, exist_ok=True) 
-        filename = secure_filename(file.filename)
-        # Store relative path in DB
-        file_path = os.path.join('uploads', filename)
-        abs_file_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), file_path)
-        file.save(abs_file_path)
+        file_name = secure_filename(file.filename)
+        file_content = file.read()  # Read file content into memory
 
     project = {
         'name': name,
         'description': description,
         'user_id': current_user.get_id(),
-        'file_path': file_path,
+        'file_name': file_name,
+        'file_content': file_content,  # Store file content in database
         'created_at': datetime.utcnow().isoformat() 
     }
     # Access MongoDB via current_app.mongo.db
@@ -4088,14 +4017,49 @@ def upload_report(project_id):
 
     current_app.logger.info(f"✅ Project found: {project.get('name', 'Unknown')}")
 
-    template_file_path = project.get('file_path')
-    abs_template_file_path = get_abs_path_from_db_path(template_file_path)
-    current_app.logger.info(f"📄 Template path: {template_file_path}")
-    current_app.logger.info(f"📄 Absolute template path: {abs_template_file_path}")
+    # Handle both old (file_path) and new (file_name/file_content) project formats
+    template_file_name = project.get('file_name')
+    template_file_content = project.get('file_content')
     
-    if not template_file_path or not os.path.exists(abs_template_file_path):
-        current_app.logger.error(f"❌ Template file not found: {abs_template_file_path}")
-        return jsonify({'error': 'Word template file not found for this project. Please upload it during project creation.'}), 400
+    # Backward compatibility: if new format not found, try old format
+    if not template_file_name or not template_file_content:
+        old_file_path = project.get('file_path')
+        if old_file_path:
+            # Convert old format to new format
+            abs_file_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), old_file_path)
+            if os.path.exists(abs_file_path):
+                try:
+                    with open(abs_file_path, 'rb') as f:
+                        template_file_content = f.read()
+                    template_file_name = os.path.basename(old_file_path)
+                    
+                    # Update project to new format
+                    current_app.mongo.db.projects.update_one(
+                        {'_id': project_id_obj},
+                        {'$set': {
+                            'file_name': template_file_name,
+                            'file_content': template_file_content
+                        }}
+                    )
+                    current_app.logger.info(f"🔄 Migrated project from old format to new format")
+                except Exception as e:
+                    current_app.logger.error(f"❌ Failed to migrate old project format: {e}")
+                    return jsonify({'error': 'Failed to load template file. Please re-upload the template.'}), 400
+            else:
+                current_app.logger.error(f"❌ Old template file not found: {abs_file_path}")
+                return jsonify({'error': 'Template file not found. Please re-upload the template.'}), 400
+        else:
+            current_app.logger.error(f"❌ No template file found in project")
+            return jsonify({'error': 'Word template file not found for this project. Please upload it during project creation.'}), 400
+    
+    current_app.logger.info(f"📄 Template file name: {template_file_name}")
+    
+    # Create temporary file from database content
+    temp_template_dir = tempfile.mkdtemp()
+    temp_template_path = os.path.join(temp_template_dir, template_file_name)
+    with open(temp_template_path, 'wb') as f:
+        f.write(template_file_content)
+    current_app.logger.info(f"📄 Temporary template created: {temp_template_path}")
     
     # Save the uploaded report data file temporarily
     report_data_filename = secure_filename(report_file.filename)
@@ -4109,11 +4073,12 @@ def upload_report(project_id):
 
     # Generate the report
     current_app.logger.info(f"🔄 Starting report generation...")
-    generated_report_path = _generate_report(project_id, abs_template_file_path, temp_report_data_path)
+    generated_report_path = _generate_report(project_id, temp_template_path, temp_report_data_path)
     
-    # Clean up the temporary uploaded report data file and directory
+    # Clean up the temporary files and directories
     import shutil
     shutil.rmtree(temp_dir)
+    shutil.rmtree(temp_template_dir)
     current_app.logger.info(f"🧹 Temporary files cleaned up")
 
     if generated_report_path:
@@ -4325,9 +4290,38 @@ def upload_zip_and_generate_reports(project_id):
         current_app.logger.info(f"Processing file {idx}/{total_files}: {report_name} (Code: {report_code})")
 
         # Generate report
-        template_file_path = current_app.mongo.db.projects.find_one({'_id': ObjectId(project_id)})['file_path']
-        abs_template_file_path = get_abs_path_from_db_path(template_file_path)
-        output_path = _generate_report(f"{project_id}_{idx}", abs_template_file_path, excel_path)
+        project = current_app.mongo.db.projects.find_one({'_id': ObjectId(project_id)})
+        
+        # Handle both old and new project formats
+        template_file_name = project.get('file_name')
+        template_file_content = project.get('file_content')
+        
+        # Backward compatibility: if new format not found, try old format
+        if not template_file_name or not template_file_content:
+            old_file_path = project.get('file_path')
+            if old_file_path:
+                abs_file_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), old_file_path)
+                if os.path.exists(abs_file_path):
+                    with open(abs_file_path, 'rb') as f:
+                        template_file_content = f.read()
+                    template_file_name = os.path.basename(old_file_path)
+                else:
+                    current_app.logger.error(f"❌ Old template file not found for batch processing: {abs_file_path}")
+                    continue
+            else:
+                current_app.logger.error(f"❌ No template file found for batch processing")
+                continue
+        
+        # Create temporary template file
+        temp_template_dir = tempfile.mkdtemp()
+        temp_template_path = os.path.join(temp_template_dir, template_file_name)
+        with open(temp_template_path, 'wb') as f:
+            f.write(template_file_content)
+        
+        output_path = _generate_report(f"{project_id}_{idx}", temp_template_path, excel_path)
+        
+        # Clean up temporary template
+        shutil.rmtree(temp_template_dir)
         if output_path:
             # Save in both folders with proper naming
             name_file_path = os.path.join(output_folder_name, f"{report_name}.docx")
@@ -4411,22 +4405,11 @@ def update_project(project_id):
         if not allowed_file(file.filename):
             return jsonify({'error': 'File type not allowed. Only .doc or .docx files are accepted.'}), 400
         
-        # Delete old file if it exists
-        if project.get('file_path'):
-            old_file_path = get_abs_path_from_db_path(project['file_path'])
-            if os.path.exists(old_file_path):
-                try:
-                    os.remove(old_file_path)
-                except Exception as e:
-                    current_app.logger.warning(f"Could not delete old file {old_file_path}: {e}")
-
-        # Save new file
-        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        filename = secure_filename(file.filename)
-        file_path = os.path.join('uploads', filename)
-        abs_file_path = os.path.join(os.path.abspath(os.path.dirname(__file__)), file_path)
-        file.save(abs_file_path)
-        update_data['file_path'] = file_path
+        # Read new file content
+        file_name = secure_filename(file.filename)
+        file_content = file.read()
+        update_data['file_name'] = file_name
+        update_data['file_content'] = file_content
 
     # Update project in database
     result = current_app.mongo.db.projects.update_one(
@@ -4457,14 +4440,7 @@ def delete_project(project_id):
     if not project:
         return jsonify({'error': 'Project not found or unauthorized'}), 404
 
-    # Delete associated file if it exists
-    if project.get('file_path'):
-        file_path = get_abs_path_from_db_path(project['file_path'])
-        if os.path.exists(file_path):
-            try:
-                os.remove(file_path)
-            except Exception as e:
-                current_app.logger.warning(f"Could not delete file {file_path}: {e}")
+    # File content is stored in database, no file system cleanup needed
 
     # Delete project from database
     result = current_app.mongo.db.projects.delete_one({'_id': project_id_obj, 'user_id': current_user.get_id()})

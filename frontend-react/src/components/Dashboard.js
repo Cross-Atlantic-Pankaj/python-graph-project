@@ -605,35 +605,76 @@ function Dashboard() {
   };
 
   return (
-    <Container maxWidth="xl" sx={{ py: 3 }}>
+    <Box sx={{ 
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
+      py: 4,
+      px: 2
+    }}>
+      <Container maxWidth="xl">
       {/* Header Section */}
       <Box sx={{ 
         background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-        borderRadius: 3,
+          borderRadius: 6,
         p: 4,
         mb: 4,
         color: 'white',
         position: 'relative',
-        overflow: 'hidden'
+          overflow: 'hidden',
+          boxShadow: '0 20px 40px rgba(102, 126, 234, 0.3)',
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'radial-gradient(circle at 20% 80%, rgba(255, 255, 255, 0.1) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 50%)',
+            zIndex: 1,
+          }
       }}>
-        <Box sx={{ position: 'absolute', top: 0, right: 0, opacity: 0.1 }}>
-          <DashboardIcon sx={{ fontSize: 120 }} />
+          <Box sx={{ position: 'absolute', top: -20, right: -20, opacity: 0.1 }}>
+            <DashboardIcon sx={{ fontSize: 160 }} />
         </Box>
-        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 1 }}>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
           <Box>
-            <Typography variant="h3" component="h1" sx={{ fontWeight: 'bold', mb: 1 }}>
+              <Typography variant="h3" component="h1" sx={{ fontWeight: 800, mb: 2, letterSpacing: '-0.02em' }}>
               Project Dashboard
             </Typography>
-            <Typography variant="h6" sx={{ opacity: 0.9 }}>
+              <Typography variant="h5" sx={{ opacity: 0.95, fontWeight: 400 }}>
               Welcome back, {user?.full_name} 👋
             </Typography>
           </Box>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-            <Avatar sx={{ bgcolor: 'rgba(255,255,255,0.2)' }}>
-              <PersonIcon />
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <Avatar sx={{ 
+                bgcolor: 'rgba(255,255,255,0.2)', 
+                width: 56, 
+                height: 56,
+                border: '2px solid rgba(255,255,255,0.3)',
+                backdropFilter: 'blur(10px)',
+                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+              }}>
+                <PersonIcon sx={{ fontSize: 28 }} />
             </Avatar>
             <Tooltip title="Logout">
-              <IconButton onClick={handleLogout} sx={{ color: 'white' }}>
+                <IconButton 
+                  onClick={handleLogout} 
+                  sx={{ 
+                    color: 'white',
+                    bgcolor: 'rgba(255,255,255,0.1)',
+                    border: '1px solid rgba(255,255,255,0.3)',
+                    borderRadius: 3,
+                    backdropFilter: 'blur(10px)',
+                    width: 48,
+                    height: 48,
+                    '&:hover': {
+                      bgcolor: 'rgba(255,255,255,0.2)',
+                      transform: 'scale(1.05)',
+                      boxShadow: '0 8px 25px rgba(0, 0, 0, 0.2)',
+                    },
+                    transition: 'all 0.3s ease'
+                  }}
+                >
                 <LogoutIcon />
               </IconButton>
             </Tooltip>
@@ -642,93 +683,169 @@ function Dashboard() {
       </Box>
 
       {/* Stats Cards */}
-      <Grid container spacing={3} sx={{ mb: 4 }}>
+      {/* Stats Cards */}
+      <Grid container spacing={4} sx={{ mb: 5 }}>
         <Grid item xs={12} sm={6} md={3}>
+          <Fade in timeout={600}>
           <Card sx={{ 
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
             color: 'white',
             position: 'relative',
-            overflow: 'hidden'
+              overflow: 'hidden',
+              borderRadius: 6,
+              boxShadow: '0 12px 24px rgba(102, 126, 234, 0.25)',
+              transition: 'all 0.3s ease',
+              '&:hover': {
+                transform: 'translateY(-8px)',
+                boxShadow: '0 20px 40px rgba(102, 126, 234, 0.4)',
+              }
           }}>
-            <CardContent>
+              <CardContent sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
-                  <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
+                    <Typography variant="h3" sx={{ fontWeight: 800, mb: 1 }}>
                     {stats.total}
                   </Typography>
-                  <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                    <Typography variant="body1" sx={{ opacity: 0.95, fontWeight: 500 }}>
                     Total Projects
                   </Typography>
                 </Box>
-                <FolderIcon sx={{ fontSize: 40, opacity: 0.7 }} />
+                  <Box sx={{ 
+                    bgcolor: 'rgba(255,255,255,0.2)', 
+                    borderRadius: '50%', 
+                    p: 2,
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+                  }}>
+                    <FolderIcon sx={{ fontSize: 32, opacity: 0.9 }} />
+                  </Box>
               </Box>
             </CardContent>
           </Card>
+          </Fade>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
+          <Fade in timeout={800}>
           <Card sx={{ 
             background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-            color: 'white'
+              color: 'white',
+              borderRadius: 6,
+              boxShadow: '0 12px 24px rgba(240, 147, 251, 0.25)',
+              transition: 'all 0.3s ease',
+              '&:hover': {
+                transform: 'translateY(-8px)',
+                boxShadow: '0 20px 40px rgba(240, 147, 251, 0.4)',
+              }
           }}>
-            <CardContent>
+              <CardContent sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
-                  <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
+                    <Typography variant="h3" sx={{ fontWeight: 800, mb: 1 }}>
                     {stats.recent}
                   </Typography>
-                  <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                    <Typography variant="body1" sx={{ opacity: 0.95, fontWeight: 500 }}>
                     Recent (7 days)
                   </Typography>
                 </Box>
-                <TrendingUpIcon sx={{ fontSize: 40, opacity: 0.7 }} />
+                  <Box sx={{ 
+                    bgcolor: 'rgba(255,255,255,0.2)', 
+                    borderRadius: '50%', 
+                    p: 2,
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+                  }}>
+                    <TrendingUpIcon sx={{ fontSize: 32, opacity: 0.9 }} />
+                  </Box>
               </Box>
             </CardContent>
           </Card>
+          </Fade>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
+          <Fade in timeout={1000}>
           <Card sx={{ 
             background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-            color: 'white'
+              color: 'white',
+              borderRadius: 6,
+              boxShadow: '0 12px 24px rgba(79, 172, 254, 0.25)',
+              transition: 'all 0.3s ease',
+              '&:hover': {
+                transform: 'translateY(-8px)',
+                boxShadow: '0 20px 40px rgba(79, 172, 254, 0.4)',
+              }
           }}>
-            <CardContent>
+              <CardContent sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
-                  <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
+                    <Typography variant="h3" sx={{ fontWeight: 800, mb: 1 }}>
                     {stats.successful}
                   </Typography>
-                  <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                    <Typography variant="body1" sx={{ opacity: 0.95, fontWeight: 500 }}>
                     Successful
                   </Typography>
                 </Box>
-                <CheckCircleIcon sx={{ fontSize: 40, opacity: 0.7 }} />
+                  <Box sx={{ 
+                    bgcolor: 'rgba(255,255,255,0.2)', 
+                    borderRadius: '50%', 
+                    p: 2,
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+                  }}>
+                    <CheckCircleIcon sx={{ fontSize: 32, opacity: 0.9 }} />
+                  </Box>
               </Box>
             </CardContent>
           </Card>
+          </Fade>
         </Grid>
         <Grid item xs={12} sm={6} md={3}>
+          <Fade in timeout={1200}>
           <Card sx={{ 
             background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
-            color: 'white'
+              color: 'white',
+              borderRadius: 6,
+              boxShadow: '0 12px 24px rgba(250, 112, 154, 0.25)',
+              transition: 'all 0.3s ease',
+              '&:hover': {
+                transform: 'translateY(-8px)',
+                boxShadow: '0 20px 40px rgba(250, 112, 154, 0.4)',
+              }
           }}>
-            <CardContent>
+              <CardContent sx={{ p: 3 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
-                  <Typography variant="h4" sx={{ fontWeight: 'bold' }}>
+                    <Typography variant="h3" sx={{ fontWeight: 800, mb: 1 }}>
                     {stats.withErrors}
                   </Typography>
-                  <Typography variant="body2" sx={{ opacity: 0.9 }}>
+                    <Typography variant="body1" sx={{ opacity: 0.95, fontWeight: 500 }}>
                     With Issues
                   </Typography>
                 </Box>
-                <CancelIcon sx={{ fontSize: 40, opacity: 0.7 }} />
+                  <Box sx={{ 
+                    bgcolor: 'rgba(255,255,255,0.2)', 
+                    borderRadius: '50%', 
+                    p: 2,
+                    backdropFilter: 'blur(10px)',
+                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+                  }}>
+                    <CancelIcon sx={{ fontSize: 32, opacity: 0.9 }} />
+                  </Box>
               </Box>
             </CardContent>
           </Card>
+          </Fade>
         </Grid>
       </Grid>
 
       {/* Controls Section */}
-      <Paper sx={{ p: 3, mb: 3, borderRadius: 2 }}>
+      <Paper sx={{ 
+        p: 3, 
+        mb: 3, 
+        borderRadius: 4,
+        background: 'white',
+        border: '2px solid #000',
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+      }}>
         <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', flex: 1 }}>
             {/* Search */}
@@ -740,9 +857,18 @@ function Dashboard() {
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon />
+                    <SearchIcon sx={{ color: '#667eea' }} />
                   </InputAdornment>
                 ),
+                sx: {
+                  borderRadius: 2,
+                  '&:hover .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#667eea',
+                  },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#667eea',
+                  },
+                }
               }}
               sx={{ minWidth: 250 }}
             />
@@ -756,9 +882,18 @@ function Dashboard() {
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <FilterIcon />
+                    <FilterIcon sx={{ color: '#667eea' }} />
                   </InputAdornment>
                 ),
+                sx: {
+                  borderRadius: 2,
+                  '&:hover .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#667eea',
+                  },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#667eea',
+                  },
+                }
               }}
               sx={{ minWidth: 120 }}
             >
@@ -775,9 +910,18 @@ function Dashboard() {
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SortIcon />
+                    <SortIcon sx={{ color: '#667eea' }} />
                   </InputAdornment>
                 ),
+                sx: {
+                  borderRadius: 2,
+                  '&:hover .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#667eea',
+                  },
+                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+                    borderColor: '#667eea',
+                  },
+                }
               }}
               sx={{ minWidth: 140 }}
             >
@@ -788,7 +932,17 @@ function Dashboard() {
             {/* Sort Order */}
             <IconButton 
               onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-              sx={{ border: 1, borderColor: 'divider' }}
+              sx={{ 
+                border: 2, 
+                borderColor: '#667eea',
+                borderRadius: 2,
+                color: '#667eea',
+                '&:hover': {
+                  bgcolor: 'rgba(102, 126, 234, 0.1)',
+                  transform: 'scale(1.05)',
+                },
+                transition: 'all 0.2s ease'
+              }}
             >
               <SortIcon sx={{ transform: sortOrder === 'desc' ? 'scaleY(-1)' : 'none' }} />
             </IconButton>
@@ -801,6 +955,18 @@ function Dashboard() {
               size="small"
               onClick={() => setViewMode('grid')}
               startIcon={<DashboardIcon />}
+              sx={{
+                borderRadius: 2,
+                px: 2,
+                border: '2px solid #000',
+                ...(viewMode === 'grid' && {
+                  background: '#000',
+                  color: 'white',
+                  '&:hover': {
+                    background: '#333',
+                  }
+                })
+              }}
             >
               Grid
             </Button>
@@ -809,6 +975,18 @@ function Dashboard() {
               size="small"
               onClick={() => setViewMode('table')}
               startIcon={<DescriptionIcon />}
+              sx={{
+                borderRadius: 2,
+                px: 2,
+                border: '2px solid #000',
+                ...(viewMode === 'table' && {
+                  background: '#000',
+                  color: 'white',
+                  '&:hover': {
+                    background: '#333',
+                  }
+                })
+              }}
             >
               Table
             </Button>
@@ -816,12 +994,21 @@ function Dashboard() {
             {/* Create Project Button */}
             <Button
               variant="contained"
+              size="medium"
               startIcon={<AddIcon />}
               onClick={() => setOpenCreateProjectDialog(true)}
               sx={{ 
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                borderRadius: 2,
+                px: 3,
+                py: 1,
+                fontWeight: 600,
+                fontSize: 14,
+                border: '2px solid #000',
+                transition: 'all 0.2s ease',
                 '&:hover': {
                   background: 'linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%)',
+                  transform: 'translateY(-1px)',
                 }
               }}
             >
@@ -837,7 +1024,7 @@ function Dashboard() {
           <CircularProgress size={60} />
         </Box>
       ) : filteredAndSortedProjects.length === 0 ? (
-        <Paper sx={{ p: 8, textAlign: 'center', borderRadius: 2 }}>
+        <Paper sx={{ p: 8, textAlign: 'center', borderRadius: 4 }}>
           <FolderIcon sx={{ fontSize: 80, color: 'text.secondary', mb: 2 }} />
           <Typography variant="h5" color="text.secondary" sx={{ mb: 1 }}>
             {searchTerm ? 'No projects found' : 'No projects yet'}
@@ -862,15 +1049,29 @@ function Dashboard() {
           )}
         </Paper>
       ) : (
-        <TableContainer component={Paper} sx={{ borderRadius: 2, boxShadow: theme.shadows[2] }}>
+        <TableContainer component={Paper} sx={{ 
+          borderRadius: 4, 
+          boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+          overflow: 'hidden',
+          background: 'white',
+          border: '2px solid #000'
+        }}>
           <Table>
             <TableHead>
               <TableRow sx={{ 
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                 '& .MuiTableCell-head': {
                   color: 'white',
-                  fontWeight: 'bold',
-                  fontSize: '0.95rem',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  padding: '12px 16px',
+                  borderBottom: 'none',
+                },
+                '& .MuiTableCell-head:first-of-type': {
+                  borderTopLeftRadius: 16,
+                },
+                '& .MuiTableCell-head:last-of-type': {
+                  borderTopRightRadius: 16,
                 }
               }}>
                 <TableCell>Project Name</TableCell>
@@ -888,17 +1089,31 @@ function Dashboard() {
                   sx={{ 
                     transition: 'all 0.2s ease',
                     '&:hover': {
-                      backgroundColor: 'rgba(102, 126, 234, 0.04)',
-                      transform: 'scale(1.01)',
+                      backgroundColor: '#f5f5f5',
+                      transform: 'scale(1.002)',
                     },
                     '&:nth-of-type(even)': {
                       backgroundColor: 'rgba(0, 0, 0, 0.02)',
+                    },
+                    '& .MuiTableCell-body': {
+                      padding: '12px 16px',
+                      borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
                     }
                   }}
                 >
-                  <TableCell component="th" scope="row" sx={{ fontWeight: 'bold', fontSize: '1.1rem' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <FolderIcon color="primary" fontSize="small" />
+                  <TableCell component="th" scope="row" sx={{ fontWeight: 600, fontSize: '1rem' }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <Box sx={{ 
+                        bgcolor: 'rgba(102, 126, 234, 0.1)', 
+                        borderRadius: '50%', 
+                        p: 0.8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid #000'
+                      }}>
+                        <FolderIcon sx={{ color: '#667eea', fontSize: 16 }} />
+                      </Box>
                       {project.name}
                     </Box>
                   </TableCell>
@@ -909,14 +1124,25 @@ function Dashboard() {
                       display: '-webkit-box',
                       WebkitLineClamp: 2,
                       WebkitBoxOrient: 'vertical',
+                      lineHeight: 1.3,
                     }}>
                       {project.description || 'No description provided'}
                     </Typography>
                   </TableCell>
                   <TableCell>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                      <CalendarIcon fontSize="small" color="action" />
-                      <Typography variant="body2">
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <Box sx={{ 
+                        bgcolor: 'rgba(102, 126, 234, 0.1)', 
+                        borderRadius: '50%', 
+                        p: 0.8,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        border: '1px solid #000'
+                      }}>
+                        <CalendarIcon sx={{ color: '#667eea', fontSize: 14 }} />
+                      </Box>
+                      <Typography variant="body2" fontWeight={500}>
                         {new Date(project.created_at).toLocaleDateString()}
                       </Typography>
                     </Box>
@@ -927,64 +1153,88 @@ function Dashboard() {
                       color="success" 
                       size="small"
                       icon={<CheckCircleIcon />}
-                      sx={{ fontWeight: 'medium' }}
+                      sx={{ 
+                        fontWeight: 600,
+                        borderRadius: 2,
+                        border: '1px solid #000',
+                        '& .MuiChip-icon': {
+                          color: 'inherit'
+                        }
+                      }}
                     />
                   </TableCell>
                   <TableCell align="right">
-                    <Box sx={{ display: 'flex', gap: 1, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                    <Box sx={{ display: 'flex', gap: 0.5, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                       <Tooltip title="Generate Report">
                         <IconButton
-                          color="primary"
+                          size="small"
                           onClick={() => handleOpenReportUploadDialog(project)}
                           sx={{ 
                             backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            borderRadius: 2,
+                            border: '1px solid #000',
                             '&:hover': {
                               backgroundColor: 'rgba(102, 126, 234, 0.2)',
-                            }
+                              transform: 'scale(1.05)',
+                            },
+                            transition: 'all 0.2s ease'
                           }}
                         >
-                          <DescriptionIcon />
+                          <DescriptionIcon sx={{ fontSize: 18, color: '#667eea' }} />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="View Errors">
                         <IconButton
-                          color="warning"
+                          size="small"
                           onClick={() => handleShowChartErrors(project)}
                           sx={{ 
                             backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                            borderRadius: 2,
+                            border: '1px solid #000',
                             '&:hover': {
                               backgroundColor: 'rgba(255, 152, 0, 0.2)',
-                            }
+                              transform: 'scale(1.05)',
+                            },
+                            transition: 'all 0.2s ease'
                           }}
                         >
-                          <BugReportIcon />
+                          <BugReportIcon sx={{ fontSize: 18, color: '#ff9800' }} />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="Edit Project">
                         <IconButton
-                          color="info"
+                          size="small"
                           onClick={() => handleEditProject(project)}
                           sx={{ 
                             backgroundColor: 'rgba(3, 169, 244, 0.1)',
+                            borderRadius: 2,
+                            border: '1px solid #000',
                             '&:hover': {
                               backgroundColor: 'rgba(3, 169, 244, 0.2)',
-                            }
+                              transform: 'scale(1.05)',
+                            },
+                            transition: 'all 0.2s ease'
                           }}
                         >
-                          <EditIcon />
+                          <EditIcon sx={{ fontSize: 18, color: '#03a9f4' }} />
                         </IconButton>
                       </Tooltip>
                       <Tooltip title="More Options">
                         <IconButton
+                          size="small"
                           onClick={(e) => handleMenuOpen(e, project)}
                           sx={{ 
-                            backgroundColor: 'rgba(0, 0, 0, 0.04)',
+                            backgroundColor: 'rgba(0, 0, 0, 0.05)',
+                            borderRadius: 2,
+                            border: '1px solid #000',
                             '&:hover': {
-                              backgroundColor: 'rgba(0, 0, 0, 0.08)',
-                            }
+                              backgroundColor: 'rgba(0, 0, 0, 0.1)',
+                              transform: 'scale(1.05)',
+                            },
+                            transition: 'all 0.2s ease'
                           }}
                         >
-                          <MoreVertIcon />
+                          <MoreVertIcon sx={{ fontSize: 18, color: '#000' }} />
                         </IconButton>
                       </Tooltip>
                     </Box>
@@ -1007,6 +1257,7 @@ function Dashboard() {
                   display: 'flex', 
                   flexDirection: 'column',
                   transition: 'transform 0.2s, box-shadow 0.2s',
+                  borderRadius: 4,
                   '&:hover': {
                     transform: 'translateY(-4px)',
                     boxShadow: theme.shadows[8],
@@ -1062,7 +1313,7 @@ function Dashboard() {
         onClose={handleMenuClose}
         PaperProps={{
           sx: {
-            borderRadius: 2,
+            borderRadius: 3,
             minWidth: 180,
           }
         }}
@@ -1099,7 +1350,7 @@ function Dashboard() {
         open={openCreateProjectDialog} 
         onClose={() => setOpenCreateProjectDialog(false)}
         PaperProps={{
-          sx: { borderRadius: 3, minWidth: 400 }
+          sx: { borderRadius: 4, minWidth: 400 }
         }}
       >
         <DialogTitle sx={{ 
@@ -1174,7 +1425,7 @@ function Dashboard() {
         open={openEditProjectDialog} 
         onClose={() => setOpenEditProjectDialog(false)}
         PaperProps={{
-          sx: { borderRadius: 3, minWidth: 400 }
+          sx: { borderRadius: 4, minWidth: 400 }
         }}
       >
         <DialogTitle sx={{ 
@@ -1251,7 +1502,7 @@ function Dashboard() {
         open={openReportUploadDialog} 
         onClose={handleCloseReportUploadDialog}
         PaperProps={{
-          sx: { borderRadius: 3, minWidth: 500 }
+          sx: { borderRadius: 4, minWidth: 500 }
         }}
       >
         <DialogTitle sx={{ 
@@ -1366,7 +1617,7 @@ function Dashboard() {
         maxWidth="md"
         fullWidth
         PaperProps={{
-          sx: { borderRadius: 3 }
+          sx: { borderRadius: 4 }
         }}
       >
         <DialogTitle sx={{ 
@@ -1511,7 +1762,7 @@ function Dashboard() {
           sx={{
             width: '100%',
             maxWidth: '500px',
-            borderRadius: 2,
+              borderRadius: 4,
             '& .MuiAlert-message': {
               width: '100%'
             }
@@ -1528,6 +1779,7 @@ function Dashboard() {
         </Alert>
       </Snackbar>
     </Container>
+      </Box>
   );
 }
 

@@ -13,6 +13,7 @@ import {
   InputAdornment,
   IconButton,
   Divider,
+  CircularProgress,
 } from '@mui/material';
 import axios from 'axios';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
@@ -271,7 +272,11 @@ function Login() {
                   },
                 }}
               >
-                {isLoading ? 'Signing In...' : 'Sign In'}
+                {isLoading ? (
+                  <CircularProgress size={20} sx={{ color: '#fff' }} />
+                ) : (
+                  'Sign In'
+                )}
               </Button>
             </form>
 
