@@ -7,7 +7,6 @@ import {
   Button,
   Typography,
   Box,
-  Alert,
   Fade,
   Zoom,
   InputAdornment,
@@ -18,6 +17,7 @@ import {
   StepLabel,
   CircularProgress,
 } from '@mui/material';
+import Alert from './Alert';
 import axios from 'axios';
 import PersonAddAlt1Icon from '@mui/icons-material/PersonAddAlt1';
 import VisibilityIcon from '@mui/icons-material/Visibility';
@@ -37,6 +37,12 @@ function Register() {
   const [error, setError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [alert, setAlert] = useState({
+    open: false,
+    message: '',
+    severity: 'error',
+    title: ''
+  });
 
   const handleChange = (e) => {
     setFormData({
@@ -53,99 +59,100 @@ function Register() {
     try {
       const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/register`, formData);
       if (response.data.message === 'Registration successful') {
-        navigate('/login');
+        setAlert({
+          open: true,
+          title: 'Registration Successful!',
+          message: 'Account created successfully. Please sign in.',
+          severity: 'success'
+        });
+        setTimeout(() => {
+          navigate('/login');
+        }, 2000);
       }
     } catch (err) {
-      setError(err.response?.data?.error || 'Registration failed. Please try again.');
+      const errorMessage = err.response?.data?.error || 'Registration failed. Please try again.';
+      setError(errorMessage);
+      setAlert({
+        open: true,
+        title: 'Registration Failed',
+        message: errorMessage,
+        severity: 'error'
+      });
     } finally {
       setIsLoading(false);
     }
   };
 
+  const handleCloseAlert = () => {
+    setAlert(prev => ({ ...prev, open: false }));
+  };
+
   const steps = ['Personal Info', 'Account Details', 'Security'];
 
   return (
-    <Container maxWidth="sm" disableGutters>
+    <>
       <Box
         sx={{
-          minHeight: '100vh',
+          height: '100vh',
+          width: '100vw',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          position: 'relative',
+          background: '#f8f9fa',
+          p: 2,
           overflow: 'hidden',
-          '&::before': {
-            content: '""',
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%)',
-            zIndex: 1,
-          }
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
         }}
       >
-        <Fade in timeout={800}>
-          <Paper
-            elevation={24}
-            sx={{
-              p: { xs: 3, sm: 5 },
-              width: '100%',
-              maxWidth: 500,
-              borderRadius: 4,
-              boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              position: 'relative',
-              zIndex: 2,
-              background: 'rgba(255, 255, 255, 0.95)',
-              backdropFilter: 'blur(10px)',
-              border: '1px solid rgba(255, 255, 255, 0.2)',
-            }}
-          >
+      <Fade in timeout={800}>
+        <Paper
+          elevation={8}
+          sx={{
+            p: { xs: 2.5, sm: 4 },
+            width: '100%',
+            maxWidth: 500,
+            height: 'auto',
+            maxHeight: '85vh',
+            borderRadius: 4,
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            background: 'white',
+            border: '1px solid #e0e0e0',
+            overflow: 'hidden',
+            position: 'relative',
+          }}
+        >
             <Zoom in timeout={1000}>
-              <Box sx={{ mb: 3, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <Box sx={{ mb: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                 <Box
                   sx={{
                     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                     borderRadius: '50%',
-                    width: 80,
-                    height: 80,
+                    width: 70,
+                    height: 70,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     mb: 2,
-                    boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
-                    animation: 'pulse 2s infinite',
-                    '@keyframes pulse': {
-                      '0%': {
-                        boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
-                      },
-                      '50%': {
-                        boxShadow: '0 8px 32px rgba(102, 126, 234, 0.6)',
-                      },
-                      '100%': {
-                        boxShadow: '0 8px 32px rgba(102, 126, 234, 0.4)',
-                      },
-                    },
+                    boxShadow: '0 4px 16px rgba(102, 126, 234, 0.2)',
                   }}
                 >
-                  <PersonAddAlt1Icon sx={{ color: '#fff', fontSize: 40 }} />
+                  <PersonAddAlt1Icon sx={{ color: '#fff', fontSize: 35 }} />
                 </Box>
                 <Typography 
-                  variant="h4" 
+                  variant="h5" 
                   component="h1" 
                   fontWeight={700} 
                   gutterBottom 
                   align="center" 
                   sx={{
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    backgroundClip: 'text',
-                    WebkitBackgroundClip: 'text',
-                    WebkitTextFillColor: 'transparent',
+                    color: '#667eea',
                     mb: 1,
                   }}
                 >
@@ -162,11 +169,12 @@ function Register() {
                       <StepLabel 
                         sx={{
                           '& .MuiStepLabel-label': {
-                            fontSize: '0.75rem',
+                            fontSize: '0.8rem',
                             fontWeight: 500,
                           },
                           '& .MuiStepIcon-root': {
                             color: '#667eea',
+                            fontSize: '1.3rem',
                           },
                         }}
                       >
@@ -178,34 +186,22 @@ function Register() {
               </Box>
             </Zoom>
 
-            {error && (
-              <Zoom in timeout={300}>
-                <Alert 
-                  severity="error" 
-                  sx={{ 
-                    mb: 3, 
-                    width: '100%', 
-                    borderRadius: 2,
-                    boxShadow: '0 4px 12px rgba(244, 67, 54, 0.15)',
-                  }}
-                >
-                  {error}
-                </Alert>
-              </Zoom>
-            )}
 
-            <form onSubmit={handleSubmit} style={{ width: '100%' }}>
+
+            <form onSubmit={handleSubmit} style={{ width: '100%', flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
               <TextField
                 fullWidth
                 label="Full Name"
                 name="full_name"
                 value={formData.full_name}
                 onChange={handleChange}
-                margin="normal"
+                margin="dense"
                 required
+                size="small"
                 InputProps={{
                   sx: { 
                     borderRadius: 2,
+                    fontSize: '0.95rem',
                     '&:hover .MuiOutlinedInput-notchedOutline': {
                       borderColor: '#667eea',
                     },
@@ -215,12 +211,13 @@ function Register() {
                   },
                   startAdornment: (
                     <InputAdornment position="start">
-                      <BadgeIcon sx={{ color: '#667eea', opacity: 0.7 }} />
+                      <BadgeIcon sx={{ color: '#667eea', opacity: 0.7, fontSize: 22 }} />
                     </InputAdornment>
                   ),
                 }}
                 InputLabelProps={{
                   sx: {
+                    fontSize: '1.05rem',
                     '&.Mui-focused': {
                       color: '#667eea',
                     },
@@ -233,11 +230,13 @@ function Register() {
                 name="username"
                 value={formData.username}
                 onChange={handleChange}
-                margin="normal"
+                margin="dense"
                 required
+                size="small"
                 InputProps={{
                   sx: { 
                     borderRadius: 2,
+                    fontSize: '0.95rem',
                     '&:hover .MuiOutlinedInput-notchedOutline': {
                       borderColor: '#667eea',
                     },
@@ -247,12 +246,13 @@ function Register() {
                   },
                   startAdornment: (
                     <InputAdornment position="start">
-                      <PersonIcon sx={{ color: '#667eea', opacity: 0.7 }} />
+                      <PersonIcon sx={{ color: '#667eea', opacity: 0.7, fontSize: 22 }} />
                     </InputAdornment>
                   ),
                 }}
                 InputLabelProps={{
                   sx: {
+                    fontSize: '1.05rem',
                     '&.Mui-focused': {
                       color: '#667eea',
                     },
@@ -266,11 +266,13 @@ function Register() {
                 type="email"
                 value={formData.email}
                 onChange={handleChange}
-                margin="normal"
+                margin="dense"
                 required
+                size="small"
                 InputProps={{
                   sx: { 
                     borderRadius: 2,
+                    fontSize: '0.95rem',
                     '&:hover .MuiOutlinedInput-notchedOutline': {
                       borderColor: '#667eea',
                     },
@@ -280,12 +282,13 @@ function Register() {
                   },
                   startAdornment: (
                     <InputAdornment position="start">
-                      <EmailIcon sx={{ color: '#667eea', opacity: 0.7 }} />
+                      <EmailIcon sx={{ color: '#667eea', opacity: 0.7, fontSize: 22 }} />
                     </InputAdornment>
                   ),
                 }}
                 InputLabelProps={{
                   sx: {
+                    fontSize: '1.05rem',
                     '&.Mui-focused': {
                       color: '#667eea',
                     },
@@ -299,11 +302,13 @@ function Register() {
                 type={showPassword ? 'text' : 'password'}
                 value={formData.password}
                 onChange={handleChange}
-                margin="normal"
+                margin="dense"
                 required
+                size="small"
                 InputProps={{
                   sx: { 
                     borderRadius: 2,
+                    fontSize: '0.95rem',
                     '&:hover .MuiOutlinedInput-notchedOutline': {
                       borderColor: '#667eea',
                     },
@@ -313,7 +318,7 @@ function Register() {
                   },
                   startAdornment: (
                     <InputAdornment position="start">
-                      <PersonAddAlt1Icon sx={{ color: '#667eea', opacity: 0.7 }} />
+                      <PersonAddAlt1Icon sx={{ color: '#667eea', opacity: 0.7, fontSize: 22 }} />
                     </InputAdornment>
                   ),
                   endAdornment: (
@@ -321,15 +326,17 @@ function Register() {
                       <IconButton
                         onClick={() => setShowPassword(!showPassword)}
                         edge="end"
+                        size="small"
                         sx={{ color: '#667eea' }}
                       >
-                        {showPassword ? <VisibilityOffIcon /> : <VisibilityIcon />}
+                        {showPassword ? <VisibilityOffIcon sx={{ fontSize: 20 }} /> : <VisibilityIcon sx={{ fontSize: 20 }} />}
                       </IconButton>
                     </InputAdornment>
                   ),
                 }}
                 InputLabelProps={{
                   sx: {
+                    fontSize: '1.05rem',
                     '&.Mui-focused': {
                       color: '#667eea',
                     },
@@ -341,22 +348,22 @@ function Register() {
                 type="submit"
                 fullWidth
                 variant="contained"
-                size="large"
+                size="medium"
                 disabled={isLoading}
                 sx={{ 
-                  mt: 4, 
+                  mt: 2, 
                   mb: 2,
                   borderRadius: 2, 
                   fontWeight: 600, 
-                  fontSize: 16, 
-                  py: 1.5, 
+                  fontSize: 15, 
+                  py: 1.2, 
                   background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                  boxShadow: '0 8px 24px rgba(102, 126, 234, 0.3)',
+                  boxShadow: '0 4px 12px rgba(102, 126, 234, 0.2)',
                   transition: 'all 0.3s ease',
                   '&:hover': {
                     background: 'linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%)',
-                    boxShadow: '0 12px 32px rgba(102, 126, 234, 0.4)',
-                    transform: 'translateY(-2px)',
+                    boxShadow: '0 6px 20px rgba(102, 126, 234, 0.3)',
+                    transform: 'translateY(-1px)',
                   },
                   '&:disabled': {
                     background: 'linear-gradient(135deg, #b0b0b0 0%, #909090 100%)',
@@ -375,8 +382,8 @@ function Register() {
 
             <Divider sx={{ width: '100%', my: 2, opacity: 0.3 }} />
 
-            <Box sx={{ mt: 2, textAlign: 'center', width: '100%' }}>
-              <Typography variant="body2" color="text.secondary">
+            <Box sx={{ mt: 1, textAlign: 'center', width: '100%' }}>
+              <Typography variant="body2" color="text.secondary" sx={{ fontSize: '0.9rem' }}>
                 Already have an account?{' '}
                 <Link 
                   to="/login" 
@@ -396,7 +403,16 @@ function Register() {
           </Paper>
         </Fade>
       </Box>
-    </Container>
+
+      {/* Custom Alert Component */}
+      <Alert
+        open={alert.open}
+        onClose={handleCloseAlert}
+        title={alert.title}
+        message={alert.message}
+        severity={alert.severity}
+      />
+    </>
   );
 }
 

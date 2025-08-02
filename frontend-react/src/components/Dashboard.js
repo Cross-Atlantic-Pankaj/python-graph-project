@@ -21,7 +21,6 @@ import {
   CircularProgress,
   Tabs,
   Tab,
-  Alert,
   Accordion,
   AccordionSummary,
   AccordionDetails,
@@ -32,7 +31,6 @@ import {
   ListItemText,
   ListItemIcon,
   LinearProgress,
-  Snackbar,
   Card,
   CardContent,
   CardActions,
@@ -48,6 +46,7 @@ import {
   useTheme,
   useMediaQuery,
 } from '@mui/material';
+import Alert from './Alert';
 import { 
   Add as AddIcon, 
   Logout as LogoutIcon, 
@@ -100,10 +99,10 @@ function Dashboard() {
   const [chartErrors, setChartErrors] = useState({});
   const [showErrorDialog, setShowErrorDialog] = useState(false);
   const [selectedProjectForErrors, setSelectedProjectForErrors] = useState(null);
-  const [customAlert, setCustomAlert] = useState({
+  const [alert, setAlert] = useState({
     open: false,
     message: '',
-    severity: 'success', // 'success', 'warning', 'error'
+    severity: 'success',
     title: ''
   });
 
@@ -234,6 +233,17 @@ function Dashboard() {
     handleMenuClose();
   };
 
+  const handleColumnSort = (column) => {
+    if (sortBy === column) {
+      // If clicking the same column, toggle order
+      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
+    } else {
+      // If clicking a different column, set it as sort column with ascending order
+      setSortBy(column);
+      setSortOrder('asc');
+    }
+  };
+
   const handleCreateProject = async () => {
     try {
       const formData = new FormData();
@@ -252,10 +262,10 @@ function Dashboard() {
       setOpenCreateProjectDialog(false);
       setNewProject({ name: '', description: '', file: null });
       loadProjects();
-      showCustomAlert('Success!', 'Project created successfully.', 'success');
+      showAlert('Success!', 'Project created successfully.', 'success');
     } catch (error) {
       console.error('Error creating project:', error.response?.data || error.message);
-      showCustomAlert('Error!', error.response?.data?.error || 'Failed to create project.', 'error');
+      showAlert('Error!', error.response?.data?.error || 'Failed to create project.', 'error');
     }
   };
 
@@ -287,10 +297,10 @@ function Dashboard() {
       setOpenEditProjectDialog(false);
       setEditingProject({ name: '', description: '', file: null });
       loadProjects();
-      showCustomAlert('Success!', 'Project updated successfully.', 'success');
+      showAlert('Success!', 'Project updated successfully.', 'success');
     } catch (error) {
       console.error('Error updating project:', error.response?.data || error.message);
-      showCustomAlert('Error!', error.response?.data?.error || 'Failed to update project.', 'error');
+      showAlert('Error!', error.response?.data?.error || 'Failed to update project.', 'error');
     }
   };
 
@@ -302,10 +312,10 @@ function Dashboard() {
     try {
       await axios.delete(`${process.env.REACT_APP_API_URL}/api/projects/${projectId}`);
       loadProjects();
-      showCustomAlert('Success!', 'Project deleted successfully.', 'success');
+      showAlert('Success!', 'Project deleted successfully.', 'success');
     } catch (error) {
       console.error('Error deleting project:', error.response?.data || error.message);
-      showCustomAlert('Error!', error.response?.data?.error || 'Failed to delete project.', 'error');
+      showAlert('Error!', error.response?.data?.error || 'Failed to delete project.', 'error');
     }
   };
 
@@ -353,8 +363,8 @@ function Dashboard() {
     setChartErrors({});
   };
 
-  const showCustomAlert = (title, message, severity = 'success') => {
-    setCustomAlert({
+  const showAlert = (title, message, severity = 'success') => {
+    setAlert({
       open: true,
       title,
       message,
@@ -362,8 +372,8 @@ function Dashboard() {
     });
   };
 
-  const handleCloseCustomAlert = () => {
-    setCustomAlert(prev => ({ ...prev, open: false }));
+  const handleCloseAlert = () => {
+    setAlert(prev => ({ ...prev, open: false }));
   };
 
   const handleReportFileUpload = async () => {
@@ -442,7 +452,7 @@ function Dashboard() {
           });
           
           setTimeout(() => {
-            showCustomAlert(
+            showAlert(
               'Batch Processing Complete! 🎉',
               `Successfully generated and downloaded ${processed_files} out of ${total_files} reports.`,
               'success'
@@ -459,7 +469,7 @@ function Dashboard() {
           });
           
           setTimeout(() => {
-            showCustomAlert(
+            showAlert(
               'Reports Generated! ⚠️',
               `${processed_files} reports were generated successfully, but the download failed. Please try again or contact support.`,
               'warning'
@@ -470,7 +480,7 @@ function Dashboard() {
         
       } catch (error) {
         console.error('Batch report error:', error.response?.data || error.message);
-        showCustomAlert(
+        showAlert(
           'Batch Processing Failed! ❌',
           'Failed to process ZIP file. Please check your file and try again.',
           'error'
@@ -512,21 +522,21 @@ function Dashboard() {
         
         if (totalErrors === 0) {
           // All charts generated successfully - Green alert
-          showCustomAlert(
+          showAlert(
             'Report Generated Successfully! 🎉',
             'All charts were generated without any errors.',
             'success'
           );
         } else if (totalErrors < 5) { // Assuming reasonable threshold for "some" errors
           // Some charts failed - Yellow warning alert
-          showCustomAlert(
+          showAlert(
             'Report Generated with Warnings ⚠️',
             `${totalErrors} chart(s) failed to generate. The report was created but some charts may be missing. Click "View Errors" for details.`,
             'warning'
           );
         } else {
           // Many charts failed - Red error alert
-          showCustomAlert(
+          showAlert(
             'Report Generation Issues ❌',
             `${totalErrors} charts failed to generate. The report may be incomplete. Click "View Errors" to see what went wrong.`,
             'error'
@@ -534,7 +544,7 @@ function Dashboard() {
         }
       } catch (errorCheckError) {
         console.error('Error checking for chart errors:', errorCheckError);
-        showCustomAlert(
+        showAlert(
           'Report Generated! 📄',
           'Report was created successfully, but error checking failed.',
           'warning'
@@ -572,7 +582,7 @@ function Dashboard() {
         setSingleProgress({ message: 'Report downloaded successfully!', percentage: 100 });
       } catch (downloadError) {
         console.error('Error downloading report:', downloadError.response?.data || downloadError.message);
-        showCustomAlert(
+        showAlert(
           'Download Failed! ⚠️',
           'Report was generated but failed to download. Please try again.',
           'warning'
@@ -584,7 +594,7 @@ function Dashboard() {
       }, 1000);
     } catch (uploadError) {
       console.error('Error uploading report:', uploadError.response?.data || uploadError.message);
-      showCustomAlert(
+      showAlert(
         'Upload Failed! ❌',
         'Failed to upload report to server. Please check your file and try again.',
         'error'
@@ -607,117 +617,148 @@ function Dashboard() {
   return (
     <Box sx={{ 
       minHeight: '100vh',
-      background: 'linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)',
-      py: 4,
+      background: '#f8f9fa',
+      py: 3,
       px: 2
     }}>
-      <Container maxWidth="xl">
+      <Container maxWidth="lg">
       {/* Header Section */}
       <Box sx={{ 
         background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-          borderRadius: 6,
-        p: 4,
-        mb: 4,
+        borderRadius: 4,
+        p: 3,
+        mb: 3,
         color: 'white',
         position: 'relative',
-          overflow: 'hidden',
-          boxShadow: '0 20px 40px rgba(102, 126, 234, 0.3)',
-          '&::before': {
-            content: '""',
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'radial-gradient(circle at 20% 80%, rgba(255, 255, 255, 0.1) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 50%)',
-            zIndex: 1,
-          }
+        overflow: 'hidden',
+        boxShadow: '0 8px 24px rgba(102, 126, 234, 0.2)',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'radial-gradient(circle at 20% 80%, rgba(255, 255, 255, 0.1) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.1) 0%, transparent 50%)',
+          zIndex: 1,
+        }
       }}>
           <Box sx={{ position: 'absolute', top: -20, right: -20, opacity: 0.1 }}>
             <DashboardIcon sx={{ fontSize: 160 }} />
         </Box>
           <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2 }}>
           <Box>
-              <Typography variant="h3" component="h1" sx={{ fontWeight: 800, mb: 2, letterSpacing: '-0.02em' }}>
+              <Typography variant="h5" component="h1" sx={{ fontWeight: 700, mb: 1, letterSpacing: '-0.02em' }}>
               Project Dashboard
             </Typography>
-              <Typography variant="h5" sx={{ opacity: 0.95, fontWeight: 400 }}>
-              Welcome back, {user?.full_name} 👋
-            </Typography>
           </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-              <Avatar sx={{ 
-                bgcolor: 'rgba(255,255,255,0.2)', 
-                width: 56, 
-                height: 56,
-                border: '2px solid rgba(255,255,255,0.3)',
-                backdropFilter: 'blur(10px)',
-                boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
-              }}>
-                <PersonIcon sx={{ fontSize: 28 }} />
-            </Avatar>
-            <Tooltip title="Logout">
-                <IconButton 
-                  onClick={handleLogout} 
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+              <Box 
+                sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: 2,
+                  bgcolor: '#f8f9fa',
+                  borderRadius: 25,
+                  px: 3,
+                  py: 1.5,
+                  border: '1px solid #e0e0e0',
+                  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                  transition: 'all 0.3s ease',
+                  height: 48,
+                  '&:hover': {
+                    bgcolor: '#f0f0f0',
+                    transform: 'scale(1.02)',
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                  }
+                }}
+              >
+                <Avatar sx={{ 
+                  bgcolor: '#e91e63', 
+                  width: 36, 
+                  height: 36,
+                  fontSize: '1rem',
+                  fontWeight: 600,
+                  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)'
+                }}>
+                  {user?.full_name ? user.full_name.charAt(0).toUpperCase() : 'U'}
+                </Avatar>
+                <Typography 
+                  variant="body1" 
                   sx={{ 
-                    color: 'white',
-                    bgcolor: 'rgba(255,255,255,0.1)',
-                    border: '1px solid rgba(255,255,255,0.3)',
-                    borderRadius: 3,
-                    backdropFilter: 'blur(10px)',
-                    width: 48,
-                    height: 48,
-                    '&:hover': {
-                      bgcolor: 'rgba(255,255,255,0.2)',
-                      transform: 'scale(1.05)',
-                      boxShadow: '0 8px 25px rgba(0, 0, 0, 0.2)',
-                    },
-                    transition: 'all 0.3s ease'
+                    color: '#333',
+                    fontWeight: 600,
+                    fontSize: '0.95rem'
                   }}
                 >
-                <LogoutIcon />
-              </IconButton>
-            </Tooltip>
-          </Box>
+                  {user?.full_name}
+                </Typography>
+              </Box>
+              <Tooltip title="Logout">
+                <Box 
+                  onClick={handleLogout} 
+                  sx={{ 
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    bgcolor: '#f8f9fa',
+                    borderRadius: 25,
+                    px: 3,
+                    py: 1.5,
+                    border: '1px solid #e0e0e0',
+                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+                    cursor: 'pointer',
+                    transition: 'all 0.3s ease',
+                    height: 48,
+                    '&:hover': {
+                      bgcolor: '#f0f0f0',
+                      transform: 'scale(1.02)',
+                      boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                    }
+                  }}
+                >
+                  <LogoutIcon sx={{ fontSize: 20, color: '#666' }} />
+                </Box>
+              </Tooltip>
+            </Box>
         </Box>
       </Box>
 
       {/* Stats Cards */}
-      {/* Stats Cards */}
-      <Grid container spacing={4} sx={{ mb: 5 }}>
+      <Grid container spacing={3} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
           <Fade in timeout={600}>
           <Card sx={{ 
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
             color: 'white',
             position: 'relative',
-              overflow: 'hidden',
-              borderRadius: 6,
-              boxShadow: '0 12px 24px rgba(102, 126, 234, 0.25)',
-              transition: 'all 0.3s ease',
-              '&:hover': {
-                transform: 'translateY(-8px)',
-                boxShadow: '0 20px 40px rgba(102, 126, 234, 0.4)',
-              }
+            overflow: 'hidden',
+            borderRadius: 4,
+            boxShadow: '0 6px 16px rgba(102, 126, 234, 0.3)',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              transform: 'translateY(-4px)',
+              boxShadow: '0 12px 24px rgba(102, 126, 234, 0.4)',
+            }
           }}>
-              <CardContent sx={{ p: 3 }}>
+              <CardContent sx={{ p: 2.5 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
-                    <Typography variant="h3" sx={{ fontWeight: 800, mb: 1 }}>
+                    <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
                     {stats.total}
                   </Typography>
-                    <Typography variant="body1" sx={{ opacity: 0.95, fontWeight: 500 }}>
+                    <Typography variant="body2" sx={{ opacity: 0.95, fontWeight: 500 }}>
                     Total Projects
                   </Typography>
                 </Box>
                   <Box sx={{ 
                     bgcolor: 'rgba(255,255,255,0.2)', 
                     borderRadius: '50%', 
-                    p: 2,
+                    p: 1.5,
                     backdropFilter: 'blur(10px)',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+                    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.1)'
                   }}>
-                    <FolderIcon sx={{ fontSize: 32, opacity: 0.9 }} />
+                    <FolderIcon sx={{ fontSize: 28, opacity: 0.9 }} />
                   </Box>
               </Box>
             </CardContent>
@@ -728,33 +769,33 @@ function Dashboard() {
           <Fade in timeout={800}>
           <Card sx={{ 
             background: 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-              color: 'white',
-              borderRadius: 6,
-              boxShadow: '0 12px 24px rgba(240, 147, 251, 0.25)',
-              transition: 'all 0.3s ease',
-              '&:hover': {
-                transform: 'translateY(-8px)',
-                boxShadow: '0 20px 40px rgba(240, 147, 251, 0.4)',
-              }
+            color: 'white',
+            borderRadius: 4,
+            boxShadow: '0 6px 16px rgba(240, 147, 251, 0.3)',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              transform: 'translateY(-4px)',
+              boxShadow: '0 12px 24px rgba(240, 147, 251, 0.4)',
+            }
           }}>
-              <CardContent sx={{ p: 3 }}>
+              <CardContent sx={{ p: 2.5 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
-                    <Typography variant="h3" sx={{ fontWeight: 800, mb: 1 }}>
+                    <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
                     {stats.recent}
                   </Typography>
-                    <Typography variant="body1" sx={{ opacity: 0.95, fontWeight: 500 }}>
+                    <Typography variant="body2" sx={{ opacity: 0.95, fontWeight: 500 }}>
                     Recent (7 days)
                   </Typography>
                 </Box>
                   <Box sx={{ 
                     bgcolor: 'rgba(255,255,255,0.2)', 
                     borderRadius: '50%', 
-                    p: 2,
+                    p: 1.5,
                     backdropFilter: 'blur(10px)',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+                    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.1)'
                   }}>
-                    <TrendingUpIcon sx={{ fontSize: 32, opacity: 0.9 }} />
+                    <TrendingUpIcon sx={{ fontSize: 28, opacity: 0.9 }} />
                   </Box>
               </Box>
             </CardContent>
@@ -765,33 +806,33 @@ function Dashboard() {
           <Fade in timeout={1000}>
           <Card sx={{ 
             background: 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-              color: 'white',
-              borderRadius: 6,
-              boxShadow: '0 12px 24px rgba(79, 172, 254, 0.25)',
-              transition: 'all 0.3s ease',
-              '&:hover': {
-                transform: 'translateY(-8px)',
-                boxShadow: '0 20px 40px rgba(79, 172, 254, 0.4)',
-              }
+            color: 'white',
+            borderRadius: 4,
+            boxShadow: '0 6px 16px rgba(79, 172, 254, 0.3)',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              transform: 'translateY(-4px)',
+              boxShadow: '0 12px 24px rgba(79, 172, 254, 0.4)',
+            }
           }}>
-              <CardContent sx={{ p: 3 }}>
+              <CardContent sx={{ p: 2.5 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
-                    <Typography variant="h3" sx={{ fontWeight: 800, mb: 1 }}>
+                    <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
                     {stats.successful}
                   </Typography>
-                    <Typography variant="body1" sx={{ opacity: 0.95, fontWeight: 500 }}>
+                    <Typography variant="body2" sx={{ opacity: 0.95, fontWeight: 500 }}>
                     Successful
                   </Typography>
                 </Box>
                   <Box sx={{ 
                     bgcolor: 'rgba(255,255,255,0.2)', 
                     borderRadius: '50%', 
-                    p: 2,
+                    p: 1.5,
                     backdropFilter: 'blur(10px)',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+                    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.1)'
                   }}>
-                    <CheckCircleIcon sx={{ fontSize: 32, opacity: 0.9 }} />
+                    <CheckCircleIcon sx={{ fontSize: 28, opacity: 0.9 }} />
                   </Box>
               </Box>
             </CardContent>
@@ -802,33 +843,33 @@ function Dashboard() {
           <Fade in timeout={1200}>
           <Card sx={{ 
             background: 'linear-gradient(135deg, #fa709a 0%, #fee140 100%)',
-              color: 'white',
-              borderRadius: 6,
-              boxShadow: '0 12px 24px rgba(250, 112, 154, 0.25)',
-              transition: 'all 0.3s ease',
-              '&:hover': {
-                transform: 'translateY(-8px)',
-                boxShadow: '0 20px 40px rgba(250, 112, 154, 0.4)',
-              }
+            color: 'white',
+            borderRadius: 4,
+            boxShadow: '0 6px 16px rgba(250, 112, 154, 0.3)',
+            transition: 'all 0.3s ease',
+            '&:hover': {
+              transform: 'translateY(-4px)',
+              boxShadow: '0 12px 24px rgba(250, 112, 154, 0.4)',
+            }
           }}>
-              <CardContent sx={{ p: 3 }}>
+              <CardContent sx={{ p: 2.5 }}>
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Box>
-                    <Typography variant="h3" sx={{ fontWeight: 800, mb: 1 }}>
+                    <Typography variant="h4" sx={{ fontWeight: 700, mb: 0.5 }}>
                     {stats.withErrors}
                   </Typography>
-                    <Typography variant="body1" sx={{ opacity: 0.95, fontWeight: 500 }}>
+                    <Typography variant="body2" sx={{ opacity: 0.95, fontWeight: 500 }}>
                     With Issues
                   </Typography>
                 </Box>
                   <Box sx={{ 
                     bgcolor: 'rgba(255,255,255,0.2)', 
                     borderRadius: '50%', 
-                    p: 2,
+                    p: 1.5,
                     backdropFilter: 'blur(10px)',
-                    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.1)'
+                    boxShadow: '0 4px 16px rgba(0, 0, 0, 0.1)'
                   }}>
-                    <CancelIcon sx={{ fontSize: 32, opacity: 0.9 }} />
+                    <CancelIcon sx={{ fontSize: 28, opacity: 0.9 }} />
                   </Box>
               </Box>
             </CardContent>
@@ -839,12 +880,12 @@ function Dashboard() {
 
       {/* Controls Section */}
       <Paper sx={{ 
-        p: 3, 
+        p: 2.5, 
         mb: 3, 
-        borderRadius: 4,
-        background: 'white',
-        border: '2px solid #000',
-        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+        borderRadius: 3,
+        background: '#f5f5f5',
+        border: '1px solid #e0e0e0',
+        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
       }}>
         <Box sx={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', gap: 2, alignItems: 'center', justifyContent: 'space-between' }}>
           <Box sx={{ display: 'flex', gap: 2, flexWrap: 'wrap', flex: 1 }}>
@@ -857,11 +898,12 @@ function Dashboard() {
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <SearchIcon sx={{ color: '#667eea' }} />
+                    <SearchIcon sx={{ color: '#667eea', fontSize: 20 }} />
                   </InputAdornment>
                 ),
                 sx: {
                   borderRadius: 2,
+                  backgroundColor: 'white',
                   '&:hover .MuiOutlinedInput-notchedOutline': {
                     borderColor: '#667eea',
                   },
@@ -870,7 +912,7 @@ function Dashboard() {
                   },
                 }
               }}
-              sx={{ minWidth: 250 }}
+              sx={{ minWidth: 200 }}
             />
             
             {/* Filter */}
@@ -882,11 +924,12 @@ function Dashboard() {
               InputProps={{
                 startAdornment: (
                   <InputAdornment position="start">
-                    <FilterIcon sx={{ color: '#667eea' }} />
+                    <FilterIcon sx={{ color: '#667eea', fontSize: 20 }} />
                   </InputAdornment>
                 ),
                 sx: {
                   borderRadius: 2,
+                  backgroundColor: 'white',
                   '&:hover .MuiOutlinedInput-notchedOutline': {
                     borderColor: '#667eea',
                   },
@@ -895,57 +938,13 @@ function Dashboard() {
                   },
                 }
               }}
-              sx={{ minWidth: 120 }}
+              sx={{ minWidth: 100 }}
             >
               <MenuItem value="all">All Projects</MenuItem>
               <MenuItem value="recent">Recent (7 days)</MenuItem>
             </TextField>
 
-            {/* Sort */}
-            <TextField
-              select
-              size="small"
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SortIcon sx={{ color: '#667eea' }} />
-                  </InputAdornment>
-                ),
-                sx: {
-                  borderRadius: 2,
-                  '&:hover .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#667eea',
-                  },
-                  '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-                    borderColor: '#667eea',
-                  },
-                }
-              }}
-              sx={{ minWidth: 140 }}
-            >
-              <MenuItem value="created_at">Date Created</MenuItem>
-              <MenuItem value="name">Project Name</MenuItem>
-            </TextField>
 
-            {/* Sort Order */}
-            <IconButton 
-              onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
-              sx={{ 
-                border: 2, 
-                borderColor: '#667eea',
-                borderRadius: 2,
-                color: '#667eea',
-                '&:hover': {
-                  bgcolor: 'rgba(102, 126, 234, 0.1)',
-                  transform: 'scale(1.05)',
-                },
-                transition: 'all 0.2s ease'
-              }}
-            >
-              <SortIcon sx={{ transform: sortOrder === 'desc' ? 'scaleY(-1)' : 'none' }} />
-            </IconButton>
           </Box>
 
           <Box sx={{ display: 'flex', gap: 1 }}>
@@ -954,16 +953,20 @@ function Dashboard() {
               variant={viewMode === 'grid' ? 'contained' : 'outlined'}
               size="small"
               onClick={() => setViewMode('grid')}
-              startIcon={<DashboardIcon />}
+              startIcon={<DashboardIcon sx={{ fontSize: 18 }} />}
               sx={{
                 borderRadius: 2,
-                px: 2,
-                border: '2px solid #000',
+                px: 1.5,
+                py: 0.5,
+                border: '1px solid #333',
+                fontSize: '0.75rem',
+                backgroundColor: 'white',
+                color: '#333',
                 ...(viewMode === 'grid' && {
-                  background: '#000',
+                  background: '#333',
                   color: 'white',
                   '&:hover': {
-                    background: '#333',
+                    background: '#555',
                   }
                 })
               }}
@@ -974,16 +977,20 @@ function Dashboard() {
               variant={viewMode === 'table' ? 'contained' : 'outlined'}
               size="small"
               onClick={() => setViewMode('table')}
-              startIcon={<DescriptionIcon />}
+              startIcon={<DescriptionIcon sx={{ fontSize: 18 }} />}
               sx={{
                 borderRadius: 2,
-                px: 2,
-                border: '2px solid #000',
+                px: 1.5,
+                py: 0.5,
+                border: '1px solid #333',
+                fontSize: '0.75rem',
+                backgroundColor: 'white',
+                color: '#333',
                 ...(viewMode === 'table' && {
-                  background: '#000',
+                  background: '#333',
                   color: 'white',
                   '&:hover': {
-                    background: '#333',
+                    background: '#555',
                   }
                 })
               }}
@@ -994,17 +1001,17 @@ function Dashboard() {
             {/* Create Project Button */}
             <Button
               variant="contained"
-              size="medium"
-              startIcon={<AddIcon />}
+              size="small"
+              startIcon={<AddIcon sx={{ fontSize: 18 }} />}
               onClick={() => setOpenCreateProjectDialog(true)}
               sx={{ 
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                 borderRadius: 2,
-                px: 3,
-                py: 1,
+                px: 2,
+                py: 0.75,
                 fontWeight: 600,
-                fontSize: 14,
-                border: '2px solid #000',
+                fontSize: 13,
+                border: '1px solid #667eea',
                 transition: 'all 0.2s ease',
                 '&:hover': {
                   background: 'linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%)',
@@ -1054,7 +1061,7 @@ function Dashboard() {
           boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
           overflow: 'hidden',
           background: 'white',
-          border: '2px solid #000'
+          border: '1px solid #e0e0e0'
         }}>
           <Table>
             <TableHead>
@@ -1074,9 +1081,47 @@ function Dashboard() {
                   borderTopRightRadius: 16,
                 }
               }}>
-                <TableCell>Project Name</TableCell>
+                <TableCell 
+                  sx={{ 
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+                    transition: 'background-color 0.2s ease'
+                  }}
+                  onClick={() => handleColumnSort('name')}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    Project Name
+                    {sortBy === 'name' && (
+                      <SortIcon sx={{ 
+                        fontSize: 16, 
+                        transform: sortOrder === 'desc' ? 'scaleY(-1)' : 'none',
+                        opacity: 0.8
+                      }} />
+                    )}
+                  </Box>
+                </TableCell>
                 <TableCell>Description</TableCell>
-                <TableCell>Created On</TableCell>
+                <TableCell 
+                  sx={{ 
+                    cursor: 'pointer',
+                    userSelect: 'none',
+                    '&:hover': { backgroundColor: 'rgba(255, 255, 255, 0.1)' },
+                    transition: 'background-color 0.2s ease'
+                  }}
+                  onClick={() => handleColumnSort('created_at')}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    Created On
+                    {sortBy === 'created_at' && (
+                      <SortIcon sx={{ 
+                        fontSize: 16, 
+                        transform: sortOrder === 'desc' ? 'scaleY(-1)' : 'none',
+                        opacity: 0.8
+                      }} />
+                    )}
+                  </Box>
+                </TableCell>
                 <TableCell align="center">Status</TableCell>
                 <TableCell align="right">Actions</TableCell>
               </TableRow>
@@ -1093,15 +1138,16 @@ function Dashboard() {
                       transform: 'scale(1.002)',
                     },
                     '&:nth-of-type(even)': {
-                      backgroundColor: 'rgba(0, 0, 0, 0.02)',
+                      backgroundColor: '#fafafa',
                     },
                     '& .MuiTableCell-body': {
                       padding: '12px 16px',
-                      borderBottom: '1px solid rgba(0, 0, 0, 0.1)',
+                      borderBottom: '1px solid #e0e0e0',
+                      color: '#333',
                     }
                   }}
                 >
-                  <TableCell component="th" scope="row" sx={{ fontWeight: 600, fontSize: '1rem' }}>
+                  <TableCell component="th" scope="row" sx={{ fontWeight: 600, fontSize: '1rem', color: '#333' }}>
                     <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
                       <Box sx={{ 
                         bgcolor: 'rgba(102, 126, 234, 0.1)', 
@@ -1110,7 +1156,7 @@ function Dashboard() {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        border: '1px solid #000'
+                        border: '1px solid #667eea'
                       }}>
                         <FolderIcon sx={{ color: '#667eea', fontSize: 16 }} />
                       </Box>
@@ -1118,13 +1164,14 @@ function Dashboard() {
                     </Box>
                   </TableCell>
                   <TableCell sx={{ maxWidth: 300 }}>
-                    <Typography variant="body2" color="text.secondary" sx={{ 
+                    <Typography variant="body2" sx={{ 
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       display: '-webkit-box',
                       WebkitLineClamp: 2,
                       WebkitBoxOrient: 'vertical',
                       lineHeight: 1.3,
+                      color: 'text.secondary',
                     }}>
                       {project.description || 'No description provided'}
                     </Typography>
@@ -1138,25 +1185,27 @@ function Dashboard() {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        border: '1px solid #000'
+                        border: '1px solid #667eea'
                       }}>
                         <CalendarIcon sx={{ color: '#667eea', fontSize: 14 }} />
                       </Box>
-                      <Typography variant="body2" fontWeight={500}>
+                      <Typography variant="body2" fontWeight={500} sx={{ color: '#333' }}>
                         {new Date(project.created_at).toLocaleDateString()}
                       </Typography>
                     </Box>
                   </TableCell>
                   <TableCell align="center">
                     <Chip 
-                      label="Active" 
+                      label="✔ Active" 
                       color="success" 
                       size="small"
                       icon={<CheckCircleIcon />}
                       sx={{ 
                         fontWeight: 600,
                         borderRadius: 2,
-                        border: '1px solid #000',
+                        border: '1px solid #4caf50',
+                        backgroundColor: '#4caf50',
+                        color: 'white',
                         '& .MuiChip-icon': {
                           color: 'inherit'
                         }
@@ -1172,7 +1221,7 @@ function Dashboard() {
                           sx={{ 
                             backgroundColor: 'rgba(102, 126, 234, 0.1)',
                             borderRadius: 2,
-                            border: '1px solid #000',
+                            border: '1px solid #667eea',
                             '&:hover': {
                               backgroundColor: 'rgba(102, 126, 234, 0.2)',
                               transform: 'scale(1.05)',
@@ -1190,7 +1239,7 @@ function Dashboard() {
                           sx={{ 
                             backgroundColor: 'rgba(255, 152, 0, 0.1)',
                             borderRadius: 2,
-                            border: '1px solid #000',
+                            border: '1px solid #ff9800',
                             '&:hover': {
                               backgroundColor: 'rgba(255, 152, 0, 0.2)',
                               transform: 'scale(1.05)',
@@ -1208,7 +1257,7 @@ function Dashboard() {
                           sx={{ 
                             backgroundColor: 'rgba(3, 169, 244, 0.1)',
                             borderRadius: 2,
-                            border: '1px solid #000',
+                            border: '1px solid #03a9f4',
                             '&:hover': {
                               backgroundColor: 'rgba(3, 169, 244, 0.2)',
                               transform: 'scale(1.05)',
@@ -1226,7 +1275,7 @@ function Dashboard() {
                           sx={{ 
                             backgroundColor: 'rgba(0, 0, 0, 0.05)',
                             borderRadius: 2,
-                            border: '1px solid #000',
+                            border: '1px solid #e0e0e0',
                             '&:hover': {
                               backgroundColor: 'rgba(0, 0, 0, 0.1)',
                               transform: 'scale(1.05)',
@@ -1234,7 +1283,7 @@ function Dashboard() {
                             transition: 'all 0.2s ease'
                           }}
                         >
-                          <MoreVertIcon sx={{ fontSize: 18, color: '#000' }} />
+                          <MoreVertIcon sx={{ fontSize: 18, color: '#666' }} />
                         </IconButton>
                       </Tooltip>
                     </Box>
@@ -1746,38 +1795,14 @@ function Dashboard() {
         </DialogActions>
       </Dialog>
 
-      {/* Custom Alert Snackbar */}
-      <Snackbar
-        open={customAlert.open}
-        autoHideDuration={6000}
-        onClose={handleCloseCustomAlert}
-        anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-        TransitionComponent={Zoom}
-      >
-        <Alert
-          onClose={handleCloseCustomAlert}
-          severity={customAlert.severity}
-          variant="filled"
-          elevation={6}
-          sx={{
-            width: '100%',
-            maxWidth: '500px',
-              borderRadius: 4,
-            '& .MuiAlert-message': {
-              width: '100%'
-            }
-          }}
-        >
-          <Box>
-            <Typography variant="h6" sx={{ fontWeight: 'bold', mb: 0.5 }}>
-              {customAlert.title}
-            </Typography>
-            <Typography variant="body2">
-              {customAlert.message}
-            </Typography>
-          </Box>
-        </Alert>
-      </Snackbar>
+      {/* Custom Alert Component */}
+      <Alert
+        open={alert.open}
+        onClose={handleCloseAlert}
+        title={alert.title}
+        message={alert.message}
+        severity={alert.severity}
+      />
     </Container>
       </Box>
   );
