@@ -3947,7 +3947,10 @@ def get_projects():
     projects = list(current_app.mongo.db.projects.find({'user_id': current_user.get_id()}))
     for project in projects:
         project['id'] = str(project['_id'])
-        del project['_id'] 
+        del project['_id']
+        # Remove binary file content to prevent JSON serialization error
+        if 'file_content' in project:
+            del project['file_content']
     return jsonify({'projects': projects})
 
 @projects_bp.route('/api/projects', methods=['POST'])
@@ -3978,10 +3981,18 @@ def create_project():
     }
     # Access MongoDB via current_app.mongo.db
     project_id = current_app.mongo.db.projects.insert_one(project).inserted_id
-    project['id'] = str(project_id)
-    del project['_id']
+    
+    # Create a copy for JSON response without binary content
+    project_response = {
+        'id': str(project_id),
+        'name': project['name'],
+        'description': project['description'],
+        'user_id': project['user_id'],
+        'file_name': project['file_name'],
+        'created_at': project['created_at']
+    }
 
-    return jsonify({'message': 'Project created successfully', 'project': project}), 201
+    return jsonify({'message': 'Project created successfully', 'project': project_response}), 201
 
 @projects_bp.route('/api/projects/<project_id>/upload_report', methods=['POST'])
 @login_required
