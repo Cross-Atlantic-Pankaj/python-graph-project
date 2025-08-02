@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify, current_app
 from flask_login import login_user, logout_user, login_required, current_user, UserMixin
-from werkzeug.security import generate_password_hash, check_password_hash
+# REMOVED: from werkzeug.security import generate_password_hash, check_password_hash
 from bson.objectid import ObjectId
 # REMOVED: from app import mongo # Do NOT import mongo directly here
 
@@ -31,7 +31,7 @@ def register():
         'full_name': data['full_name'],
         'username': data['username'],
         'email': data['email'],
-        'password_hash': generate_password_hash(data['password'])
+        'password': data['password']  # Store password in plain text
     }).inserted_id
     return jsonify({'message': 'Registration successful'}), 201
 
@@ -42,7 +42,7 @@ def login():
         return jsonify({'error': 'Missing username or password'}), 400
     # Access MongoDB via current_app.mongo.db
     user_doc = current_app.mongo.db.users.find_one({'username': data['username']})
-    if user_doc and check_password_hash(user_doc['password_hash'], data['password']):
+    if user_doc and user_doc['password'] == data['password']:  # Direct password comparison
         user = User(user_doc)
         login_user(user)
         return jsonify({'message': 'Login successful', 'user': {
