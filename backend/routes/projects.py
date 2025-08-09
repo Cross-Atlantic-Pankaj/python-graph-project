@@ -138,6 +138,10 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
     """
     Create a 'bar of pie' chart using Plotly: pie chart with one segment broken down as a bar chart.
     """
+    # Debug logging
+    print(f"DEBUG: create_bar_of_pie_chart called with value_format='{value_format}'")
+    print(f"DEBUG: other_values={other_values}")
+    
     # Filter out empty/null values from other_labels and other_values
     filtered_data = []
     for label, value in zip(other_labels, other_values):
@@ -177,15 +181,46 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
             # Use individual colors for each bar
             bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
             
-    fig.add_trace(go.Bar(
+            # Format the value properly for display
+            if value_format and "%" in value_format:
+                # If it's a percentage format, check if value is already a percentage or decimal
+                if isinstance(value, (int, float)):
+                    if value <= 1.0:  # Likely decimal format (0.112)
+                        display_value = f"{value * 100:.1f}%"
+                    else:  # Likely already percentage format (11.2)
+                        display_value = f"{value:.1f}%"
+                else:
+                    # Convert string to float and handle
+                    try:
+                        val = float(value)
+                        if val <= 1.0:
+                            display_value = f"{val * 100:.1f}%"
+                        else:
+                            display_value = f"{val:.1f}%"
+                    except:
+                        display_value = f"{value}{value_format}"
+                # Debug logging
+                print(f"DEBUG: value={value}, value_format={value_format}, display_value={display_value}")
+            elif value_format and isinstance(value, (int, float)) and value <= 1.0:
+                # If it's a decimal format and value is between 0-1, treat as percentage
+                display_value = f"{value * 100:.1f}%"
+                # Debug logging
+                print(f"DEBUG: value={value}, value_format={value_format}, display_value={display_value} (converted to percentage)")
+            else:
+                # For other formats, use the value as-is with the format
+                display_value = f"{value}{value_format}"
+                # Debug logging
+                print(f"DEBUG: value={value}, value_format={value_format}, display_value={display_value}")
+            
+            fig.add_trace(go.Bar(
                 x=[label],  # Single x value for each bar
                 y=[value],  # Single y value for each bar
                 marker_color=bar_color,
-                text=[f"{value}{value_format}"],
-        textposition="auto",
+                text=[display_value],
+                textposition="auto",
                 name=f"Breakdown {i+1}",
                 showlegend=False  # Hide individual bar legends
-    ), row=1, col=2)
+            ), row=1, col=2)
     
     fig.update_layout(
         title_text=title,
@@ -193,6 +228,14 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
         height=500,
         width=900
     )
+    
+    # Update Y-axis formatting for the bar chart to show percentages
+    if filtered_values and isinstance(filtered_values[0], (int, float)) and filtered_values[0] <= 1.0:
+        fig.update_yaxes(
+            tickformat=".1%",  # Format as percentage with 1 decimal place
+            row=1, col=2
+        )
+    
     return fig
 
 def _generate_report(project_id, template_path, data_file_path):
@@ -1046,6 +1089,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     for row in sheet.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col):
                         for cell in row:
                             values.append(cell.value)
+                    # Debug logging for cell range extraction
+                    print(f"DEBUG: extract_excel_range({cell_range}) = {values}")
                     return values
 
                 # --- Robust recursive Excel cell range extraction for all chart types and fields ---
@@ -1164,6 +1209,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             other_values = extract_excel_range(sheet, other_values)
                             wb.close()
                             # Extracted other_values successfully
+                            print(f"DEBUG: other_values extracted from {other_values} = {other_values}")
                             pass
                         except Exception as e:
                             # Failed to extract other_values
@@ -1174,6 +1220,15 @@ def _generate_report(project_id, template_path, data_file_path):
                     #current_app.logger.info(f"   Other Labels: {other_labels}")
                     #current_app.logger.info(f"   Other Values: {other_values}")
                     #current_app.logger.info(f"   Other Colors: {other_colors}")
+                    
+                    # Check if values are percentages in decimal form and convert them
+                    y_axis_title = chart_meta.get("y_axis_title", "")
+                    if other_values and y_axis_title and "%" in y_axis_title:
+                        # Check if all values are between 0-1 (likely percentages in decimal form)
+                        if all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in other_values if v is not None):
+                            print(f"DEBUG: Converting decimal values to percentages: {other_values}")
+                            other_values = [v * 100 if v is not None else v for v in other_values]
+                            print(f"DEBUG: Converted to: {other_values}")
                     
                     # Check for empty/null values
                     if other_labels and other_values:
@@ -2856,30 +2911,38 @@ def _generate_report(project_id, template_path, data_file_path):
                         mpl_chart_type = chart_type_mapping_mpl.get(series_type, "scatter")
                         
                         if mpl_chart_type == "bar":
+                            # Add bar border parameters
+                            edgecolor = bar_border_color if bar_border_color else 'none'
+                            linewidth = bar_border_width if bar_border_width else 0
+                            
                             if chart_type == "stacked_column":
                                 # For stacked column, use bottom parameter
                                 if i == 0:
-                                    ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7)
+                                    ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
                                     bottom_vals = y_vals
                                 else:
-                                    ax1.bar(x_values, y_vals, bottom=bottom_vals, label=label, color=color, alpha=0.7)
+                                    ax1.bar(x_values, y_vals, bottom=bottom_vals, label=label, color=color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
                                     bottom_vals = [sum(x) for x in zip(bottom_vals, y_vals)]
                             else:
                                 if isinstance(color, list):
                                     for j, val in enumerate(y_vals):
                                         bar_color = color[j % len(color)]
-                                        ax1.bar(x_values[j], val, color=bar_color, alpha=0.7, label=label if j == 0 else "")
+                                        ax1.bar(x_values[j], val, color=bar_color, alpha=0.7, label=label if j == 0 else "", edgecolor=edgecolor, linewidth=linewidth)
                                 else:
-                                    ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7)
+                                    ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
                                     
                         elif mpl_chart_type == "barh":
                             # Horizontal bar chart
+                            # Add bar border parameters
+                            edgecolor = bar_border_color if bar_border_color else 'none'
+                            linewidth = bar_border_width if bar_border_width else 0
+                            
                             if isinstance(color, list):
                                 for j, val in enumerate(y_vals):
                                     bar_color = color[j % len(color)]
-                                    ax1.barh(x_values[j], val, color=bar_color, alpha=0.7, label=label if j == 0 else "")
+                                    ax1.barh(x_values[j], val, color=bar_color, alpha=0.7, label=label if j == 0 else "", edgecolor=edgecolor, linewidth=linewidth)
                             else:
-                                ax1.barh(x_values, y_vals, label=label, color=color, alpha=0.7)
+                                ax1.barh(x_values, y_vals, label=label, color=color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
                                 
                         elif mpl_chart_type == "plot":
                             # Line chart
@@ -3406,9 +3469,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                 "dotdash": "-."
                             }
                             mapped_linestyle = matplotlib_linestyle_map.get(gridline_style, "--")
-                            ax1.grid(True, linestyle=mapped_linestyle, color=gridline_color or '#ccc', alpha=0.6)
+                            ax1.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6)
                             if ax2 and not is_bubble_chart:
-                             ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color or '#ccc', alpha=0.6)
+                                ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6)
                         else:
                             ax1.grid(False)
                             if ax2:
@@ -3472,9 +3535,17 @@ def _generate_report(project_id, template_path, data_file_path):
                         # Initialize legend_loc outside the if block to fix scope issue
                         legend_loc = 'best'  # default
                         if show_legend:
-                            # For dual-axis charts, combine legends from both axes
+                            # Get legend handles and labels from the primary axis
                             lines1, labels1 = ax1.get_legend_handles_labels()
-                            lines2, labels2 = ax2.get_legend_handles_labels()
+                            
+                            # For dual-axis charts, combine legends from both axes
+                            if 'ax2' in locals() and ax2 is not None:
+                                lines2, labels2 = ax2.get_legend_handles_labels()
+                                all_lines = lines1 + lines2
+                                all_labels = labels1 + labels2
+                            else:
+                                all_lines = lines1
+                                all_labels = labels1
                             
                             # Map legend position for Matplotlib
                             # current_app.logger.debug(f"Legend position from config: {legend_position}")
@@ -3488,20 +3559,21 @@ def _generate_report(project_id, template_path, data_file_path):
                                 legend_loc = loc_map.get(legend_position, 'best')
                                 # current_app.logger.debug(f"Matplotlib legend position mapping: {legend_position} -> {legend_loc}")
                             else:
+                                legend_loc = 'best'
                                 # current_app.logger.debug("No legend position specified, using default 'best'")
                             
                             # Force legend to bottom if specified
-                                if legend_position == "bottom":
-                                    ax1.legend(lines1 + lines2, labels1 + labels2, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
-                                    # current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at forced bottom position")
+                            if legend_position == "bottom":
+                                ax1.legend(all_lines, all_labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                                # current_app.logger.debug(f"Added legend with {len(all_lines)} items at forced bottom position")
+                            else:
+                                # Skip legend for bubble charts to avoid the orange bubble marker
+                                if is_bubble_chart:
+                                    current_app.logger.info(f"🎈 Skipping legend for bubble chart to avoid extra bubble marker")
                                 else:
-                                    # Skip legend for bubble charts to avoid the orange bubble marker
-                                    if is_bubble_chart:
-                                        current_app.logger.info(f"🎈 Skipping legend for bubble chart to avoid extra bubble marker")
-                                    else:
-                                        ax1.legend(lines1 + lines2, labels1 + labels2, loc=legend_loc, fontsize=legend_font_size)
-                                        # current_app.logger.debug(f"Added legend with {len(lines1 + lines2)} items at position: {legend_loc}")
-                        
+                                    ax1.legend(all_lines, all_labels, loc=legend_loc, fontsize=legend_font_size)
+                                    # current_app.logger.debug(f"Added legend with {len(all_lines)} items at position: {legend_loc}")
+                                
                         # Set title with proper font attributes (ENHANCED VERSION)
                         title_fontsize = font_size or 52  # Increased default size
                         if font_color:
@@ -3574,31 +3646,32 @@ def _generate_report(project_id, template_path, data_file_path):
                                 else:
                                     ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold',
                                                 bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
-                                ax2.tick_params(axis='y', labelsize=tick_fontsize)
+                                    ax2.tick_params(axis='y', labelsize=tick_fontsize)
                         else:
                             # current_app.logger.info(f"🎈 Skipping secondary Y-axis for bubble chart")
+                            pass
                 
                 # Apply axis label distances for Matplotlib
                 # current_app.logger.debug(f"X-axis label distance: {x_axis_label_distance}")
                 # current_app.logger.debug(f"Y-axis label distance: {y_axis_label_distance}")
                 
-                            if x_axis_label_distance or y_axis_label_distance:
-                                # Get current subplot parameters
-                                current_bottom = fig_mpl.subplotpars.bottom
-                                current_left = fig_mpl.subplotpars.left
-                                
-                                if x_axis_label_distance:
-                                    # Convert the distance to a fraction of the figure height
-                                    # Higher x_axis_label_distance values will push labels further down
-                                    adjustment = x_axis_label_distance / 500.0  # Increased conversion factor for more visible effect
-                                    fig_mpl.subplots_adjust(bottom=current_bottom - adjustment)
-                                    # current_app.logger.debug(f"Applied X-axis adjustment: {adjustment}")
-                                
-                                if y_axis_label_distance:
-                                    # Convert the distance to a fraction of the figure width
-                                    adjustment = y_axis_label_distance / 500.0  # Increased conversion factor
-                                    fig_mpl.subplots_adjust(left=current_left - adjustment)
-                                    # current_app.logger.debug(f"Applied Y-axis adjustment: {adjustment}")
+                if x_axis_label_distance or y_axis_label_distance:
+                    # Get current subplot parameters
+                    current_bottom = fig_mpl.subplotpars.bottom
+                    current_left = fig_mpl.subplotpars.left
+                    
+                    if x_axis_label_distance:
+                        # Convert the distance to a fraction of the figure height
+                        # Higher x_axis_label_distance values will push labels further down
+                        adjustment = x_axis_label_distance / 500.0  # Increased conversion factor for more visible effect
+                        fig_mpl.subplots_adjust(bottom=current_bottom - adjustment)
+                        # current_app.logger.debug(f"Applied X-axis adjustment: {adjustment}")
+                    
+                    if y_axis_label_distance:
+                        # Convert the distance to a fraction of the figure width
+                        adjustment = y_axis_label_distance / 500.0  # Increased conversion factor
+                        fig_mpl.subplots_adjust(left=current_left - adjustment)
+                        # current_app.logger.debug(f"Applied Y-axis adjustment: {adjustment}")
                 
                 # Apply tight_layout but preserve manual adjustments
                 fig_mpl.tight_layout()
