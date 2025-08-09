@@ -138,10 +138,6 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
     """
     Create a 'bar of pie' chart using Plotly: pie chart with one segment broken down as a bar chart.
     """
-    # Debug logging
-    print(f"DEBUG: create_bar_of_pie_chart called with value_format='{value_format}'")
-    print(f"DEBUG: other_values={other_values}")
-    
     # Filter out empty/null values from other_labels and other_values
     filtered_data = []
     for label, value in zip(other_labels, other_values):
@@ -181,39 +177,42 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
             # Use individual colors for each bar
             bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
             
-            # Format the value properly for display
-            if value_format and "%" in value_format:
-                # If it's a percentage format, check if value is already a percentage or decimal
-                if isinstance(value, (int, float)):
-                    if value <= 1.0:  # Likely decimal format (0.112)
-                        display_value = f"{value * 100:.1f}%"
-                    else:  # Likely already percentage format (11.2)
-                        display_value = f"{value:.1f}%"
-                else:
-                    # Convert string to float and handle
-                    try:
-                        val = float(value)
-                        if val <= 1.0:
-                            display_value = f"{val * 100:.1f}%"
-                        else:
-                            display_value = f"{val:.1f}%"
-                    except:
-                        display_value = f"{value}{value_format}"
-                # Debug logging
-                print(f"DEBUG: value={value}, value_format={value_format}, display_value={display_value}")
-            elif value_format and isinstance(value, (int, float)) and value <= 1.0:
-                # If it's a decimal format and value is between 0-1, treat as percentage
-                display_value = f"{value * 100:.1f}%"
-                # Debug logging
-                print(f"DEBUG: value={value}, value_format={value_format}, display_value={display_value} (converted to percentage)")
+            # Format the value properly for display - show as XX.X% instead of 0.XXX
+            if isinstance(value, (int, float)):
+                if value <= 1.0:  # Likely decimal format (0.11)
+                    display_value = f"{value * 100:.1f}%"
+                else:  # Likely already percentage format (11.0)
+                    display_value = f"{value:.1f}%"
             else:
-                # For other formats, use the value as-is with the format
-                display_value = f"{value}{value_format}"
-                # Debug logging
-                print(f"DEBUG: value={value}, value_format={value_format}, display_value={display_value}")
+                # Convert string to float and handle
+                try:
+                    val = float(value)
+                    if val <= 1.0:
+                        display_value = f"{val * 100:.1f}%"
+                    else:
+                        display_value = f"{val:.1f}%"
+                except:
+                    display_value = str(value)
+            
+            # Format the x-axis label as percentage
+            if isinstance(label, (int, float)):
+                if label <= 1.0:  # Likely decimal format (0.06)
+                    formatted_label = f"{label * 100:.1f}%"
+                else:  # Likely already percentage format (6.0)
+                    formatted_label = f"{label:.1f}%"
+            else:
+                # Convert string to float and handle
+                try:
+                    val = float(label)
+                    if val <= 1.0:
+                        formatted_label = f"{val * 100:.1f}%"
+                    else:
+                        formatted_label = f"{val:.1f}%"
+                except:
+                    formatted_label = str(label)
             
             fig.add_trace(go.Bar(
-                x=[label],  # Single x value for each bar
+                x=[formatted_label],  # Use formatted label for x-axis
                 y=[value],  # Single y value for each bar
                 marker_color=bar_color,
                 text=[display_value],
@@ -1083,15 +1082,16 @@ def _generate_report(project_id, template_path, data_file_path):
                 # --- Excel range extraction helpers ---
                 def extract_excel_range(sheet, cell_range):
                     # cell_range: e.g., 'E23:E29' or 'AA20:AA23'
-                    from openpyxl.utils import range_boundaries
-                    min_col, min_row, max_col, max_row = range_boundaries(cell_range)
-                    values = []
-                    for row in sheet.iter_rows(min_row=min_row, max_row=max_row, min_col=min_col, max_col=max_col):
-                        for cell in row:
-                            values.append(cell.value)
-                    # Debug logging for cell range extraction
-                    print(f"DEBUG: extract_excel_range({cell_range}) = {values}")
-                    return values
+                    try:
+                        values = []
+                        for row in sheet[cell_range]:
+                            for cell in row:
+                                if cell.value is not None:
+                                    values.append(cell.value)
+                        return values
+                    except Exception as e:
+                        current_app.logger.error(f"Error extracting range {cell_range}: {e}")
+                        return []
 
                 # --- Robust recursive Excel cell range extraction for all chart types and fields ---
                 def extract_cell_ranges(obj, sheet):
@@ -2065,22 +2065,46 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Set x-tick labels for filtered data
                     if filtered_labels:
                         ax2.set_xticks(range(len(filtered_labels)))
-                        ax2.set_xticklabels(filtered_labels, rotation=0)
+                        # Format x-axis labels as percentages
+                        formatted_x_labels = []
+                        for label in filtered_labels:
+                            if isinstance(label, (int, float)):
+                                if label <= 1.0:  # Likely decimal format (0.06)
+                                    formatted_x_labels.append(f"{label * 100:.1f}%")
+                                else:  # Likely already percentage format (6.0)
+                                    formatted_x_labels.append(f"{label:.1f}%")
+                            else:
+                                # Convert string to float and handle
+                                try:
+                                    val = float(label)
+                                    if val <= 1.0:
+                                        formatted_x_labels.append(f"{val * 100:.1f}%")
+                                    else:
+                                        formatted_x_labels.append(f"{val:.1f}%")
+                                except:
+                                    formatted_x_labels.append(str(label))
+                        ax2.set_xticklabels(formatted_x_labels, rotation=0)
                     # Add data labels with proper formatting
                     value_format = chart_meta.get("value_format", ".2f")
                     data_label_font_size = chart_meta.get("data_label_font_size", 10)
                     data_label_color = chart_meta.get("data_label_color", "#000000")
                     for bar, v in zip(bars, filtered_values):
-                        if value_format == "value":
-                            formatted_value = str(v)
-                        elif value_format == ".2f":
-                            formatted_value = f"{v:.2f}"
-                        elif value_format == ".1f":
-                            formatted_value = f"{v:.1f}"
-                        elif value_format == ".0f":
-                            formatted_value = f"{v:.0f}"
+                        # Format percentage values as XX.X% instead of 0.XXX
+                        if isinstance(v, (int, float)):
+                            if v <= 1.0:  # Likely decimal format (0.11)
+                                formatted_value = f"{v * 100:.1f}%"
+                            else:  # Likely already percentage format (11.0)
+                                formatted_value = f"{v:.1f}%"
                         else:
-                            formatted_value = f"{v:{value_format}}"
+                            # Convert string to float and handle
+                            try:
+                                val = float(v)
+                                if val <= 1.0:
+                                    formatted_value = f"{val * 100:.1f}%"
+                                else:
+                                    formatted_value = f"{val:.1f}%"
+                            except:
+                                formatted_value = str(v)
                         ax2.text(bar.get_x() + bar.get_width()/2, v, formatted_value, ha='center', va='bottom', fontweight='bold', fontsize=data_label_font_size, color=data_label_color)
 
                 else:
@@ -2847,22 +2871,46 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Set x-tick labels for filtered data
                     if filtered_labels:
                         ax2.set_xticks(range(len(filtered_labels)))
-                        ax2.set_xticklabels(filtered_labels, rotation=0)
+                        # Format x-axis labels as percentages
+                        formatted_x_labels = []
+                        for label in filtered_labels:
+                            if isinstance(label, (int, float)):
+                                if label <= 1.0:  # Likely decimal format (0.06)
+                                    formatted_x_labels.append(f"{label * 100:.1f}%")
+                                else:  # Likely already percentage format (6.0)
+                                    formatted_x_labels.append(f"{label:.1f}%")
+                            else:
+                                # Convert string to float and handle
+                                try:
+                                    val = float(label)
+                                    if val <= 1.0:
+                                        formatted_x_labels.append(f"{val * 100:.1f}%")
+                                    else:
+                                        formatted_x_labels.append(f"{val:.1f}%")
+                                except:
+                                    formatted_x_labels.append(str(label))
+                        ax2.set_xticklabels(formatted_x_labels, rotation=0)
                     # Add data labels with proper formatting
                     value_format = chart_meta.get("value_format", ".2f")
                     data_label_font_size = chart_meta.get("data_label_font_size", 10)
                     data_label_color = chart_meta.get("data_label_color", "#000000")
                     for bar, v in zip(bars, filtered_values):
-                        if value_format == "value":
-                            formatted_value = str(v)
-                        elif value_format == ".2f":
-                            formatted_value = f"{v:.2f}"
-                        elif value_format == ".1f":
-                            formatted_value = f"{v:.1f}"
-                        elif value_format == ".0f":
-                            formatted_value = f"{v:.0f}"
+                        # Format percentage values as XX.X% instead of 0.XXX
+                        if isinstance(v, (int, float)):
+                            if v <= 1.0:  # Likely decimal format (0.11)
+                                formatted_value = f"{v * 100:.1f}%"
+                            else:  # Likely already percentage format (11.0)
+                                formatted_value = f"{v:.1f}%"
                         else:
-                            formatted_value = f"{v:{value_format}}"
+                            # Convert string to float and handle
+                            try:
+                                val = float(v)
+                                if val <= 1.0:
+                                    formatted_value = f"{val * 100:.1f}%"
+                                else:
+                                    formatted_value = f"{val:.1f}%"
+                            except:
+                                formatted_value = str(v)
                         ax2.text(bar.get_x() + bar.get_width()/2, v, formatted_value, ha='center', va='bottom', fontweight='bold', fontsize=data_label_font_size, color=data_label_color)
 
                 else:
