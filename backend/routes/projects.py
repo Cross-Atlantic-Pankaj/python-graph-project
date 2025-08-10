@@ -77,11 +77,11 @@ def extract_report_info_from_excel(excel_path):
         # Fallback to filename if not found
         if not report_name:
             report_name = os.path.splitext(os.path.basename(excel_path))[0]
-            current_app.logger.warning(f"Report_Name not found in {excel_path}, using filename: {report_name}")
+            #current_app.logger.warning(f"Report_Name not found in {excel_path}, using filename: {report_name}")
         
         if not report_code:
             report_code = f"REPORT_{os.path.splitext(os.path.basename(excel_path))[0]}"
-            current_app.logger.warning(f"Report_Code not found in {excel_path}, using generated code: {report_code}")
+            #current_app.logger.warning(f"Report_Code not found in {excel_path}, using generated code: {report_code}")
         
         current_app.logger.info(f"Extracted from {excel_path}: Report_Name='{report_name}', Report_Code='{report_code}'")
         return report_name, report_code
@@ -180,27 +180,27 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
             # Format the value properly for display - show as XX.X% instead of 0.XXX
             if isinstance(value, (int, float)):
                 if value <= 1.0:  # Likely decimal format (0.11)
-                    display_value = f"{value * 100:.1f}%"
-                else:  # Likely already percentage format (11.0)
-                    display_value = f"{value:.1f}%"
-            else:
-                # Convert string to float and handle
-                try:
-                    val = float(value)
-                    if val <= 1.0:
-                        display_value = f"{val * 100:.1f}%"
-                    else:
-                        display_value = f"{val:.1f}%"
-                except:
-                    display_value = str(value)
+                        display_value = f"{value * 100:.1f}%"
+            else:  # Likely already percentage format (11.0)
+                        display_value = f"{value:.1f}%"
+        else:
+                    # Convert string to float and handle
+                    try:
+                        val = float(value)
+                        if val <= 1.0:
+                            display_value = f"{val * 100:.1f}%"
+                        else:
+                            display_value = f"{val:.1f}%"
+                    except:
+                        display_value = str(value)
             
             # Format the x-axis label as percentage
-            if isinstance(label, (int, float)):
+        if isinstance(label, (int, float)):
                 if label <= 1.0:  # Likely decimal format (0.06)
                     formatted_label = f"{label * 100:.1f}%"
                 else:  # Likely already percentage format (6.0)
                     formatted_label = f"{label:.1f}%"
-            else:
+        else:
                 # Convert string to float and handle
                 try:
                     val = float(label)
@@ -211,15 +211,15 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
                 except:
                     formatted_label = str(label)
             
-            fig.add_trace(go.Bar(
-                x=[formatted_label],  # Use formatted label for x-axis
-                y=[value],  # Single y value for each bar
-                marker_color=bar_color,
-                text=[display_value],
-                textposition="auto",
-                name=f"Breakdown {i+1}",
-                showlegend=False  # Hide individual bar legends
-            ), row=1, col=2)
+        fig.add_trace(go.Bar(
+            x=[formatted_label],  # Use formatted label for x-axis
+            y=[value],  # Single y value for each bar
+            marker_color=bar_color,
+            text=[display_value],
+            textposition="auto",
+            name=f"Breakdown {i+1}",
+            showlegend=False  # Hide individual bar legends
+        ), row=1, col=2)
     
     fig.update_layout(
         title_text=title,
@@ -298,7 +298,8 @@ def _generate_report(project_id, template_path, data_file_path):
                         flat_data_map[col_lower] = str(value).strip()
                         current_app.logger.info(f"📋 LOADED: {col_lower} = '{str(value).strip()}'")
                     else:
-                        current_app.logger.warning(f"⚠️ Empty value for {col}")
+                        # Empty value - skip silently
+                        pass
         
         # Ensure we have all required global metadata
         required_global_metadata = ['country', 'report_name', 'report_code', 'currency']
@@ -338,7 +339,8 @@ def _generate_report(project_id, template_path, data_file_path):
                             # If conversion fails, use the original value as string
                             flat_data_map[key] = str(value).strip()
                     else:
-                        current_app.logger.warning(f"⚠️ Empty value for {col} -> {key}")
+                        # Empty value - skip silently
+                        pass
                 
                 # Handle Growth columns (for growth rates)
                 elif col_lower.startswith("growth_y"):
@@ -373,9 +375,10 @@ def _generate_report(project_id, template_path, data_file_path):
                         except (ValueError, TypeError):
                             # If conversion fails, use the original value as string
                             flat_data_map[key] = str(value).strip()
-                            current_app.logger.warning(f"Could not convert growth value: {value}")
+                            # Conversion failed - skip silently
                     else:
-                        current_app.logger.warning(f"⚠️ Empty value for {col} -> {key}")
+                        # Empty value - skip silently
+                        pass
 
             # Handle CAGR
             if pd.notna(row.get("Chart_Data_CAGR")):
@@ -409,9 +412,10 @@ def _generate_report(project_id, template_path, data_file_path):
                     except (ValueError, TypeError):
                         # If conversion fails, use the original value as string
                         flat_data_map[key] = str(value).strip()
-                        current_app.logger.warning(f"Could not convert CAGR value: {value}")
+                        # Conversion failed - skip silently
                 else:
-                    current_app.logger.warning(f"⚠️ Empty value for Chart_Data_CAGR -> {key}")
+                    # Empty value - skip silently
+                    pass
 
         # Ensure all keys are lowercase
         flat_data_map = {k.lower(): v for k, v in flat_data_map.items()}
@@ -864,7 +868,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 for paragraph in doc.paragraphs:
                     if '<country>' in paragraph.text:
                         remaining_country_tags += 1
-                        current_app.logger.warning(f"⚠️ REMAINING <country> TAG FOUND: {paragraph.text[:100]}...")
+                        #current_app.logger.warning(f"⚠️ REMAINING <country> TAG FOUND: {paragraph.text[:100]}...")
                 
                 # Check all tables
                 for table in doc.tables:
@@ -872,7 +876,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         for cell in row.cells:
                             if '<country>' in cell.text:
                                 remaining_country_tags += 1
-                                current_app.logger.warning(f"⚠️ REMAINING <country> TAG IN TABLE: {cell.text[:100]}...")
+                                #current_app.logger.warning(f"⚠️ REMAINING <country> TAG IN TABLE: {cell.text[:100]}...")
                 
                 if remaining_country_tags == 0:
                     current_app.logger.info("✅ ALL <country> TAGS SUCCESSFULLY REPLACED!")
@@ -1018,6 +1022,19 @@ def _generate_report(project_id, template_path, data_file_path):
                 bar_border_color = data_dict.get("bar_border_color") or chart_config.get("bar_border_color") or chart_meta.get("bar_border_color")
                 bar_border_width = data_dict.get("bar_border_width") or chart_config.get("bar_border_width") or chart_meta.get("bar_border_width")
                 font_family = data_dict.get("font_family") or chart_config.get("font_family") or chart_meta.get("font_family")
+                # Add font fallback for macOS compatibility
+                if font_family:
+                    # Check if the font is available, otherwise use a fallback
+                    import matplotlib.font_manager as fm
+                    available_fonts = [f.name for f in fm.fontManager.ttflist]
+                    if font_family not in available_fonts:
+                        # Use system-appropriate fallback fonts
+                        if font_family.lower() in ['calibri', 'arial']:
+                            font_family = 'Helvetica'  # macOS equivalent
+                        elif font_family.lower() in ['times new roman', 'times']:
+                            font_family = 'Times'  # macOS equivalent
+                        else:
+                            font_family = 'Helvetica'  # Default fallback
                 font_size = data_dict.get("font_size") or chart_config.get("font_size") or chart_meta.get("font_size")
                 font_color = data_dict.get("font_color") or chart_config.get("font_color") or chart_meta.get("font_color")
                 legend_position = data_dict.get("legend_position") or chart_config.get("legend_position") or chart_meta.get("legend_position")
@@ -1038,6 +1055,8 @@ def _generate_report(project_id, template_path, data_file_path):
                 axis_tick_format = data_dict.get("axis_tick_format") or chart_config.get("axis_tick_format") or chart_meta.get("axis_tick_format")
                 y_axis_min_max = data_dict.get("y_axis_min_max") or chart_config.get("y_axis_min_max") or chart_meta.get("y_axis_min_max")
                 # current_app.logger.debug(f"Y-axis min/max from config: {y_axis_min_max}")
+                x_axis_min_max = data_dict.get("x_axis_min_max") or chart_config.get("x_axis_min_max") or chart_meta.get("x_axis_min_max")
+                # current_app.logger.debug(f"X-axis min/max from config: {x_axis_min_max}")
                 secondary_y_axis_format = data_dict.get("secondary_y_axis_format") or chart_config.get("secondary_y_axis_format") or chart_meta.get("secondary_y_axis_format")
                 secondary_y_axis_min_max = data_dict.get("secondary_y_axis_min_max") or chart_config.get("secondary_y_axis_min_max") or chart_meta.get("secondary_y_axis_min_max")
                 disable_secondary_y = data_dict.get("disable_secondary_y") or chart_config.get("disable_secondary_y") or chart_meta.get("disable_secondary_y", False)
@@ -1063,7 +1082,12 @@ def _generate_report(project_id, template_path, data_file_path):
                 # --- Extract margin settings ---
                 margin = data_dict.get("margin") or chart_config.get("margin") or chart_meta.get("margin")
                 x_axis_label_distance = data_dict.get("x_axis_label_distance") or chart_config.get("x_axis_label_distance") or chart_meta.get("x_axis_label_distance")
-                y_axis_label_distance = data_dict.get("y_axis_label_distance") or chart_config.get("y_axis_label_distance") or chart_meta.get("y_axis_label_distance")
+                y_axis_label_distance = (
+                    data_dict.get("y_axis_label_distance")
+                    or chart_config.get("y_axis_label_distance")
+                    or chart_meta.get("y_axis_label_distance")
+                    or chart_meta.get("primary_y_axis_label_distance")
+                )
                 axis_tick_distance = data_dict.get("axis_tick_distance") or chart_config.get("axis_tick_distance") or chart_meta.get("axis_tick_distance")
                 figsize = data_dict.get("figsize") or chart_config.get("figsize") or chart_meta.get("figsize")
                 
@@ -1086,12 +1110,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         values = []
                         for row in sheet[cell_range]:
                             for cell in row:
-                                if cell.value is not None:
-                                    values.append(cell.value)
+                                            if cell.value is not None:
+                                                values.append(cell.value)
                         return values
                     except Exception as e:
-                        current_app.logger.error(f"Error extracting range {cell_range}: {e}")
-                        return []
+                            current_app.logger.error(f"Error extracting range {cell_range}: {e}")
+                            return []
 
                 # --- Robust recursive Excel cell range extraction for all chart types and fields ---
                 def extract_cell_ranges(obj, sheet):
@@ -1617,7 +1641,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 ))
                         else:
                             # Fallback to scatter if chart type not recognized
-                            current_app.logger.warning(f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
+                            #current_app.logger.warning(f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
                             fig.add_trace(go.Scatter(**trace_kwargs,
                                 mode='markers',
                                 hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
@@ -1894,17 +1918,94 @@ def _generate_report(project_id, template_path, data_file_path):
                         labels = series.get("labels", x_values)
                         values = series.get("values", [])
                         color = series.get("marker", {}).get("color") if "marker" in series else colors
+                        marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
+                        explode = series.get("pull")
+                        opacity = series.get("opacity", chart_meta.get("opacity"))
+                        textinfo = series.get("textinfo", chart_meta.get("textinfo", "percent"))
+                        textposition = series.get("textposition", chart_meta.get("textposition", "inside")).lower()
+                        value_format_str = chart_meta.get("value_format", ".1f")
+                        data_labels_enabled = bool(chart_meta.get("data_labels", True))
+                        data_label_font_size = chart_meta.get("data_label_font_size", font_size or 10)
+                        data_label_color = chart_meta.get("data_label_color", font_color or "#000000")
+                        start_angle = startangle if 'startangle' in locals() and startangle is not None else 90
+                        sort_order = chart_meta.get("sort_order")
+
+                        # Optional sorting
+                        if sort_order in ("ascending", "descending") and values:
+                            zipped = list(zip(values, labels, color if isinstance(color, list) else [color]*len(labels), explode if isinstance(explode, list) else [0]*len(labels)))
+                            reverse = sort_order == "descending"
+                            zipped.sort(key=lambda t: (t[0] if t[0] is not None else 0), reverse=reverse)
+                            values, labels, color_list, explode_list = zip(*zipped)
+                            values = list(values)
+                            labels = list(labels)
+                            color = list(color_list)
+                            explode = list(explode_list)
+
+                        # Build autopct based on textinfo/value_format
+                        def make_autopct(fmt:str, include_percent:bool, include_value:bool):
+                            def _inner(pct):
+                                total = sum(values) if values else 0
+                                val = pct * total / 100.0
+                                parts = []
+                                if include_value:
+                                    try:
+                                        parts.append(f"{val:{fmt}}")
+                                    except Exception:
+                                        parts.append(f"{val:.1f}")
+                                if include_percent:
+                                    parts.append(f"{pct:.1f}%")
+                                return " " .join(parts)
+                            return _inner
+
+                        include_label = "label" in (textinfo or "")
+                        include_percent = "percent" in (textinfo or "")
+                        include_value = "value" in (textinfo or "")
+
+                        autopct_callable = None
+                        if data_labels_enabled and (include_percent or include_value):
+                            autopct_callable = make_autopct(value_format_str, include_percent, include_value)
+
+                        # Wedge and text props
+                        wedgeprops = {}
+                        if isinstance(marker_line, dict):
+                            if marker_line.get("color"):
+                                wedgeprops["edgecolor"] = marker_line.get("color")
+                            if marker_line.get("width") is not None:
+                                wedgeprops["linewidth"] = marker_line.get("width")
+                        if opacity is not None:
+                            wedgeprops["alpha"] = opacity
+
+                        textprops = {"color": data_label_color, "fontsize": data_label_font_size}
+                        if chart_meta.get("font_family"):
+                            textprops["fontfamily"] = chart_meta.get("font_family")
+
+                        # Positioning
+                        pctdistance = 0.6 if textposition == "inside" else 1.15
+                        labeldistance = 1.1 if textposition != "inside" else 1.05
                         
                         # Create pie chart
-                        wedges, texts, autotexts = ax1.pie(values, labels=labels, autopct='%1.1f%%', 
-                                                          colors=color, startangle=90)
-                        
-                        # Style the text
-                        for autotext in autotexts:
-                            autotext.set_color('white')
+                        wedges, texts, autotexts = ax1.pie(
+                            values,
+                            labels=labels if include_label else None,
+                            autopct=autopct_callable,
+                            colors=color,
+                            startangle=start_angle,
+                            explode=explode,
+                            wedgeprops=wedgeprops,
+                            pctdistance=pctdistance,
+                            labeldistance=labeldistance,
+                            textprops=textprops,
+                        )
+
+                        # Style the autopct texts
+                        for autotext in autotexts or []:
+                            autotext.set_color(data_label_color)
+                            autotext.set_fontsize(data_label_font_size)
                             autotext.set_fontweight('bold')
+                            if chart_meta.get("font_family"):
+                                autotext.set_fontfamily(chart_meta.get("font_family"))
                         
-                        ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                        ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                         
                         # Add legend for pie chart
                         show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -1955,17 +2056,94 @@ def _generate_report(project_id, template_path, data_file_path):
                             labels = series.get("labels", x_values)
                             values = series.get("values", [])
                             color = series.get("marker", {}).get("color") if "marker" in series else colors
+                            marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
+                            explode = series.get("pull")
+                            opacity = series.get("opacity", chart_meta.get("opacity"))
+                            textinfo = series.get("textinfo", chart_meta.get("textinfo", "percent"))
+                            textposition = series.get("textposition", chart_meta.get("textposition", "inside")).lower()
+                            value_format_str = chart_meta.get("value_format", ".1f")
+                            data_labels_enabled = bool(chart_meta.get("data_labels", True))
+                            data_label_font_size = chart_meta.get("data_label_font_size", font_size or 10)
+                            data_label_color = chart_meta.get("data_label_color", font_color or "#000000")
+                            start_angle = startangle if 'startangle' in locals() and startangle is not None else 90
+                            sort_order = chart_meta.get("sort_order")
+
+                            # Optional sorting
+                            if sort_order in ("ascending", "descending") and values:
+                                zipped = list(zip(values, labels, color if isinstance(color, list) else [color]*len(labels), explode if isinstance(explode, list) else [0]*len(labels)))
+                                reverse = sort_order == "descending"
+                                zipped.sort(key=lambda t: (t[0] if t[0] is not None else 0), reverse=reverse)
+                                values, labels, color_list, explode_list = zip(*zipped)
+                                values = list(values)
+                                labels = list(labels)
+                                color = list(color_list)
+                                explode = list(explode_list)
+
+                            # Build autopct based on textinfo/value_format
+                            def make_autopct(fmt:str, include_percent:bool, include_value:bool):
+                                def _inner(pct):
+                                    total = sum(values) if values else 0
+                                    val = pct * total / 100.0
+                                    parts = []
+                                    if include_value:
+                                        try:
+                                            parts.append(f"{val:{fmt}}")
+                                        except Exception:
+                                            parts.append(f"{val:.1f}")
+                                    if include_percent:
+                                        parts.append(f"{pct:.1f}%")
+                                    return " " .join(parts)
+                                return _inner
+
+                            include_label = "label" in (textinfo or "")
+                            include_percent = "percent" in (textinfo or "")
+                            include_value = "value" in (textinfo or "")
+
+                            autopct_callable = None
+                            if data_labels_enabled and (include_percent or include_value):
+                                autopct_callable = make_autopct(value_format_str, include_percent, include_value)
+
+                            # Wedge and text props
+                            wedgeprops = {}
+                            if isinstance(marker_line, dict):
+                                if marker_line.get("color"):
+                                    wedgeprops["edgecolor"] = marker_line.get("color")
+                                if marker_line.get("width") is not None:
+                                    wedgeprops["linewidth"] = marker_line.get("width")
+                            if opacity is not None:
+                                wedgeprops["alpha"] = opacity
+
+                            textprops = {"color": data_label_color, "fontsize": data_label_font_size}
+                            if chart_meta.get("font_family"):
+                                textprops["fontfamily"] = chart_meta.get("font_family")
+
+                            # Positioning
+                            pctdistance = 0.6 if textposition == "inside" else 1.15
+                            labeldistance = 1.1 if textposition != "inside" else 1.05
                             
                             # Create pie chart
-                            wedges, texts, autotexts = ax.pie(values, labels=labels, autopct='%1.1f%%', 
-                                                             colors=color, startangle=90)
+                            wedges, texts, autotexts = ax.pie(
+                                values,
+                                labels=labels if include_label else None,
+                                autopct=autopct_callable,
+                                colors=color,
+                                startangle=start_angle,
+                                explode=explode,
+                                wedgeprops=wedgeprops,
+                                pctdistance=pctdistance,
+                                labeldistance=labeldistance,
+                                textprops=textprops,
+                            )
                             
                             # Style the text
-                            for autotext in autotexts:
-                                autotext.set_color('white')
+                            for autotext in autotexts or []:
+                                autotext.set_color(data_label_color)
+                                autotext.set_fontsize(data_label_font_size)
                                 autotext.set_fontweight('bold')
+                                if chart_meta.get("font_family"):
+                                    autotext.set_fontfamily(chart_meta.get("font_family"))
                             
-                            ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                            ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                             
                             # Add legend for regular pie chart
                             show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -2385,7 +2563,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 ))
                         else:
                             # Fallback to scatter if chart type not recognized
-                            current_app.logger.warning(f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
+                            #current_app.logger.warning(f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
                             fig.add_trace(go.Scatter(**trace_kwargs,
                                 mode='markers',
                                 hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
@@ -2700,17 +2878,94 @@ def _generate_report(project_id, template_path, data_file_path):
                         labels = series.get("labels", x_values)
                         values = series.get("values", [])
                         color = series.get("marker", {}).get("color") if "marker" in series else colors
+                        marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
+                        explode = series.get("pull")
+                        opacity = series.get("opacity", chart_meta.get("opacity"))
+                        textinfo = series.get("textinfo", chart_meta.get("textinfo", "percent"))
+                        textposition = series.get("textposition", chart_meta.get("textposition", "inside")).lower()
+                        value_format_str = chart_meta.get("value_format", ".1f")
+                        data_labels_enabled = bool(chart_meta.get("data_labels", True))
+                        data_label_font_size = chart_meta.get("data_label_font_size", font_size or 10)
+                        data_label_color = chart_meta.get("data_label_color", font_color or "#000000")
+                        start_angle = startangle if 'startangle' in locals() and startangle is not None else 90
+                        sort_order = chart_meta.get("sort_order")
+
+                        # Optional sorting
+                        if sort_order in ("ascending", "descending") and values:
+                            zipped = list(zip(values, labels, color if isinstance(color, list) else [color]*len(labels), explode if isinstance(explode, list) else [0]*len(labels)))
+                            reverse = sort_order == "descending"
+                            zipped.sort(key=lambda t: (t[0] if t[0] is not None else 0), reverse=reverse)
+                            values, labels, color_list, explode_list = zip(*zipped)
+                            values = list(values)
+                            labels = list(labels)
+                            color = list(color_list)
+                            explode = list(explode_list)
+
+                        # Build autopct based on textinfo/value_format
+                        def make_autopct(fmt:str, include_percent:bool, include_value:bool):
+                            def _inner(pct):
+                                total = sum(values) if values else 0
+                                val = pct * total / 100.0
+                                parts = []
+                                if include_value:
+                                    try:
+                                        parts.append(f"{val:{fmt}}")
+                                    except Exception:
+                                        parts.append(f"{val:.1f}")
+                                if include_percent:
+                                    parts.append(f"{pct:.1f}%")
+                                return " " .join(parts)
+                            return _inner
+
+                        include_label = "label" in (textinfo or "")
+                        include_percent = "percent" in (textinfo or "")
+                        include_value = "value" in (textinfo or "")
+
+                        autopct_callable = None
+                        if data_labels_enabled and (include_percent or include_value):
+                            autopct_callable = make_autopct(value_format_str, include_percent, include_value)
+
+                        # Wedge and text props
+                        wedgeprops = {}
+                        if isinstance(marker_line, dict):
+                            if marker_line.get("color"):
+                                wedgeprops["edgecolor"] = marker_line.get("color")
+                            if marker_line.get("width") is not None:
+                                wedgeprops["linewidth"] = marker_line.get("width")
+                        if opacity is not None:
+                            wedgeprops["alpha"] = opacity
+
+                        textprops = {"color": data_label_color, "fontsize": data_label_font_size}
+                        if chart_meta.get("font_family"):
+                            textprops["fontfamily"] = chart_meta.get("font_family")
+
+                        # Positioning
+                        pctdistance = 0.6 if textposition == "inside" else 1.15
+                        labeldistance = 1.1 if textposition != "inside" else 1.05
                         
                         # Create pie chart
-                        wedges, texts, autotexts = ax1.pie(values, labels=labels, autopct='%1.1f%%', 
-                                                          colors=color, startangle=90)
-                        
-                        # Style the text
-                        for autotext in autotexts:
-                            autotext.set_color('white')
+                        wedges, texts, autotexts = ax1.pie(
+                            values,
+                            labels=labels if include_label else None,
+                            autopct=autopct_callable,
+                            colors=color,
+                            startangle=start_angle,
+                            explode=explode,
+                            wedgeprops=wedgeprops,
+                            pctdistance=pctdistance,
+                            labeldistance=labeldistance,
+                            textprops=textprops,
+                        )
+
+                        # Style the autopct texts
+                        for autotext in autotexts or []:
+                            autotext.set_color(data_label_color)
+                            autotext.set_fontsize(data_label_font_size)
                             autotext.set_fontweight('bold')
+                            if chart_meta.get("font_family"):
+                                autotext.set_fontfamily(chart_meta.get("font_family"))
                         
-                        ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                        ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                         
                         # Add legend for pie chart
                         show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -2761,17 +3016,94 @@ def _generate_report(project_id, template_path, data_file_path):
                             labels = series.get("labels", x_values)
                             values = series.get("values", [])
                             color = series.get("marker", {}).get("color") if "marker" in series else colors
+                            marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
+                            explode = series.get("pull")
+                            opacity = series.get("opacity", chart_meta.get("opacity"))
+                            textinfo = series.get("textinfo", chart_meta.get("textinfo", "percent"))
+                            textposition = series.get("textposition", chart_meta.get("textposition", "inside")).lower()
+                            value_format_str = chart_meta.get("value_format", ".1f")
+                            data_labels_enabled = bool(chart_meta.get("data_labels", True))
+                            data_label_font_size = chart_meta.get("data_label_font_size", font_size or 10)
+                            data_label_color = chart_meta.get("data_label_color", font_color or "#000000")
+                            start_angle = startangle if 'startangle' in locals() and startangle is not None else 90
+                            sort_order = chart_meta.get("sort_order")
+
+                            # Optional sorting
+                            if sort_order in ("ascending", "descending") and values:
+                                zipped = list(zip(values, labels, color if isinstance(color, list) else [color]*len(labels), explode if isinstance(explode, list) else [0]*len(labels)))
+                                reverse = sort_order == "descending"
+                                zipped.sort(key=lambda t: (t[0] if t[0] is not None else 0), reverse=reverse)
+                                values, labels, color_list, explode_list = zip(*zipped)
+                                values = list(values)
+                                labels = list(labels)
+                                color = list(color_list)
+                                explode = list(explode_list)
+
+                            # Build autopct based on textinfo/value_format
+                            def make_autopct(fmt:str, include_percent:bool, include_value:bool):
+                                def _inner(pct):
+                                    total = sum(values) if values else 0
+                                    val = pct * total / 100.0
+                                    parts = []
+                                    if include_value:
+                                        try:
+                                            parts.append(f"{val:{fmt}}")
+                                        except Exception:
+                                            parts.append(f"{val:.1f}")
+                                    if include_percent:
+                                        parts.append(f"{pct:.1f}%")
+                                    return " " .join(parts)
+                                return _inner
+
+                            include_label = "label" in (textinfo or "")
+                            include_percent = "percent" in (textinfo or "")
+                            include_value = "value" in (textinfo or "")
+
+                            autopct_callable = None
+                            if data_labels_enabled and (include_percent or include_value):
+                                autopct_callable = make_autopct(value_format_str, include_percent, include_value)
+
+                            # Wedge and text props
+                            wedgeprops = {}
+                            if isinstance(marker_line, dict):
+                                if marker_line.get("color"):
+                                    wedgeprops["edgecolor"] = marker_line.get("color")
+                                if marker_line.get("width") is not None:
+                                    wedgeprops["linewidth"] = marker_line.get("width")
+                            if opacity is not None:
+                                wedgeprops["alpha"] = opacity
+
+                            textprops = {"color": data_label_color, "fontsize": data_label_font_size}
+                            if chart_meta.get("font_family"):
+                                textprops["fontfamily"] = chart_meta.get("font_family")
+
+                            # Positioning
+                            pctdistance = 0.6 if textposition == "inside" else 1.15
+                            labeldistance = 1.1 if textposition != "inside" else 1.05
                             
                             # Create pie chart
-                            wedges, texts, autotexts = ax.pie(values, labels=labels, autopct='%1.1f%%', 
-                                                             colors=color, startangle=90)
+                            wedges, texts, autotexts = ax.pie(
+                                values,
+                                labels=labels if include_label else None,
+                                autopct=autopct_callable,
+                                colors=color,
+                                startangle=start_angle,
+                                explode=explode,
+                                wedgeprops=wedgeprops,
+                                pctdistance=pctdistance,
+                                labeldistance=labeldistance,
+                                textprops=textprops,
+                            )
                             
                             # Style the text
-                            for autotext in autotexts:
-                                autotext.set_color('white')
+                            for autotext in autotexts or []:
+                                autotext.set_color(data_label_color)
+                                autotext.set_fontsize(data_label_font_size)
                                 autotext.set_fontweight('bold')
+                                if chart_meta.get("font_family"):
+                                    autotext.set_fontfamily(chart_meta.get("font_family"))
                             
-                            ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                            ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                             
                             # Add legend for regular pie chart
                             show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -3013,7 +3345,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # Ensure all arrays have the same length
                                 min_length = min(len(x_values), len(y_vals), len(sizes))
                                 if min_length < len(x_values) or min_length < len(y_vals) or min_length < len(sizes):
-                                    current_app.logger.warning(f"⚠️ Array length mismatch! Truncating to {min_length}")
+                                    #current_app.logger.warning(f"⚠️ Array length mismatch! Truncating to {min_length}")
                                     x_values = x_values[:min_length]
                                     y_vals = y_vals[:min_length]
                                     sizes = sizes[:min_length]
@@ -3024,13 +3356,11 @@ def _generate_report(project_id, template_path, data_file_path):
                                 scaled_sizes = [s * 20 for s in sizes]  # Much larger scale for better visibility
                                 # Scaled sizes calculated
                                 
-                                # Get colors - support both single color and color list
+                                # Colors
                                 bubble_colors = color
                                 if isinstance(color, list):
-                                    # Use provided colors
                                     bubble_colors = color
                                 elif color:
-                                    # Single color - create gradient based on size
                                     import matplotlib.cm as cm
                                     import numpy as np
                                     size_array = np.array(sizes)
@@ -3038,21 +3368,53 @@ def _generate_report(project_id, template_path, data_file_path):
                                     cmap = cm.viridis if color == 'auto' else cm.get_cmap('viridis')
                                     bubble_colors = [cmap(norm_size) for norm_size in normalized_sizes]
                                 else:
-                                    # Default color scheme
                                     bubble_colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', '#98D8C8', '#F7DC6F']
                                 
+                                # Marker styles from config
+                                marker_cfg = series.get("marker", {}) if isinstance(series.get("marker"), dict) else {}
+                                marker_line_cfg = marker_cfg.get("line", {}) if isinstance(marker_cfg.get("line"), dict) else {}
+                                alpha_val = marker_cfg.get("opacity", series.get("opacity", chart_meta.get("opacity", 0.8)))
+                                edge_color = marker_line_cfg.get("color", 'white')
+                                edge_width = marker_line_cfg.get("width", 2)
+                                
                                 # Create bubble chart with enhanced styling
-                                scatter = ax1.scatter(x_values, y_vals, 
+                                scatter = ax1.scatter(
+                                    x_values, y_vals, 
                                                      s=scaled_sizes, 
                                                      c=bubble_colors, 
-                                                     alpha=0.8,  # Increased opacity
-                                                     edgecolors='white',  # White borders
-                                                     linewidth=2,  # Border thickness
+                                    alpha=alpha_val,
+                                    edgecolors=edge_color,
+                                    linewidth=edge_width,
                                                      label=label,
-                                                     zorder=3)  # Higher z-order for better layering
+                                    zorder=3)
+                                
+                                # Keep a reference for legend building
+                                try:
+                                    if not hasattr(ax1, "_bubble_handles"):
+                                        ax1._bubble_handles = []
+                                        ax1._bubble_labels = []
+                                    ax1._bubble_handles.append(scatter)
+                                    ax1._bubble_labels.append(label)
+                                except Exception:
+                                    pass
+                                
+                                # Create an explicit proxy handle so legend always renders
+                                try:
+                                    from matplotlib.lines import Line2D
+                                    if isinstance(bubble_colors, list) and len(bubble_colors) > 0:
+                                        legend_facecolor = bubble_colors[0]
+                                    else:
+                                        legend_facecolor = bubble_colors if bubble_colors else '#1f77b4'
+                                    proxy = Line2D([0], [0], marker='o', linestyle='None', label=label,
+                                                   markerfacecolor=legend_facecolor, markeredgecolor=edge_color,
+                                                   markeredgewidth=edge_width, markersize=10, alpha=alpha_val)
+                                    ax1._bubble_proxy = proxy
+                                except Exception:
+                                    pass
                                 
                                 # Add subtle shadow effect for depth
-                                ax1.scatter(x_values, y_vals, 
+                                ax1.scatter(
+                                    x_values, y_vals, 
                                           s=scaled_sizes, 
                                           c='black', 
                                           alpha=0.1, 
@@ -3060,27 +3422,78 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 # Add data labels for bubble chart if enabled
                                 if show_data_labels:
-                                    for j, (x, y, size_val) in enumerate(zip(x_values, y_vals, sizes)):
+                                    for j, (x, y, value_num) in enumerate(zip(x_values, y_vals, y_vals)):
                                         if j < len(x_values):
-                                            # Format size value for label
+                                            # Format value for label using value_format and axis_tick_format
                                             try:
-                                                if value_format == ".1f":
-                                                    formatted_size = f"{float(size_val):.1f}"
-                                                elif value_format == ".0f":
-                                                    formatted_size = f"{float(size_val):.0f}"
+                                                if axis_tick_format and "$" in axis_tick_format:
+                                                    num = float(value_num)
+                                                    formatted_value = f"${num:,.0f}" if value_format in (".0f", None) else f"${num:,.0f}" if value_format == ".0f" else f"${num:,.0f}"
+                                                    # Simplify: currency with thousands, ignore decimals beyond .0f for labels
                                                 else:
-                                                    formatted_size = f"{float(size_val):.0f}"
+                                                    num = float(value_num)
+                                                    if value_format == ".0f":
+                                                        formatted_value = f"{num:.0f}"
+                                                    elif value_format == ".1f":
+                                                        formatted_value = f"{num:.1f}"
+                                                    elif value_format == ".2f":
+                                                        formatted_value = f"{num:.2f}"
+                                                    else:
+                                                        formatted_value = f"{num:.0f}"
                                             except:
-                                                formatted_size = str(size_val)
+                                                formatted_value = str(value_num)
                                             
-                                            # Add size label on bubble with better positioning
-                                            label_color = data_label_color or '#000000'
-                                            ax1.text(x, y, formatted_size, 
+                                            # Add text label inside bubble
+                                            ax1.text(x, y, formatted_value, 
                                                     ha='center', va='center', 
                                                     fontsize=data_label_font_size or 10,
-                                                    color=label_color,
+                                                    color=data_label_color or '#000000',
                                                     fontweight='bold',
-                                                    zorder=5)  # Higher z-order to ensure visibility
+                                                    zorder=4)
+                                
+                                # Fix axis ranges for bubble charts to prevent layout shifts
+                                if i == len(series_data) - 1:  # Only set once after all series
+                                    # Always set fixed x-axis range for bubble charts to prevent layout shifts
+                                    if x_axis_min_max and isinstance(x_axis_min_max, list) and len(x_axis_min_max) == 2:
+                                        # Use explicit range from config
+                                        ax1.set_xlim(x_axis_min_max[0], x_axis_min_max[1])
+                                    else:
+                                        # Set auto-calculated range with padding
+                                        x_min, x_max = min(x_values), max(x_values)
+                                        x_padding = (x_max - x_min) * 0.1
+                                        ax1.set_xlim(x_min - x_padding, x_max + x_padding)
+                                    
+                                    # Always set fixed y-axis range for bubble charts to prevent layout shifts
+                                    if y_axis_min_max and isinstance(y_axis_min_max, list) and len(y_axis_min_max) == 2:
+                                        # Use explicit range from config
+                                        ax1.set_ylim(y_axis_min_max[0], y_axis_min_max[1])
+                                    else:
+                                        # Set auto-calculated range with padding
+                                        y_min, y_max = min(y_vals), max(y_vals)
+                                        y_padding = (y_max - y_min) * 0.1
+                                        ax1.set_ylim(y_min - y_padding, y_max + y_padding)
+                                    
+                                    # Apply axis label distances specifically for bubble charts
+                                    if x_axis_label_distance is not None or y_axis_label_distance is not None:
+                                        # Calculate labelpad values with multiplication for visibility
+                                        x_labelpad = (x_axis_label_distance * 10) if x_axis_label_distance is not None else 50.0
+                                        y_labelpad = (y_axis_label_distance * 10) if y_axis_label_distance is not None else 50.0
+                                        
+                                        # Get axis titles
+                                        x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
+                                        y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
+                                        
+                                        # Set axis labels with distance
+                                        if x_axis_title:
+                                            ax1.set_xlabel(x_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
+                                                        fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
+                                                        labelpad=x_labelpad)
+                                        if y_axis_title:
+                                            ax1.set_ylabel(y_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
+                                                        fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
+                                                        labelpad=y_labelpad)
+                                        
+                                        current_app.logger.info(f"🎈 Bubble Chart Axis Label Distance - X: {x_axis_label_distance} → {x_labelpad}, Y: {y_axis_label_distance} → {y_labelpad}")
                             else:
                                 # Enhanced scatter plot with custom styling
                                 # Extract marker properties from series
@@ -3090,6 +3503,15 @@ def _generate_report(project_id, template_path, data_file_path):
                                 marker_opacity = series.get("marker", {}).get("opacity", 0.8)
                                 text_labels = series.get("text", [])
                                 text_position = series.get("textposition", "top center")
+                                
+                                # Extract line properties from series
+                                line_config = series.get("line", {})
+                                line_color = line_config.get("color", marker_color)
+                                line_width = line_config.get("width", 2)
+                                line_dash = line_config.get("dash", "solid")
+                                
+                                # Handle mode setting
+                                mode = series.get("mode", "markers")
                                 
                                 # Handle marker size (can be single value or list)
                                 if isinstance(marker_size, list):
@@ -3109,6 +3531,25 @@ def _generate_report(project_id, template_path, data_file_path):
                                                      linewidth=1.5,
                                                      label=label,
                                                      zorder=3)
+                                
+                                # Add line if mode includes lines or if line properties are specified
+                                if "lines" in mode or "line" in mode or line_config:
+                                    # Convert dash style to matplotlib format
+                                    if line_dash == "dash":
+                                        linestyle = "--"
+                                    elif line_dash == "dot":
+                                        linestyle = ":"
+                                    elif line_dash == "dashdot":
+                                        linestyle = "-."
+                                    else:
+                                        linestyle = "-"  # solid
+                                    
+                                    ax1.plot(x_values, y_vals, 
+                                            color=line_color, 
+                                            linewidth=line_width, 
+                                            linestyle=linestyle,
+                                            alpha=marker_opacity,
+                                            zorder=2)
                                 
                                 # Add subtle shadow effect for depth
                                 ax1.scatter(x_values, y_vals, 
@@ -3150,7 +3591,6 @@ def _generate_report(project_id, template_path, data_file_path):
                                                              alpha=0.9,
                                                              edgecolor='gray',
                                                              linewidth=0.5))
-                                
                         elif mpl_chart_type == "fill_between":
                             # Enhanced Area chart
                             # current_app.logger.debug(f"Processing area chart for series: {label}")
@@ -3161,12 +3601,24 @@ def _generate_report(project_id, template_path, data_file_path):
                             fill_type = series.get("fill", "tozeroy")
                             line_color = series.get("line", {}).get("color", color)
                             line_width = series.get("line", {}).get("width", 2)
+                            line_shape = series.get("line", {}).get("shape", "linear")
                             marker_symbol = series.get("marker", {}).get("symbol", "o")
                             marker_size = series.get("marker", {}).get("size", 6)
                             marker_color = series.get("marker", {}).get("color", line_color)
                             area_opacity = series.get("opacity", 0.6)
                             text_labels = series.get("text", [])
                             text_position = series.get("textposition", "top center")
+                            
+                            # Handle line shape
+                            if line_shape == "spline":
+                                linestyle = "-"
+                                # For spline, we could add curve smoothing, but matplotlib doesn't have built-in splines
+                            elif line_shape == "hv":
+                                linestyle = "step"
+                            elif line_shape == "vh":
+                                linestyle = "step"
+                            else:
+                                linestyle = "-"  # linear
                             
                             # Create area fill based on fill type
                             if fill_type == "tozeroy":
@@ -3177,18 +3629,43 @@ def _generate_report(project_id, template_path, data_file_path):
                                 if i == 0:
                                     # First series - fill from zero
                                     ax1.fill_between(x_vals, y_vals, alpha=area_opacity, label=label, color=line_color)
-                                    bottom_vals = y_vals
+                                    # Store the cumulative values for next series
+                                    if not hasattr(ax1, '_stacked_bottom'):
+                                        ax1._stacked_bottom = {}
+                                    ax1._stacked_bottom[label] = y_vals
                                 else:
-                                    # Subsequent series - fill from previous series
-                                    ax1.fill_between(x_vals, bottom_vals, [b + y for b, y in zip(bottom_vals, y_vals)], 
-                                                   alpha=area_opacity, label=label, color=line_color)
-                                    bottom_vals = [b + y for b, y in zip(bottom_vals, y_vals)]
+                                    # Get the bottom values from previous series
+                                    prev_bottom = getattr(ax1, '_stacked_bottom', {}).get(series_data[i-1].get('name', f'series_{i-1}'), [0] * len(y_vals))
+                                    # Calculate new bottom (cumulative)
+                                    new_bottom = [b + y for b, y in zip(prev_bottom, y_vals)]
+                                    # Fill between previous bottom and new bottom
+                                    ax1.fill_between(x_vals, prev_bottom, new_bottom, alpha=area_opacity, label=label, color=line_color)
+                                    # Store the new cumulative values
+                                    ax1._stacked_bottom[label] = new_bottom
+                            elif fill_type == "tonextx":
+                                # Fill to next x values (horizontal stacking)
+                                if i == 0:
+                                    # First series - fill from zero
+                                    ax1.fill_betweenx(y_vals, x_vals, alpha=area_opacity, label=label, color=line_color)
+                                    # Store the cumulative values for next series
+                                    if not hasattr(ax1, '_stacked_left'):
+                                        ax1._stacked_left = {}
+                                    ax1._stacked_left[label] = x_vals
+                                else:
+                                    # Get the left values from previous series
+                                    prev_left = getattr(ax1, '_stacked_left', {}).get(series_data[i-1].get('name', f'series_{i-1}'), [0] * len(x_vals))
+                                    # Calculate new left (cumulative)
+                                    new_left = [l + x for l, x in zip(prev_left, x_vals)]
+                                    # Fill between previous left and new left
+                                    ax1.fill_betweenx(y_vals, prev_left, new_left, alpha=area_opacity, label=label, color=line_color)
+                                    # Store the new cumulative values
+                                    ax1._stacked_left[label] = new_left
                             else:
                                 # Default fill
                                 ax1.fill_between(x_vals, y_vals, alpha=area_opacity, label=label, color=line_color)
                             
                             # Add line on top of area
-                            ax1.plot(x_vals, y_vals, color=line_color, linewidth=line_width, zorder=3)
+                            ax1.plot(x_vals, y_vals, color=line_color, linewidth=line_width, linestyle=linestyle, zorder=3)
                             
                             # Add markers if specified
                             if marker_symbol != "none":
@@ -3229,7 +3706,102 @@ def _generate_report(project_id, template_path, data_file_path):
                                                         edgecolor='gray',
                                                         linewidth=0.5),
                                                zorder=5)
+                        # Set axis labels, title, and legend for area chart (only once after all series)
+                        if i == len(series_data) - 1 and mpl_chart_type == "fill_between":  # Only for area charts
+                            # Set axis labels
+                            x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
+                            y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
+                            if x_axis_title:
+                                # Use the actual distance value directly, not divided by 10
+                                x_labelpad = x_axis_label_distance if x_axis_label_distance is not None else 5.0
+                                # Make the distance effect much more pronounced by multiplying the value
+                                x_labelpad = (x_axis_label_distance * 10) if x_axis_label_distance is not None else 50.0
+                                ax1.set_xlabel(x_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
+                                             fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
+                                             labelpad=x_labelpad)
+                            if y_axis_title:
+                                # Use the actual distance value directly, not divided by 10
+                                y_labelpad = y_axis_label_distance if y_axis_label_distance is not None else 5.0
+                                # Make the distance effect much more pronounced by multiplying the value
+                                y_labelpad = (y_axis_label_distance * 10) if y_axis_label_distance is not None else 50.0
+                                ax1.set_ylabel(y_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
+                                             fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
+                                             labelpad=y_labelpad)
+                             
+                             # Set chart title
+                            if title:
+                                 ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20,
+                                             color=font_color if font_color else 'black',
+                                             fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
+                             
+                             # Set legend
+                            show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            if show_legend:
+                                 legend_position = chart_meta.get("legend_position", "top")
+                                 legend_font_size = chart_meta.get("legend_font_size", 10)
+                                 
+                                 if legend_position == "bottom":
+                                     ax1.legend(loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                                 elif legend_position == "top":
+                                     ax1.legend(loc='upper center', bbox_to_anchor=(0.5, 1.02), fontsize=legend_font_size)
+                                 else:
+                                     ax1.legend(loc='best', fontsize=legend_font_size)
+
+                            # Add data labels if text is provided
+                            if text_labels and len(text_labels) == len(y_vals):
+                                # ... existing data label code ...
+                                ax1.annotate(text, (x, y + y_offset), ha=ha, va='center',
+                                            fontsize=data_label_font_size or 10,
+                                            color=label_color,
+                                            fontweight='bold',
+                                            bbox=dict(boxstyle="round,pad=0.3", 
+                                                    facecolor='white', 
+                                                    alpha=0.9,
+                                                    edgecolor='gray',
+                                                    linewidth=0.5),
+                                            zorder=5)
+
+                            # Set axis labels, title, and legend for area chart (only once after all series)
+                            if i == len(series_data) - 1:  # Only set once after all series are processed
+                                # Set axis labels
+                                x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
+                                y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
+                                if x_axis_title:
+                                    # Use the actual distance value directly, not divided by 10
+                                    x_labelpad = x_axis_label_distance if x_axis_label_distance is not None else 5.0
+                                    # Make the distance effect much more pronounced by multiplying the value
+                                    x_labelpad = (x_axis_label_distance * 10) if x_axis_label_distance is not None else 50.0
+                                    ax1.set_xlabel(x_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
+                                                fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
+                                                labelpad=x_labelpad)
+                                if y_axis_title:
+                                    # Use the actual distance value directly, not divided by 10
+                                    y_labelpad = y_axis_label_distance if y_axis_label_distance is not None else 5.0
+                                    # Make the distance effect much more pronounced by multiplying the value
+                                    y_labelpad = (y_axis_label_distance * 10) if y_axis_label_distance is not None else 50.0
+                                    ax1.set_ylabel(y_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
+                                                fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
+                                                labelpad=y_labelpad)
+
+                            # Set chart title
+                            if title:
+                                ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20,
+                                            color=font_color if font_color else 'black',
+                                            fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                             
+                            # Set legend
+                            show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            if show_legend:
+                                legend_position = chart_meta.get("legend_position", "top")
+                                legend_font_size = chart_meta.get("legend_font_size", 10)
+                                
+                                if legend_position == "bottom":
+                                    ax1.legend(loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                                elif legend_position == "top":
+                                    ax1.legend(loc='upper center', bbox_to_anchor=(0.5, 1.02), fontsize=legend_font_size)
+                                else:
+                                    ax1.legend(loc='best', fontsize=legend_font_size)
+                                    
                         elif mpl_chart_type == "hist":
                             # Histogram
                             ax1.hist(y_vals, bins=10, label=label, color=color, alpha=0.7)
@@ -3251,7 +3823,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             
                             # Ensure we have valid heatmap data
                             if not heatmap_data or len(heatmap_data) == 0:
-                                current_app.logger.warning(f"⚠️ No heatmap data found in series: {series}")
+                                #current_app.logger.warning(f"⚠️ No heatmap data found in series: {series}")
                                 # Create a default heatmap for testing
                                 heatmap_data = [[1, 0, 1, 1], [1, 1, 1, 0], [0, 1, 1, 1]]
                                 # current_app.logger.debug(f"Using default heatmap data: {heatmap_data}")
@@ -3278,6 +3850,22 @@ def _generate_report(project_id, template_path, data_file_path):
                             im = ax1.imshow(heatmap_data, cmap=colorscale, aspect='auto', 
                                            interpolation='nearest', alpha=0.8)
                             
+                            # Axis labels from config
+                            x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
+                            y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
+                            if x_axis_title:
+                                # Apply x_axis_label_distance for heatmaps
+                                x_labelpad = x_axis_label_distance if x_axis_label_distance else 5.0  # Use the value directly
+                                ax1.set_xlabel(x_axis_title, fontsize=font_size or 12, color=font_color if font_color else None,
+                                               fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
+                                               labelpad=x_labelpad)
+                            if y_axis_title:
+                                # Apply y_axis_label_distance for heatmaps
+                                y_labelpad = y_axis_label_distance if y_axis_label_distance else 5.0  # Use the value directly
+                                ax1.set_ylabel(y_axis_title, fontsize=font_size or 12, color=font_color if font_color else None,
+                                               fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
+                                               labelpad=y_labelpad)
+                            
                             # Set axis labels
                             if x_values:
                                 ax1.set_xticks(range(len(x_values)))
@@ -3292,9 +3880,21 @@ def _generate_report(project_id, template_path, data_file_path):
                             ax1.set_yticks(range(len(y_labels)))
                             ax1.set_yticklabels(y_labels)
                             
-                            # Add colorbar
-                            cbar = plt.colorbar(im, ax=ax1, shrink=0.8)
-                            cbar.set_label(series.get("name", "Value"), rotation=270, labelpad=15)
+                            # Respect show_gridlines for heatmap explicitly (override style defaults)
+                            if not chart_meta.get("show_gridlines", False):
+                                try:
+                                    ax1.grid(visible=False, which='both', axis='both')
+                                except TypeError:
+                                    # Fallback for older Matplotlib
+                                    ax1.grid(False)
+                                ax1.set_axisbelow(True)
+                            
+                            # Add colorbar if showscale is enabled
+                            showscale = series.get("showscale", True)
+                            if showscale:
+                                cbar = plt.colorbar(im, ax=ax1, shrink=0.8)
+                                cbar.set_label(series.get("name", "Value"), rotation=270, labelpad=15,
+                                                    fontsize=chart_meta.get("legend_font_size", 10))
                             
                             # Add text annotations on heatmap cells
                             for i in range(len(heatmap_data)):
@@ -3317,18 +3917,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                            fontweight='bold', fontsize=10)
                             
                             # Set title
-                            ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
-                            
-                            # Remove grid for cleaner look
-                            ax1.grid(False)
-                            
-                            # Set axis labels
-                            ax1.set_xlabel(chart_meta.get("x_label", "Week"), fontsize=label_fontsize if 'label_fontsize' in locals() else 12)
-                            ax1.set_ylabel(chart_meta.get("primary_y_label", "Employee"), fontsize=label_fontsize if 'label_fontsize' in locals() else 12)
-                            
-                            # Skip other chart processing for heatmap
-                            continue
-                                
+                            ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20,
+                                          color=font_color if font_color else None,
+                                          fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                         elif mpl_chart_type == "contour":
                             # Contour plot (simplified)
                             if len(y_vals) > 0:
@@ -3338,7 +3929,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                         else:
                             # Fallback to scatter for unknown types
-                            current_app.logger.warning(f"⚠️ Unknown matplotlib chart type '{series_type}', falling back to scatter")
+                            #current_app.logger.warning(f"⚠️ Unknown matplotlib chart type '{series_type}', falling back to scatter")
                             ax1.scatter(x_values, y_vals, label=label, color=color, alpha=0.7)
 
                     # Add data labels to Matplotlib chart if enabled (skip for area charts as they have custom label handling)
@@ -3421,14 +4012,20 @@ def _generate_report(project_id, template_path, data_file_path):
                                             # current_app.logger.debug(f"Added line data label with color: {label_color}")
 
                                             # Set labels and styling
-                        if chart_type != "pie":
-                            # Improved font size scaling for Matplotlib
+                        if chart_type != "pie" and chart_type != "area":
+                            # Improved font size scaling for Matplotlib (moved outside condition)
                             title_fontsize = font_size or 52  # Increased default title size
                             label_fontsize = int((font_size or 52) * 0.9)  # Increased relative size for labels
                             
                             # Apply axis label distances using labelpad parameter
-                            x_labelpad = x_axis_label_distance / 10.0 if x_axis_label_distance else 5.0  # Convert to points
-                            y_labelpad = y_axis_label_distance / 10.0 if y_axis_label_distance else 5.0  # Convert to points
+                            x_labelpad = x_axis_label_distance if x_axis_label_distance else 5.0  # Use the value directly
+                            y_labelpad = y_axis_label_distance if y_axis_label_distance else 5.0  # Use the value directly
+                            # Make the distance effect much more pronounced by multiplying the values
+                            x_labelpad = (x_axis_label_distance * 10) if x_axis_label_distance is not None else 50.0
+                            y_labelpad = (y_axis_label_distance * 10) if y_axis_label_distance is not None else 50.0
+                            
+                            # Debug logging
+                            current_app.logger.info(f"🔍 Axis Label Distance Debug - X: {x_axis_label_distance} → {x_labelpad}, Y: {y_axis_label_distance} → {y_labelpad}")
                             
                             ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), 
                                          fontsize=label_fontsize, color=font_color, labelpad=x_labelpad)
@@ -3437,6 +4034,14 @@ def _generate_report(project_id, template_path, data_file_path):
                             if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
                                 ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), 
                                              fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
+
+                            # Apply axis scale type if provided
+                            xaxis_type_cfg = chart_meta.get("xaxis_type")
+                            yaxis_type_cfg = chart_meta.get("yaxis_type")
+                            if xaxis_type_cfg in ("log", "log10"):
+                                ax1.set_xscale('log')
+                            if yaxis_type_cfg in ("log", "log10"):
+                                ax1.set_yscale('log')
 
                         # Determine if this is a bubble chart early
                         is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
@@ -3475,10 +4080,16 @@ def _generate_report(project_id, template_path, data_file_path):
                                      ax2.tick_params(axis='y', length=5)  # Show secondary y-axis tick marks
                         
                         # Apply X-axis label distance using tick parameters
-                        if x_axis_label_distance:
-                            # Use tick label padding to control distance
-                            ax1.tick_params(axis='x', pad=x_axis_label_distance)
-                            # current_app.logger.debug(f"Applied X-axis tick padding: {x_axis_label_distance}")
+                        # if x_axis_label_distance:
+                        #     # Use tick label padding to control distance
+                        #     ax1.tick_params(axis='x', pad=5)  # Fixed: Use small default padding
+                        #     # current_app.logger.debug(f"Applied X-axis tick padding: {x_axis_label_distance}")
+                        
+                        # Apply Y-axis label distance using tick parameters
+                        # if y_axis_label_distance:
+                        #     # Use tick label padding to control distance
+                        #     ax1.tick_params(axis='y', pad=5)  # Fixed: Use small default padding
+                        #     # current_app.logger.debug(f"Applied Y-axis tick padding: {y_axis_label_distance}")
                         
                         # Apply secondary y-axis formatting for Matplotlib
                         if ax2 and not is_bubble_chart:
@@ -3517,9 +4128,10 @@ def _generate_report(project_id, template_path, data_file_path):
                                 "dotdash": "-."
                             }
                             mapped_linestyle = matplotlib_linestyle_map.get(gridline_style, "--")
-                            ax1.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6)
+                            # Show both horizontal and vertical gridlines
+                            ax1.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6, axis='both')
                             if ax2 and not is_bubble_chart:
-                                ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6)
+                                ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6, axis='both')
                         else:
                             ax1.grid(False)
                             if ax2:
@@ -3548,17 +4160,17 @@ def _generate_report(project_id, template_path, data_file_path):
                                     data_max = max(all_y_values)
                                     data_range = data_max - data_min
                                     
-                                    # Check if the provided range is reasonable (within 10x of data range)
+                                    # Check if the provided range is reasonable (within 100x of data range for currency formatting)
                                     provided_range = y_axis_min_max[1] - y_axis_min_max[0]
-                                    if provided_range > data_range * 10:
-                                        # Auto-calculate appropriate range
+                                    if provided_range > data_range * 100 and not axis_tick_format:
+                                        # Auto-calculate appropriate range only if no special formatting is requested
                                         padding = data_range * 0.1  # 10% padding
                                         auto_min = max(0, data_min - padding)
                                         auto_max = data_max + padding
                                         ax1.set_ylim(auto_min, auto_max)
                                         # current_app.logger.debug(f"Auto-adjusted Y-axis range from {y_axis_min_max} to {[auto_min, auto_max]} (data range: {data_min}-{data_max})")
                                     else:
-                                        # Use provided range
+                                        # Use provided range (especially for currency formatting)
                                         ax1.set_ylim(y_axis_min_max[0], y_axis_min_max[1])
                                         # current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
                                 else:
@@ -3573,137 +4185,52 @@ def _generate_report(project_id, template_path, data_file_path):
                         
                         # Legend
                         show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
-                        # current_app.logger.debug(f"Matplotlib legend setting: {show_legend}")
                         
-                        # Disable legend for bubble charts to avoid the orange bubble marker
-                        if is_bubble_chart:
-                            show_legend = False
-                            # current_app.logger.info(f"🎈 Disabled legend for bubble chart to avoid extra bubble marker")
-                        
-                        # Initialize legend_loc outside the if block to fix scope issue
-                        legend_loc = 'best'  # default
+                        legend_loc = 'best'
                         if show_legend:
-                            # Get legend handles and labels from the primary axis
-                            lines1, labels1 = ax1.get_legend_handles_labels()
-                            
-                            # For dual-axis charts, combine legends from both axes
-                            if 'ax2' in locals() and ax2 is not None:
-                                lines2, labels2 = ax2.get_legend_handles_labels()
-                                all_lines = lines1 + lines2
-                                all_labels = labels1 + labels2
+                            handles = []
+                            labels_list = []
+                            # Use explicit proxy if present
+                            proxy = getattr(ax1, "_bubble_proxy", None)
+                            if proxy is not None:
+                                handles.append(proxy)
+                                labels_list.append(proxy.get_label())
                             else:
-                                all_lines = lines1
-                                all_labels = labels1
-                            
-                            # Map legend position for Matplotlib
-                            # current_app.logger.debug(f"Legend position from config: {legend_position}")
+                                # Prefer stored bubble handles/labels
+                                handles = getattr(ax1, "_bubble_handles", []) or []
+                                labels_list = getattr(ax1, "_bubble_labels", []) or []
+                                if not handles:
+                                    handles, labels_list = ax1.get_legend_handles_labels()
+
+                            # Combine with secondary axis if present
+                            if 'ax2' in locals() and ax2 is not None:
+                                h2, l2 = ax2.get_legend_handles_labels()
+                                handles += h2
+                                labels_list += l2
+
                             if legend_position:
                                 loc_map = {
                                     "top": "upper center",
                                     "bottom": "lower center", 
                                     "left": "center left",
-                                    "right": "center right"
+                                    "right": "center right",
                                 }
                                 legend_loc = loc_map.get(legend_position, 'best')
-                                # current_app.logger.debug(f"Matplotlib legend position mapping: {legend_position} -> {legend_loc}")
-                            else:
-                                legend_loc = 'best'
-                                # current_app.logger.debug("No legend position specified, using default 'best'")
                             
-                            # Force legend to bottom if specified
                             if legend_position == "bottom":
-                                ax1.legend(all_lines, all_labels, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
-                                # current_app.logger.debug(f"Added legend with {len(all_lines)} items at forced bottom position")
+                                ax1.legend(handles, labels_list, loc='lower center', bbox_to_anchor=(0.5, -0.15), fontsize=legend_font_size)
+                            elif legend_position == "top":
+                                ax1.legend(handles, labels_list, loc='upper center', bbox_to_anchor=(0.5, 1.02), fontsize=legend_font_size)
                             else:
-                                # Skip legend for bubble charts to avoid the orange bubble marker
-                                if is_bubble_chart:
-                                    current_app.logger.info(f"🎈 Skipping legend for bubble chart to avoid extra bubble marker")
-                                else:
-                                    ax1.legend(all_lines, all_labels, loc=legend_loc, fontsize=legend_font_size)
-                                    # current_app.logger.debug(f"Added legend with {len(all_lines)} items at position: {legend_loc}")
+                                ax1.legend(handles, labels_list, loc=legend_loc, fontsize=legend_font_size)
                                 
                         # Set title with proper font attributes (ENHANCED VERSION)
-                        title_fontsize = font_size or 52  # Increased default size
-                        if font_color:
-                            ax1.set_title(title, fontsize=title_fontsize, weight='bold', color=font_color, 
-                                         bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
-                            # current_app.logger.debug(f"Applied title with color: {font_color}, size: {title_fontsize}")
-                        else:
-                            ax1.set_title(title, fontsize=title_fontsize, weight='bold',
-                                         bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.8))
-                        
-                        # Apply font color to axis labels (ENHANCED VERSION)
-                        x_label_text = chart_meta.get("x_label", "X")
-                        primary_y_label_text = chart_meta.get("primary_y_label", "Y")
-                        label_fontsize = int(title_fontsize * 0.9)  # Increased relative size
-                        
-                        # Apply axis label distances using labelpad parameter
-                        x_labelpad = x_axis_label_distance / 10.0 if x_axis_label_distance else 5.0  # Convert to points
-                        y_labelpad = y_axis_label_distance / 10.0 if y_axis_label_distance else 5.0  # Convert to points
-                        
-                        if font_color:
-                            ax1.set_xlabel(x_label_text, fontsize=label_fontsize, weight='bold', color=font_color,
-                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=x_labelpad)
-                            ax1.set_ylabel(primary_y_label_text, fontsize=label_fontsize, weight='bold', color=font_color,
-                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
-                            # current_app.logger.debug(f"Applied axis labels with color: {font_color}")
-                        else:
-                            ax1.set_xlabel(x_label_text, fontsize=label_fontsize, weight='bold',
-                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=x_labelpad)
-                            ax1.set_ylabel(primary_y_label_text, fontsize=label_fontsize, weight='bold',
-                                         bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
-                        
-                        # Apply font size and color to tick labels (ENHANCED VERSION)
-                        tick_fontsize = axis_tick_font_size or int(title_fontsize * 0.8)  # Increased relative size
-                        if font_color:
-                            ax1.tick_params(axis='both', labelsize=tick_fontsize, colors=font_color)
-                            # current_app.logger.debug(f"Applied tick labels with color: {font_color}, size: {tick_fontsize}")
-                        else:
-                            ax1.tick_params(axis='both', labelsize=tick_fontsize)
-                        
-                        # Tick mark control for Matplotlib (additional section)
-                        if show_x_ticks is not None or show_y_ticks is not None:
-                            if show_x_ticks is not None:
-                                if not show_x_ticks:
-                                    ax1.tick_params(axis='x', length=0)  # Hide tick marks
-                                    ax1.set_xticklabels([])  # Hide tick labels
-                                else:
-                                    ax1.tick_params(axis='x', length=5)  # Show tick marks
-                            if show_y_ticks is not None:
-                                if not show_y_ticks:
-                                    ax1.tick_params(axis='y', length=0)  # Hide tick marks
-                                    ax1.set_yticklabels([])  # Hide tick labels
-                                    if 'ax2' in locals():
-                                        ax2.tick_params(axis='y', length=0)  # Hide secondary y-axis tick marks
-                                        ax2.set_yticklabels([])  # Hide secondary y-axis tick labels
-                                else:
-                                    ax1.tick_params(axis='y', length=5)  # Show tick marks
-                                    if 'ax2' in locals():
-                                        ax2.tick_params(axis='y', length=5)  # Show secondary y-axis tick marks
-                        
-                        # Also apply font color to secondary y-axis (ENHANCED VERSION)
-                        if 'ax2' in locals() and ax2 is not None:
-                            # Skip secondary Y-axis for bubble charts
-                            is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
-                            if not is_bubble_chart:
-                                if font_color:
-                                    ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold', color=font_color,
-                                                bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
-                                    ax2.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
-                                    # current_app.logger.debug(f"Applied secondary axis with color: {font_color}")
-                                else:
-                                    ax2.set_ylabel(chart_meta.get("secondary_y_label", "Secondary Y"), fontsize=label_fontsize, weight='bold',
-                                                bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.8), labelpad=y_labelpad)
-                                    ax2.tick_params(axis='y', labelsize=tick_fontsize)
-                        else:
-                            # current_app.logger.info(f"🎈 Skipping secondary Y-axis for bubble chart")
-                            pass
-                
-                # Apply axis label distances for Matplotlib
+
+                # Apply axis label distances for Matplotlib (skip heatmaps as they're handled specifically)
                 # current_app.logger.debug(f"X-axis label distance: {x_axis_label_distance}")
                 # current_app.logger.debug(f"Y-axis label distance: {y_axis_label_distance}")
                 
-                if x_axis_label_distance or y_axis_label_distance:
+                if (x_axis_label_distance or y_axis_label_distance) and chart_type != "heatmap":
                     # Get current subplot parameters
                     current_bottom = fig_mpl.subplotpars.bottom
                     current_left = fig_mpl.subplotpars.left
@@ -3724,16 +4251,36 @@ def _generate_report(project_id, template_path, data_file_path):
                 # Apply tight_layout but preserve manual adjustments
                 fig_mpl.tight_layout()
                 
-                # Re-apply manual adjustments after tight_layout with larger effect
-                if x_axis_label_distance or y_axis_label_distance:
+                # Re-apply manual adjustments after tight_layout with larger effect (skip heatmaps)
+                if (x_axis_label_distance or y_axis_label_distance) and chart_type != "heatmap":
                     if x_axis_label_distance:
                         adjustment = x_axis_label_distance / 300.0  # Even larger effect after tight_layout
                         fig_mpl.subplots_adjust(bottom=fig_mpl.subplotpars.bottom - adjustment)
+                        # Also re-apply x-axis label padding and nudge its position downward
+                        try:
+                            x_labelpad = x_axis_label_distance / 10.0 if x_axis_label_distance else 5.0
+                            ax1.xaxis.labelpad = x_labelpad
+                            # Move label further down in axes coordinates
+                            x_label_nudge = -0.10 - (x_axis_label_distance / 1200.0)
+                            ax1.xaxis.set_label_coords(0.5, x_label_nudge)
+                        except Exception:
+                            pass
                         # current_app.logger.debug(f"Re-applied X-axis adjustment: {adjustment}")
                     
                     if y_axis_label_distance:
                         adjustment = y_axis_label_distance / 300.0  # Even larger effect after tight_layout
                         fig_mpl.subplots_adjust(left=fig_mpl.subplotpars.left - adjustment)
+                        # Ensure the y-label itself moves away from the axis ticks
+                        try:
+                            # Re-apply labelpad explicitly after tight_layout
+                            y_labelpad = y_axis_label_distance / 10.0 if y_axis_label_distance else 5.0
+                            ax1.yaxis.labelpad = y_labelpad
+                            # Additionally, nudge the label position in axes coordinates for a clearer visual effect
+                            # Negative x moves it further left; scale factor tuned for visibility
+                            coord_nudge = -0.02 - (y_axis_label_distance / 1200.0)
+                            ax1.yaxis.set_label_coords(coord_nudge, 0.5)
+                        except Exception:
+                            pass
                         # current_app.logger.debug(f"Re-applied Y-axis adjustment: {adjustment}")
 
                 # Add annotations if specified
@@ -3847,11 +4394,11 @@ def _generate_report(project_id, template_path, data_file_path):
                     if left_pos >= right_pos:
                         left_pos = 0.1
                         right_pos = 0.9
-                        current_app.logger.warning(f"Invalid margin: left >= right, using default values")
+                        #current_app.logger.warning(f"Invalid margin: left >= right, using default values")
                     if bottom_pos >= top_pos:
                         bottom_pos = 0.1
                         top_pos = 0.9
-                        current_app.logger.warning(f"Invalid margin: bottom >= top, using default values")
+                        #current_app.logger.warning(f"Invalid margin: bottom >= top, using default values")
                     
                     # Apply margins using figure padding
                     fig_mpl.subplots_adjust(
