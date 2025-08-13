@@ -16,6 +16,9 @@ import {
 } from '@mui/material';
 import Alert from './Alert';
 import axios from 'axios';
+
+// Ensure cookies are included for session-based auth
+axios.defaults.withCredentials = true;
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
