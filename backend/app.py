@@ -31,13 +31,7 @@ def create_app():
         app.config['SESSION_COOKIE_SECURE'] = True
     CORS(
         app,
-        origins=[
-            "https://python-graph-project-fall-ss1cuw632.vercel.app",
-            "https://python-graph-project-fall.vercel.app",
-            "https://python-graph-project.onrender.com",
-            "http://localhost:3000",
-            "http://localhost:3001"
-        ],
+        origins="*",
         supports_credentials=True,
         allow_headers=["Content-Type", "Authorization"],
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
