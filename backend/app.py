@@ -1,6 +1,11 @@
 from flask import Flask, send_from_directory, jsonify, current_app
 import re
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+    MATPLOTLIB_AVAILABLE = True
+except ImportError:
+    MATPLOTLIB_AVAILABLE = False
+    print("Warning: matplotlib not available - chart functionality will be limited")
 from openpyxl import load_workbook
 from docx import Document
 from docx.shared import Inches
