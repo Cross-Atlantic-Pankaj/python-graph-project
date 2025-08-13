@@ -16,14 +16,14 @@ import {
 } from '@mui/material';
 import Alert from './Alert';
 import axios from 'axios';
-
-// Ensure cookies are included for session-based auth
-axios.defaults.withCredentials = true;
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
 import EmailIcon from '@mui/icons-material/Email';
 import PersonIcon from '@mui/icons-material/Person';
+
+// Ensure cookies are included for session-based auth
+axios.defaults.withCredentials = true;
 
 function Login() {
   const navigate = useNavigate();
