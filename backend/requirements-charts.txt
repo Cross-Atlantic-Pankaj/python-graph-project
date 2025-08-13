@@ -1,0 +1,6 @@
+# Chart libraries - install these after basic requirements
+# Run: pip install -r requirements-charts.txt
+
+matplotlib==3.8.4
+pandas==2.3.0
+plotly==5.22.0 
