@@ -2,6 +2,9 @@ import React from 'react';
 import { Navigate } from 'react-router-dom';
 import axios from 'axios';
 
+// Ensure axios sends cookies for auth-protected endpoints
+axios.defaults.withCredentials = true;
+
 function PrivateRoute({ children }) {
   const [isAuthenticated, setIsAuthenticated] = React.useState(null);
 

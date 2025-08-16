@@ -28,15 +28,14 @@ def create_app():
     # Load MONGO_URI from environment variable
     app.config["MONGO_URI"] = os.environ["MONGO_URI"]
     app.config['SECRET_KEY'] = 'your-secret-key-here'
-    app.config['SESSION_COOKIE_SAMESITE'] = 'None'
-    # Set SESSION_COOKIE_SECURE to False for local development, True for production
-    if 'localhost' in os.environ.get('MONGO_URI', '') or socket.gethostname() == 'localhost':
-        app.config['SESSION_COOKIE_SECURE'] = False
-    else:
-        app.config['SESSION_COOKIE_SECURE'] = True
+    # Configure cookies to work over HTTP on AWS. When you move to HTTPS, set
+    # SESSION_COOKIE_SECURE=True and SESSION_COOKIE_SAMESITE='None'.
+    app.config['SESSION_COOKIE_SECURE'] = False
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     CORS(
         app,
         origins=[
+            "http://52.66.214.215:3000",
             "https://python-graph-project-fall-ss1cuw632.vercel.app",
             "https://python-graph-project-fall.vercel.app",
             "https://python-graph-project.onrender.com",
