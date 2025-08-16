@@ -1138,10 +1138,74 @@ def _generate_report(project_id, template_path, data_file_path):
                 if "source_sheet" in chart_meta:
                     wb = openpyxl.load_workbook(data_file_path, data_only=True)
                     sheet = wb[chart_meta["source_sheet"]]
+                    
+                    # Validate chart configuration before extraction
+                    def validate_chart_config(config):
+                        """Validate chart configuration for dimension consistency"""
+                        if "series" in config and isinstance(config["series"], dict):
+                            series_config = config["series"]
+                            x_axis_range = series_config.get("x_axis", "")
+                            
+                            if x_axis_range and isinstance(x_axis_range, str) and ":" in x_axis_range:
+                                # Parse x_axis range to get length
+                                try:
+                                    start_cell, end_cell = x_axis_range.split(":")
+                                    start_col, start_row = re.match(r"([A-Z]+)(\d+)", start_cell).groups()
+                                    end_col, end_row = re.match(r"([A-Z]+)(\d+)", end_cell).groups()
+                                    
+                                    if start_col == end_col:  # Same column
+                                        x_length = int(end_row) - int(start_row) + 1
+                                        current_app.logger.info(f"🔍 X-axis range {x_axis_range} has {x_length} cells")
+                                        
+                                        # Check each series data
+                                        series_data = series_config.get("data", [])
+                                        for i, series in enumerate(series_data):
+                                            series_name = series.get("name", f"Series {i+1}")
+                                            values_range = series.get("values", "")
+                                            
+                                            if values_range and isinstance(values_range, str) and ":" in values_range:
+                                                try:
+                                                    start_cell, end_cell = values_range.split(":")
+                                                    start_col, start_row = re.match(r"([A-Z]+)(\d+)", start_cell).groups()
+                                                    end_col, end_row = re.match(r"([A-Z]+)(\d+)", end_cell).groups()
+                                                    
+                                                    if start_col == end_col:  # Same column
+                                                        y_length = int(end_row) - int(start_row) + 1
+                                                        current_app.logger.info(f"📊 Series '{series_name}' range {values_range} has {y_length} cells")
+                                                        
+                                                        if x_length != y_length:
+                                                            current_app.logger.warning(f"⚠️ Dimension mismatch detected: x_axis={x_length}, {series_name}={y_length}")
+                                                            
+                                                            # Fix by adjusting the shorter range
+                                                            if x_length > y_length:
+                                                                # Extend y_values range
+                                                                new_end_row = int(start_row) + x_length - 1
+                                                                new_end_cell = f"{start_col}{new_end_row}"
+                                                                series["values"] = f"{start_cell}:{new_end_cell}"
+                                                                current_app.logger.info(f"🔧 Extended {series_name} range to {series['values']}")
+                                                            else:
+                                                                # Truncate x_axis range
+                                                                new_end_row = int(start_row) + y_length - 1
+                                                                new_end_cell = f"{start_col}{new_end_row}"
+                                                                series_config["x_axis"] = f"{start_cell}:{new_end_cell}"
+                                                                current_app.logger.info(f"🔧 Truncated x_axis range to {series_config['x_axis']}")
+                                                                break  # Only need to fix once
+                                                except Exception as e:
+                                                    current_app.logger.error(f"❌ Error parsing values range {values_range}: {e}")
+                                except Exception as e:
+                                    current_app.logger.error(f"❌ Error parsing x_axis range {x_axis_range}: {e}")
+                    
+                    # Validate chart configuration
+                    validate_chart_config(chart_meta)
+                    
                     # Extract cell ranges from both chart_meta and series_meta
                     extract_cell_ranges(chart_meta, sheet)
                     extract_cell_ranges(series_meta, sheet)
                     wb.close()
+                    
+                    # Log the extracted data for debugging
+                    current_app.logger.info(f"🔍 Chart meta after extraction: {chart_meta}")
+                    current_app.logger.info(f"🔍 Series meta after extraction: {series_meta}")
                 
                 # Use updated values from series_meta after extraction
                 series_data = series_meta.get("data", [])
@@ -1149,11 +1213,21 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Handle case where data is directly in series object
                     series_data = series_meta.get("series", [])
                 
+                # Also check if chart_meta has series data (fallback)
+                if not series_data and "series" in chart_meta:
+                    series_data = chart_meta.get("series", {}).get("data", [])
+                    if not series_data:
+                        series_data = chart_meta.get("series", [])
+                
                 # Extract x_values from the correct location
                 x_values = series_meta.get("x_axis", [])
                 if not x_values and "series" in series_meta:
                     # Try to get x_axis from the series object
                     x_values = series_meta.get("series", {}).get("x_axis", [])
+                
+                # If still no x_values, try to get from chart_meta
+                if not x_values and "series" in chart_meta:
+                    x_values = chart_meta.get("series", {}).get("x_axis", [])
                 
                 # If still no x_values, try to get from the first series data item
                 if not x_values and series_data and len(series_data) > 0:
@@ -1164,6 +1238,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Also check if there's a separate x_axis in the series object
                     elif "series" in series_meta and isinstance(series_meta["series"], dict):
                         x_values = series_meta["series"].get("x_axis", [])
+                    elif "series" in chart_meta and isinstance(chart_meta["series"], dict):
+                        x_values = chart_meta["series"].get("x_axis", [])
                 
                 # current_app.logger.info(f"🔍 Extracted x_values: {x_values}")
                 
@@ -1171,6 +1247,45 @@ def _generate_report(project_id, template_path, data_file_path):
                 if not x_values:
                     x_values = []
                     # No x_values found, using empty list as fallback
+                
+                # Validate and fix dimension mismatches
+                def validate_and_fix_dimensions(x_vals, series_data):
+                    """Validate that all series have the same length as x_axis and fix if needed"""
+                    if not x_vals or not series_data:
+                        return x_vals, series_data
+                    
+                    x_length = len(x_vals)
+                    current_app.logger.info(f"🔍 Validating dimensions: x_axis length = {x_length}")
+                    
+                    for i, series in enumerate(series_data):
+                        series_name = series.get("name", f"Series {i+1}")
+                        y_vals = series.get("values", [])
+                        y_length = len(y_vals)
+                        
+                        current_app.logger.info(f"📊 Series '{series_name}': {y_length} values")
+                        
+                        if x_length != y_length:
+                            current_app.logger.warning(f"⚠️ Dimension mismatch in '{series_name}': x_axis={x_length}, y_values={y_length}")
+                            
+                            # Fix by truncating to the minimum length
+                            min_length = min(x_length, y_length)
+                            if min_length > 0:
+                                # Truncate x_axis if it's longer
+                                if x_length > min_length:
+                                    x_vals = x_vals[:min_length]
+                                    current_app.logger.info(f"✂️ Truncated x_axis to {min_length} values")
+                                
+                                # Truncate y_values if they're longer
+                                if y_length > min_length:
+                                    series["values"] = y_vals[:min_length]
+                                    current_app.logger.info(f"✂️ Truncated '{series_name}' values to {min_length}")
+                            else:
+                                current_app.logger.error(f"❌ Cannot fix dimensions: both arrays are empty")
+                    
+                    return x_vals, series_data
+                
+                # Apply dimension validation
+                x_values, series_data = validate_and_fix_dimensions(x_values, series_data)
                 
                 colors = series_meta.get("colors", [])
                 

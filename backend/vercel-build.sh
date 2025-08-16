@@ -1,19 +1,12 @@
 #!/bin/bash
 
-# Clean up any existing cache
-rm -rf __pycache__
-rm -rf .pytest_cache
-rm -rf .coverage
+# Disable Python bytecode generation
+export PYTHONDONTWRITEBYTECODE=1
 
-# Remove test files
-rm -f test_*.py
+# Install Python dependencies
+pip install -r requirements.txt
 
-# Remove documentation
-rm -f *.md
+# Create a simple WSGI entry point
+echo "from app import create_app; app = create_app()" > vercel_app.py
 
-# Remove any large data files
-find . -name "*.csv" -delete
-find . -name "*.xlsx" -delete
-find . -name "*.xls" -delete
-
-echo "Build optimization completed" 
+echo "Build completed successfully!" 

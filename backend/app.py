@@ -1,3 +1,9 @@
+import sys
+import os
+
+# Disable Python bytecode generation to prevent __pycache__ files
+sys.dont_write_bytecode = True
+
 from flask import Flask, send_from_directory, jsonify, current_app
 import re
 try:
