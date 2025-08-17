@@ -27,7 +27,7 @@ import re
 
 # Files are now stored in database, no upload folder needed
 
-ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'xlsx', 'docx'}
+ALLOWED_EXTENSIONS = {'txt', 'pdf', 'png', 'jpg', 'jpeg', 'gif', 'csv', 'xlsx', 'docx', 'doc'}
 ALLOWED_REPORT_EXTENSIONS = {'csv', 'xlsx'}
 
 projects_bp = Blueprint('projects', __name__)
@@ -37,6 +37,41 @@ def allowed_file(filename):
 
 def allowed_report_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_REPORT_EXTENSIONS
+
+def validate_excel_structure(file_path):
+    """Validate that an Excel file has the required structure for report generation"""
+    try:
+        df = pd.read_excel(file_path, sheet_name=0, keep_default_na=False)
+        df.columns = df.columns.str.strip().str.replace(" ", "_").str.replace("__", "_")
+        
+        # Check required columns
+        required_columns = ["Text_Tag", "Text", "Chart_Tag", "Chart_Attributes", "Chart_Type"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        
+        if missing_columns:
+            return False, f"Missing columns: {missing_columns}. Available: {list(df.columns)}"
+        
+        # Check if there's any data
+        if df.empty:
+            return False, "Excel file is empty"
+        
+        # Check for required global metadata
+        has_global_metadata = False
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if col_lower in ['country', 'report_name', 'report_code', 'currency']:
+                # Check if any row has non-empty values for these columns
+                if df[col].notna().any() and (df[col].astype(str).str.strip() != '').any():
+                    has_global_metadata = True
+                    break
+        
+        if not has_global_metadata:
+            return False, "No global metadata found (country, report_name, report_code, currency)"
+        
+        return True, "Valid structure"
+        
+    except Exception as e:
+        return False, f"Error reading Excel file: {str(e)}"
 
 def extract_report_info_from_excel(excel_path):
     """Extract Report_Name and Report_Code from Excel file"""
@@ -261,6 +296,9 @@ def _generate_report(project_id, template_path, data_file_path):
         
         df.columns = df.columns.str.strip().str.replace(" ", "_").str.replace("__", "_")
         
+        current_app.logger.info(f"📊 Excel file loaded successfully. Shape: {df.shape}")
+        current_app.logger.info(f"📊 Columns after cleaning: {list(df.columns)}")
+        
         # Log the raw data to see what pandas is reading
         # Excel data loaded successfully
 
@@ -271,6 +309,7 @@ def _generate_report(project_id, template_path, data_file_path):
         missing_columns = [col for col in required_columns if col not in df.columns]
         if missing_columns:
             current_app.logger.error(f"❌ Missing required columns: {missing_columns}")
+            current_app.logger.error(f"❌ Available columns: {list(df.columns)}")
             raise ValueError(f"Excel file missing required columns: {missing_columns}")
 
         text_map = {str(k).strip().lower(): str(v).strip() for k, v in zip(df["Text_Tag"], df["Text"]) if pd.notna(k) and pd.notna(v)}
@@ -305,9 +344,10 @@ def _generate_report(project_id, template_path, data_file_path):
         required_global_metadata = ['country', 'report_name', 'report_code', 'currency']
         missing_metadata = [key for key in required_global_metadata if key not in flat_data_map]
         if missing_metadata:
-            current_app.logger.error(f"❌ MISSING: {missing_metadata}")
+            current_app.logger.error(f"❌ MISSING GLOBAL METADATA: {missing_metadata}")
+            current_app.logger.error(f"❌ FOUND METADATA: {flat_data_map}")
         else:
-            current_app.logger.info(f"✅ DATA LOADED: {flat_data_map}")
+            current_app.logger.info(f"✅ ALL GLOBAL METADATA FOUND: {flat_data_map}")
         
         # Second pass: Process chart-specific data from rows with chart tags
         for _, row in df.iterrows():
@@ -5048,6 +5088,9 @@ def upload_zip_and_generate_reports(project_id):
     zip_file = request.files['zip_file']
     if not zip_file.filename.endswith('.zip'):
         return jsonify({'error': 'Only .zip files are allowed'}), 400
+    
+    if zip_file.filename == '':
+        return jsonify({'error': 'No ZIP file selected'}), 400
 
     # Clear any existing errors for this project before starting new generation
     if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
@@ -5061,11 +5104,32 @@ def upload_zip_and_generate_reports(project_id):
     # Save and extract ZIP
     zip_path = os.path.join(temp_dir, secure_filename(zip_file.filename))
     zip_file.save(zip_path)
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        zip_ref.extractall(extracted_dir)
+    current_app.logger.info(f"ZIP file saved: {zip_path}")
+    
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            # Test if ZIP is valid
+            zip_ref.testzip()
+            zip_ref.extractall(extracted_dir)
+            current_app.logger.info(f"ZIP extracted to: {extracted_dir}")
+            current_app.logger.info(f"ZIP contents: {zip_ref.namelist()}")
+    except zipfile.BadZipFile:
+        current_app.logger.error(f"❌ Corrupted ZIP file: {zip_file.filename}")
+        shutil.rmtree(temp_dir)
+        return jsonify({'error': 'The uploaded ZIP file is corrupted or invalid'}), 400
+    except Exception as e:
+        current_app.logger.error(f"❌ Error extracting ZIP: {e}")
+        shutil.rmtree(temp_dir)
+        return jsonify({'error': f'Error extracting ZIP file: {str(e)}'}), 500
 
-    # Find all Excel files
-    excel_files = [os.path.join(extracted_dir, f) for f in os.listdir(extracted_dir) if f.endswith('.xlsx') or f.endswith('.xls')]
+    # Find all Excel files (including in subdirectories)
+    excel_files = []
+    for root, dirs, files in os.walk(extracted_dir):
+        for file in files:
+            if file.endswith('.xlsx') or file.endswith('.xls'):
+                excel_files.append(os.path.join(root, file))
+    
+    current_app.logger.info(f"Found {len(excel_files)} Excel files in ZIP: {[os.path.basename(f) for f in excel_files]}")
 
     # Prepare temporary output folders
     output_folder_name = os.path.join(temp_dir, 'reports_by_name')
@@ -5075,13 +5139,33 @@ def upload_zip_and_generate_reports(project_id):
 
     generated_files = []
     total_files = len(excel_files)
+    
+    if total_files == 0:
+        current_app.logger.error(f"❌ No Excel files found in ZIP: {zip_file.filename}")
+        # Clean up temp directory
+        shutil.rmtree(temp_dir)
+        return jsonify({'error': 'No Excel files (.xlsx or .xls) found in the uploaded ZIP file'}), 400
+    
     current_app.logger.info(f"Starting batch processing of {total_files} Excel files")
     
     for idx, excel_path in enumerate(excel_files, 1):
-        # Extract report name and code from Excel file
-        report_name, report_code = extract_report_info_from_excel(excel_path)
+        current_app.logger.info(f"🔍 Starting to process file {idx}/{total_files}: {os.path.basename(excel_path)}")
         
-        current_app.logger.info(f"Processing file {idx}/{total_files}: {report_name} (Code: {report_code})")
+        # Validate Excel structure first
+        is_valid, validation_message = validate_excel_structure(excel_path)
+        if not is_valid:
+            current_app.logger.error(f"❌ Invalid Excel structure in {os.path.basename(excel_path)}: {validation_message}")
+            continue
+        
+        current_app.logger.info(f"✅ Excel structure validated for {os.path.basename(excel_path)}")
+        
+        # Extract report name and code from Excel file
+        try:
+            report_name, report_code = extract_report_info_from_excel(excel_path)
+            current_app.logger.info(f"📋 Extracted info: {report_name} (Code: {report_code})")
+        except Exception as e:
+            current_app.logger.error(f"❌ Failed to extract report info from {os.path.basename(excel_path)}: {e}")
+            continue
 
         # Generate report
         project = current_app.mongo.db.projects.find_one({'_id': ObjectId(project_id)})
@@ -5112,22 +5196,36 @@ def upload_zip_and_generate_reports(project_id):
         with open(temp_template_path, 'wb') as f:
             f.write(template_file_content)
         
-        output_path = _generate_report(f"{project_id}_{idx}", temp_template_path, excel_path)
-        
-        # Clean up temporary template
-        shutil.rmtree(temp_template_dir)
-        if output_path:
-            # Save in both folders with proper naming
-            name_file_path = os.path.join(output_folder_name, f"{report_name}.docx")
-            code_file_path = os.path.join(output_folder_code, f"{report_code}.docx")
+        try:
+            output_path = _generate_report(f"{project_id}_{idx}", temp_template_path, excel_path)
             
-            shutil.copy(output_path, name_file_path)
-            shutil.copy(output_path, code_file_path)
+            # Clean up temporary template
+            shutil.rmtree(temp_template_dir)
             
-            generated_files.append({'name': report_name, 'code': report_code})
-            current_app.logger.info(f"✅ Successfully generated report {idx}/{total_files}: {report_name} -> {report_code}")
-        else:
-            current_app.logger.error(f"❌ Failed to generate report {idx}/{total_files}: {report_name}")
+            if output_path:
+                # Save in both folders with unique naming (add original filename to prevent overwrites)
+                base_filename = os.path.splitext(os.path.basename(excel_path))[0]  # Get original Excel filename without extension
+                name_file_path = os.path.join(output_folder_name, f"{report_name}_{base_filename}.docx")
+                code_file_path = os.path.join(output_folder_code, f"{report_code}_{base_filename}.docx")
+                
+                shutil.copy(output_path, name_file_path)
+                shutil.copy(output_path, code_file_path)
+                
+                generated_files.append({
+                    'name': f"{report_name}_{base_filename}", 
+                    'code': f"{report_code}_{base_filename}",
+                    'original_file': base_filename,
+                    'report_name': report_name,
+                    'report_code': report_code
+                })
+                current_app.logger.info(f"✅ Successfully generated report {idx}/{total_files}: {report_name}_{base_filename} -> {report_code}_{base_filename}")
+            else:
+                current_app.logger.error(f"❌ Failed to generate report {idx}/{total_files}: {report_name}")
+        except Exception as e:
+            current_app.logger.error(f"❌ Error processing file {idx}/{total_files} ({os.path.basename(excel_path)}): {e}")
+            # Clean up temporary template if it exists
+            if os.path.exists(temp_template_dir):
+                shutil.rmtree(temp_template_dir)
         
         # Log progress
         current_app.logger.info(f"Progress: {idx}/{total_files} reports processed")
@@ -5155,6 +5253,13 @@ def upload_zip_and_generate_reports(project_id):
     shutil.rmtree(temp_dir)
 
     current_app.logger.info(f"Batch processing complete. Generated {len(generated_files)} out of {total_files} reports")
+    
+    # Log summary of results
+    if len(generated_files) < total_files:
+        current_app.logger.warning(f"⚠️  {total_files - len(generated_files)} files failed to process")
+        current_app.logger.info(f"✅ Successfully processed: {[f['name'] for f in generated_files]}")
+    else:
+        current_app.logger.info(f"✅ All {total_files} files processed successfully!")
 
     return jsonify({
         'message': f'Generated {len(generated_files)} out of {total_files} reports.',
@@ -5171,55 +5276,114 @@ def update_project(project_id):
     try:
         project_id_obj = ObjectId(project_id)
     except Exception as e:
+        current_app.logger.error(f"Invalid project ID: {project_id}, error: {e}")
         return jsonify({'error': 'Invalid project ID'}), 400
 
-    # Check if project exists and belongs to user
-    project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
-    if not project:
-        return jsonify({'error': 'Project not found or unauthorized'}), 404
+    try:
+        # Check MongoDB connection first
+        try:
+            current_app.mongo.db.command('ping')
+            current_app.logger.info(f"MongoDB connection test successful for project {project_id}")
+        except Exception as e:
+            current_app.logger.error(f"MongoDB connection failed for project {project_id}: {e}")
+            return jsonify({'error': 'Database connection failed'}), 500
 
-    # Get form data
-    name = request.form.get('name')
-    description = request.form.get('description')
-    file = request.files.get('file')
+        # Check if project exists and belongs to user
+        project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
+        if not project:
+            current_app.logger.warning(f"Project not found or unauthorized: {project_id} for user {current_user.get_id()}")
+            return jsonify({'error': 'Project not found or unauthorized'}), 404
 
-    # Validate required fields
-    if not name or not description:
-        return jsonify({'error': 'Missing required fields (name or description)'}), 400
+        # Get form data
+        name = request.form.get('name')
+        description = request.form.get('description')
+        file = request.files.get('file')
 
-    # Prepare update data
-    update_data = {
-        'name': name,
-        'description': description,
-        'updated_at': datetime.utcnow().isoformat()
-    }
+        current_app.logger.info(f"Updating project {project_id}: name='{name}', description='{description}', file={file.filename if file else 'None'}")
 
-    # Handle file upload if provided
-    if file:
-        if not allowed_file(file.filename):
-            return jsonify({'error': 'File type not allowed. Only .doc or .docx files are accepted.'}), 400
-        
-        # Read new file content
-        file_name = secure_filename(file.filename)
-        file_content = file.read()
-        update_data['file_name'] = file_name
-        update_data['file_content'] = file_content
+        # Validate required fields
+        if not name or not description:
+            current_app.logger.warning(f"Missing required fields for project {project_id}: name='{name}', description='{description}'")
+            return jsonify({'error': 'Missing required fields (name or description)'}), 400
 
-    # Update project in database
-    result = current_app.mongo.db.projects.update_one(
-        {'_id': project_id_obj, 'user_id': current_user.get_id()},
-        {'$set': update_data}
-    )
+        # Prepare update data
+        update_data = {
+            'name': name,
+            'description': description,
+            'updated_at': datetime.utcnow().isoformat()
+        }
 
-    if result.modified_count == 0:
-        return jsonify({'error': 'Failed to update project'}), 500
+        # Handle file upload if provided
+        if file:
+            if not allowed_file(file.filename):
+                current_app.logger.warning(f"Invalid file type for project {project_id}: {file.filename}")
+                return jsonify({'error': 'File type not allowed. Only .doc or .docx files are accepted.'}), 400
+            
+            try:
+                # Read new file content
+                file_name = secure_filename(file.filename)
+                file_content = file.read()
+                
+                # Check file size (MongoDB document limit is 16MB)
+                if len(file_content) > 15 * 1024 * 1024:  # 15MB limit to be safe
+                    current_app.logger.error(f"File too large for project {project_id}: {file_name} ({len(file_content)} bytes)")
+                    return jsonify({'error': 'File too large. Maximum file size is 15MB.'}), 400
+                
+                # Validate file content is not empty
+                if len(file_content) == 0:
+                    current_app.logger.error(f"Empty file uploaded for project {project_id}: {file_name}")
+                    return jsonify({'error': 'Uploaded file is empty'}), 400
+                
+                # Store file content as binary data
+                update_data['file_name'] = file_name
+                update_data['file_content'] = file_content
+                current_app.logger.info(f"File uploaded for project {project_id}: {file_name} ({len(file_content)} bytes)")
+                
+                # Verify the file can be read properly (basic validation)
+                try:
+                    if file_name.endswith('.docx'):
+                        # Try to open as a Word document to validate
+                        from io import BytesIO
+                        from docx import Document
+                        doc = Document(BytesIO(file_content))
+                        current_app.logger.info(f"Word document validation successful for {file_name}")
+                except Exception as e:
+                    current_app.logger.warning(f"Word document validation failed for {file_name}: {e}")
+                    # Don't fail the upload, just log the warning
+            except Exception as e:
+                current_app.logger.error(f"Error reading file for project {project_id}: {e}")
+                return jsonify({'error': f'Failed to read uploaded file: {str(e)}'}), 500
 
-    # Get updated project
-    updated_project = current_app.mongo.db.projects.find_one({'_id': project_id_obj})
-    updated_project['id'] = str(updated_project['_id'])
-    del updated_project['_id']
+        # Update project in database
+        try:
+            result = current_app.mongo.db.projects.update_one(
+                {'_id': project_id_obj, 'user_id': current_user.get_id()},
+                {'$set': update_data}
+            )
 
-    return jsonify({'message': 'Project updated successfully', 'project': updated_project})
+            if result.modified_count == 0:
+                current_app.logger.error(f"Failed to update project {project_id} in database")
+                return jsonify({'error': 'Failed to update project'}), 500
+
+            # Get updated project
+            updated_project = current_app.mongo.db.projects.find_one({'_id': project_id_obj})
+            if not updated_project:
+                current_app.logger.error(f"Failed to retrieve updated project {project_id}")
+                return jsonify({'error': 'Failed to retrieve updated project'}), 500
+
+            updated_project['id'] = str(updated_project['_id'])
+            del updated_project['_id']
+
+            current_app.logger.info(f"Successfully updated project {project_id}")
+            return jsonify({'message': 'Project updated successfully', 'project': updated_project})
+
+        except Exception as e:
+            current_app.logger.error(f"Database error updating project {project_id}: {e}")
+            return jsonify({'error': f'Database error occurred: {str(e)}'}), 500
+
+    except Exception as e:
+        current_app.logger.error(f"Unexpected error updating project {project_id}: {e}")
+        return jsonify({'error': 'An unexpected error occurred'}), 500
 
 @projects_bp.route('/api/projects/<project_id>', methods=['DELETE'])
 @login_required
