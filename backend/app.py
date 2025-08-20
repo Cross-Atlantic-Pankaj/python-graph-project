@@ -42,6 +42,7 @@ def create_app():
         app,
         origins=[
             "http://52.66.214.215:3000",
+            "http://13.234.17.200:3000",
             "https://python-graph-project-fall-ss1cuw632.vercel.app",
             "https://python-graph-project-fall.vercel.app",
             "https://python-graph-project.onrender.com",
