@@ -296,8 +296,8 @@ def _generate_report(project_id, template_path, data_file_path):
         
         df.columns = df.columns.str.strip().str.replace(" ", "_").str.replace("__", "_")
         
-        current_app.logger.info(f"📊 Excel file loaded successfully. Shape: {df.shape}")
-        current_app.logger.info(f"📊 Columns after cleaning: {list(df.columns)}")
+        current_app.logger.debug(f"📊 Excel file loaded successfully. Shape: {df.shape}")
+        current_app.logger.debug(f"📊 Columns after cleaning: {list(df.columns)}")
         
         # Log the raw data to see what pandas is reading
         # Excel data loaded successfully
@@ -335,7 +335,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         global_metadata[col_lower] = str(value).strip()
                         # Also add to flat_data_map with the column name as key
                         flat_data_map[col_lower] = str(value).strip()
-                        current_app.logger.info(f"📋 LOADED: {col_lower} = '{str(value).strip()}'")
+                        current_app.logger.debug(f"📋 LOADED: {col_lower} = '{str(value).strip()}'")
                     else:
                         # Empty value - skip silently
                         pass
@@ -347,7 +347,7 @@ def _generate_report(project_id, template_path, data_file_path):
             current_app.logger.error(f"❌ MISSING GLOBAL METADATA: {missing_metadata}")
             current_app.logger.error(f"❌ FOUND METADATA: {flat_data_map}")
         else:
-            current_app.logger.info(f"✅ ALL GLOBAL METADATA FOUND: {flat_data_map}")
+            current_app.logger.debug(f"✅ ALL GLOBAL METADATA FOUND: {flat_data_map}")
         
         # Second pass: Process chart-specific data from rows with chart tags
         for _, row in df.iterrows():
@@ -602,7 +602,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 if key in ['country', 'report_name', 'report_code', 'currency']:
                       if key in flat_data_map:
-                          current_app.logger.info(f"✅ Data available for {placeholder}: {flat_data_map[key]}")
+                          current_app.logger.debug(f"✅ Data available for {placeholder}: {flat_data_map[key]}")
                       else:
                           current_app.logger.error(f"❌ NO DATA AVAILABLE for {placeholder} (key: {key})")
                           current_app.logger.error(f"❌ Available keys: {list(flat_data_map.keys())}")
@@ -627,7 +627,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     zip_ref.extractall(extract_dir)
                 
                 # COMPREHENSIVE HYPERLINK-AWARE XML PROCESSING
-                current_app.logger.info("🔄 COMPREHENSIVE HYPERLINK-AWARE XML PROCESSING...")
+                current_app.logger.debug("🔄 COMPREHENSIVE HYPERLINK-AWARE XML PROCESSING...")
                 
                 # Track all modifications
                 total_files_modified = 0
@@ -645,7 +645,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 if '<country>' in content:
                                     country_count = content.count('<country>')
-                                    current_app.logger.info(f"🔄 FOUND {country_count} <country> TAGS IN {file}")
+                                    current_app.logger.debug(f"🔄 FOUND {country_count} <country> TAGS IN {file}")
                                     
                                     # Replace <country> with Austria
                                     modified_content = content.replace('<country>', 'Austria')
@@ -656,7 +656,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         
                                         total_files_modified += 1
                                         total_replacements += country_count
-                                        current_app.logger.info(f"🔄 XML FILE MODIFIED: {file} ({country_count} replacements)")
+                                        current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({country_count} replacements)")
                                     else:
                                         current_app.logger.warning(f"⚠️ NO CHANGES MADE TO {file} DESPITE FINDING TAGS")
                             except Exception as e:
@@ -677,7 +677,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 if '<country>' in content:
                                     country_count = content.count('<country>')
-                                    current_app.logger.info(f"🔄 FOUND {country_count} <country> TAGS IN HYPERLINK FILE: {file}")
+                                    current_app.logger.debug(f"🔄 FOUND {country_count} <country> TAGS IN HYPERLINK FILE: {file}")
                                     
                                     # Replace <country> with Austria
                                     modified_content = content.replace('<country>', 'Austria')
@@ -688,7 +688,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         
                                         total_files_modified += 1
                                         total_replacements += country_count
-                                        current_app.logger.info(f"🔄 HYPERLINK FILE MODIFIED: {file} ({country_count} replacements)")
+                                        current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({country_count} replacements)")
                             except Exception as e:
                                 current_app.logger.warning(f"⚠️ Error processing hyperlink file {file}: {e}")
                 
@@ -705,7 +705,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 if '<country>' in content:
                                     country_count = content.count('<country>')
-                                    current_app.logger.info(f"🔄 FOUND {country_count} <country> TAGS IN RELS FILE: {file}")
+                                    current_app.logger.debug(f"🔄 FOUND {country_count} <country> TAGS IN RELS FILE: {file}")
                                     
                                     # Replace <country> with Austria
                                     modified_content = content.replace('<country>', 'Austria')
@@ -716,7 +716,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         
                                         total_files_modified += 1
                                         total_replacements += country_count
-                                        current_app.logger.info(f"🔄 RELS FILE MODIFIED: {file} ({country_count} replacements)")
+                                        current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({country_count} replacements)")
                             except Exception as e:
                                 current_app.logger.warning(f"⚠️ Error processing rels file {file}: {e}")
                 
@@ -732,7 +732,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 if '<country>' in content:
                                     country_count = content.count('<country>')
-                                    current_app.logger.info(f"🔄 FOUND {country_count} <country> TAGS IN WORD_RELS FILE: {file}")
+                                    current_app.logger.debug(f"🔄 FOUND {country_count} <country> TAGS IN WORD_RELS FILE: {file}")
                                     
                                     # Replace <country> with Austria
                                     modified_content = content.replace('<country>', 'Austria')
@@ -743,13 +743,13 @@ def _generate_report(project_id, template_path, data_file_path):
                                         
                                         total_files_modified += 1
                                         total_replacements += country_count
-                                        current_app.logger.info(f"🔄 WORD_RELS FILE MODIFIED: {file} ({country_count} replacements)")
+                                        current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({country_count} replacements)")
                             except Exception as e:
                                 current_app.logger.warning(f"⚠️ Error processing word_rels file {file}: {e}")
                 
                 # 5. If any files were modified, recreate the document
                 if total_files_modified > 0:
-                    current_app.logger.info(f"🔄 COMPREHENSIVE XML REPLACEMENT COMPLETED: {total_files_modified} files, {total_replacements} total replacements")
+                    current_app.logger.debug(f"🔄 COMPREHENSIVE XML REPLACEMENT COMPLETED: {total_files_modified} files, {total_replacements} total replacements")
                     
                     # Recreate the document
                     with zipfile.ZipFile(tmp_path, 'w') as zip_ref:
@@ -762,7 +762,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Reload the modified document
                     from docx import Document as NewDocument
                     doc = NewDocument(tmp_path)
-                    current_app.logger.info("🔄 DOCUMENT RELOADED AFTER COMPREHENSIVE XML MODIFICATION")
+                    current_app.logger.debug("🔄 DOCUMENT RELOADED AFTER COMPREHENSIVE XML MODIFICATION")
                     
                     # Cleanup and return - no need for further processing
                     shutil.rmtree(extract_dir)
@@ -846,7 +846,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 dollar_placeholder = f"${{{key}}}"
                                 if dollar_placeholder in modified_text:
                                     modified_text = modified_text.replace(dollar_placeholder, str(value))
-                                    current_app.logger.info(f"🔄 FIELD REPLACED: {dollar_placeholder} -> {value}")
+                                    current_app.logger.debug(f"🔄 FIELD REPLACED: {dollar_placeholder} -> {value}")
                                 
                         # Replace <> placeholders
                         for key, value in flat_data_map.items():
@@ -854,7 +854,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 angle_placeholder = f"<{key}>"
                                 if angle_placeholder in modified_text:
                                     modified_text = modified_text.replace(angle_placeholder, str(value))
-                                    current_app.logger.info(f"🔄 FIELD REPLACED: {angle_placeholder} -> {value}")
+                                    current_app.logger.debug(f"🔄 FIELD REPLACED: {angle_placeholder} -> {value}")
                         
                         # Update field text if modified
                         if modified_text != original_text:
@@ -879,7 +879,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             try:
                                 element.text = original_text.replace('<country>', 'Austria')
                                 xml_replacements += 1
-                                current_app.logger.info(f"🔄 XML TEXT ELEMENT REPLACED: <country> -> Austria")
+                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: <country> -> Austria")
                             except Exception as xml_error:
                                 current_app.logger.warning(f"⚠️ Could not update XML text element: {xml_error}")
                 
@@ -894,7 +894,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 for field in doc.fields:
                     if field.type == 3:  # TOC field type
                         field.update()
-                        current_app.logger.info("🔄 TOC FIELD UPDATED")
+                        current_app.logger.debug("🔄 TOC FIELD UPDATED")
             except Exception as e:
                 # TOC fields update skipped
                 pass
@@ -919,7 +919,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 #current_app.logger.warning(f"⚠️ REMAINING <country> TAG IN TABLE: {cell.text[:100]}...")
                 
                 if remaining_country_tags == 0:
-                    current_app.logger.info("✅ ALL <country> TAGS SUCCESSFULLY REPLACED!")
+                    current_app.logger.debug("✅ ALL <country> TAGS SUCCESSFULLY REPLACED!")
                 else:
                     current_app.logger.warning(f"⚠️ {remaining_country_tags} <country> TAGS STILL REMAIN")
                     
@@ -1066,15 +1066,24 @@ def _generate_report(project_id, template_path, data_file_path):
                 if font_family:
                     # Check if the font is available, otherwise use a fallback
                     import matplotlib.font_manager as fm
-                    available_fonts = [f.name for f in fm.fontManager.ttflist]
-                    if font_family not in available_fonts:
-                        # Use system-appropriate fallback fonts
-                        if font_family.lower() in ['calibri', 'arial']:
-                            font_family = 'Helvetica'  # macOS equivalent
-                        elif font_family.lower() in ['times new roman', 'times']:
-                            font_family = 'Times'  # macOS equivalent
-                        else:
-                            font_family = 'Helvetica'  # Default fallback
+                    # Suppress font warnings by setting log level
+                    import logging
+                    original_level = logging.getLogger('matplotlib.font_manager').level
+                    logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+                    
+                    try:
+                        available_fonts = [f.name for f in fm.fontManager.ttflist]
+                        if font_family not in available_fonts:
+                            # Use system-appropriate fallback fonts
+                            if font_family.lower() in ['calibri', 'arial']:
+                                font_family = 'Helvetica'  # macOS equivalent
+                            elif font_family.lower() in ['times new roman', 'times']:
+                                font_family = 'Times'  # macOS equivalent
+                            else:
+                                font_family = 'Helvetica'  # Default fallback
+                    finally:
+                        # Restore original logging level
+                        logging.getLogger('matplotlib.font_manager').setLevel(original_level)
                 font_size = data_dict.get("font_size") or chart_config.get("font_size") or chart_meta.get("font_size")
                 font_color = data_dict.get("font_color") or chart_config.get("font_color") or chart_meta.get("font_color")
                 legend_position = data_dict.get("legend_position") or chart_config.get("legend_position") or chart_meta.get("legend_position")
@@ -1244,8 +1253,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     wb.close()
                     
                     # Log the extracted data for debugging
-                    current_app.logger.info(f"🔍 Chart meta after extraction: {chart_meta}")
-                    current_app.logger.info(f"🔍 Series meta after extraction: {series_meta}")
+                    current_app.logger.debug(f"🔍 Chart meta after extraction: {chart_meta}")
+                    current_app.logger.debug(f"🔍 Series meta after extraction: {series_meta}")
                 
                 # Use updated values from series_meta after extraction
                 series_data = series_meta.get("data", [])
@@ -1295,14 +1304,14 @@ def _generate_report(project_id, template_path, data_file_path):
                         return x_vals, series_data
                     
                     x_length = len(x_vals)
-                    current_app.logger.info(f"🔍 Validating dimensions: x_axis length = {x_length}")
+                    current_app.logger.debug(f"🔍 Validating dimensions: x_axis length = {x_length}")
                     
                     for i, series in enumerate(series_data):
                         series_name = series.get("name", f"Series {i+1}")
                         y_vals = series.get("values", [])
                         y_length = len(y_vals)
                         
-                        current_app.logger.info(f"📊 Series '{series_name}': {y_length} values")
+                        current_app.logger.debug(f"📊 Series '{series_name}': {y_length} values")
                         
                         if x_length != y_length:
                             current_app.logger.warning(f"⚠️ Dimension mismatch in '{series_name}': x_axis={x_length}, y_values={y_length}")
@@ -1313,12 +1322,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # Truncate x_axis if it's longer
                                 if x_length > min_length:
                                     x_vals = x_vals[:min_length]
-                                    current_app.logger.info(f"✂️ Truncated x_axis to {min_length} values")
+                                    current_app.logger.debug(f"✂️ Truncated x_axis to {min_length} values")
                                 
                                 # Truncate y_values if they're longer
                                 if y_length > min_length:
                                     series["values"] = y_vals[:min_length]
-                                    current_app.logger.info(f"✂️ Truncated '{series_name}' values to {min_length}")
+                                    current_app.logger.debug(f"✂️ Truncated '{series_name}' values to {min_length}")
                             else:
                                 current_app.logger.error(f"❌ Cannot fix dimensions: both arrays are empty")
                     
@@ -3648,7 +3657,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                                         fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
                                                         labelpad=y_labelpad)
                                         
-                                        current_app.logger.info(f"🎈 Bubble Chart Axis Label Distance - X: {x_axis_label_distance} → {x_labelpad}, Y: {y_axis_label_distance} → {y_labelpad}")
+                                        current_app.logger.debug(f"🎈 Bubble Chart Axis Label Distance - X: {x_axis_label_distance} → {x_labelpad}, Y: {y_axis_label_distance} → {y_labelpad}")
                             else:
                                 # Enhanced scatter plot with custom styling
                                 # Extract marker properties from series
@@ -4180,7 +4189,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             y_labelpad = (y_axis_label_distance * 10) if y_axis_label_distance is not None else 50.0
                             
                             # Debug logging
-                            current_app.logger.info(f"🔍 Axis Label Distance Debug - X: {x_axis_label_distance} → {x_labelpad}, Y: {y_axis_label_distance} → {y_labelpad}")
+                            current_app.logger.debug(f"🔍 Axis Label Distance Debug - X: {x_axis_label_distance} → {x_labelpad}, Y: {y_axis_label_distance} → {y_labelpad}")
                             
                             ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), 
                                          fontsize=label_fontsize, color=font_color, labelpad=x_labelpad)
@@ -4820,14 +4829,14 @@ def create_project():
 @projects_bp.route('/api/projects/<project_id>/upload_report', methods=['POST'])
 @login_required
 def upload_report(project_id):
-    current_app.logger.info(f"📤 Upload request received for project: {project_id}")
+    current_app.logger.debug(f"📤 Upload request received for project: {project_id}")
     
     if 'report_file' not in request.files:
         current_app.logger.error(f"❌ No report_file in request.files: {list(request.files.keys())}")
         return jsonify({'error': 'No report file provided'}), 400
 
     report_file = request.files['report_file']
-    current_app.logger.info(f"📁 File received: {report_file.filename}")
+    current_app.logger.debug(f"📁 File received: {report_file.filename}")
 
     if report_file.filename == '':
         current_app.logger.error(f"❌ Empty filename")
@@ -4839,7 +4848,7 @@ def upload_report(project_id):
 
     try:
         project_id_obj = ObjectId(project_id)
-        current_app.logger.info(f"✅ Valid project ID: {project_id}")
+        current_app.logger.debug(f"✅ Valid project ID: {project_id}")
     except Exception as e:
         current_app.logger.error(f"❌ Invalid project ID: {project_id}, error: {e}")
         return jsonify({'error': 'Invalid project ID'}), 400
@@ -4849,7 +4858,7 @@ def upload_report(project_id):
         current_app.logger.error(f"❌ Project not found or unauthorized: {project_id}")
         return jsonify({'error': 'Project not found or unauthorized'}), 404
 
-    current_app.logger.info(f"✅ Project found: {project.get('name', 'Unknown')}")
+    current_app.logger.debug(f"✅ Project found: {project.get('name', 'Unknown')}")
 
     # Handle both old (file_path) and new (file_name/file_content) project formats
     template_file_name = project.get('file_name')
@@ -4875,7 +4884,7 @@ def upload_report(project_id):
                             'file_content': template_file_content
                         }}
                     )
-                    current_app.logger.info(f"🔄 Migrated project from old format to new format")
+                    current_app.logger.debug(f"🔄 Migrated project from old format to new format")
                 except Exception as e:
                     current_app.logger.error(f"❌ Failed to migrate old project format: {e}")
                     return jsonify({'error': 'Failed to load template file. Please re-upload the template.'}), 400
@@ -4886,14 +4895,14 @@ def upload_report(project_id):
             current_app.logger.error(f"❌ No template file found in project")
             return jsonify({'error': 'Word template file not found for this project. Please upload it during project creation.'}), 400
     
-    current_app.logger.info(f"📄 Template file name: {template_file_name}")
+    current_app.logger.debug(f"📄 Template file name: {template_file_name}")
     
     # Create temporary file from database content
     temp_template_dir = tempfile.mkdtemp()
     temp_template_path = os.path.join(temp_template_dir, template_file_name)
     with open(temp_template_path, 'wb') as f:
         f.write(template_file_content)
-    current_app.logger.info(f"📄 Temporary template created: {temp_template_path}")
+    current_app.logger.debug(f"📄 Temporary template created: {temp_template_path}")
     
     # Save the uploaded report data file temporarily
     report_data_filename = secure_filename(report_file.filename)
@@ -4906,17 +4915,17 @@ def upload_report(project_id):
         current_app.chart_errors[project_id] = {}
 
     # Generate the report
-    current_app.logger.info(f"🔄 Starting report generation...")
+    current_app.logger.debug(f"🔄 Starting report generation...")
     generated_report_path = _generate_report(project_id, temp_template_path, temp_report_data_path)
     
     # Clean up the temporary files and directories
     import shutil
     shutil.rmtree(temp_dir)
     shutil.rmtree(temp_template_dir)
-    current_app.logger.info(f"🧹 Temporary files cleaned up")
+    current_app.logger.debug(f"🧹 Temporary files cleaned up")
 
     if generated_report_path:
-        current_app.logger.info(f"✅ Report generated successfully: {generated_report_path}")
+        current_app.logger.debug(f"✅ Report generated successfully: {generated_report_path}")
         # Update project with generated report path
         current_app.mongo.db.projects.update_one(
             {'_id': project_id_obj},

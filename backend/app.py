@@ -1,8 +1,26 @@
 import sys
 import os
+import logging
 
 # Disable Python bytecode generation to prevent __pycache__ files
 sys.dont_write_bytecode = True
+
+# Configure logging to reduce verbose output
+logging.basicConfig(
+    level=logging.WARNING,  # Change from INFO to WARNING to reduce verbosity
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+
+# Suppress matplotlib font warnings
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+
+# Suppress matplotlib font manager warnings
+try:
+    import matplotlib
+    matplotlib.set_loglevel('error')  # Only show errors, not warnings
+except ImportError:
+    pass
 
 from flask import Flask, send_from_directory, jsonify, current_app
 import re
@@ -31,6 +49,11 @@ login_manager = LoginManager()
 
 def create_app():
     app = Flask(__name__, static_folder='../frontend-react/build', static_url_path='')
+    
+    # Configure app logging
+    if not app.debug:
+        app.logger.setLevel(logging.WARNING)
+    
     # Load MONGO_URI from environment variable
     app.config["MONGO_URI"] = os.environ["MONGO_URI"]
     app.config['SECRET_KEY'] = 'your-secret-key-here'
