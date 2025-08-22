@@ -282,7 +282,10 @@ def _generate_report(project_id, template_path, data_file_path):
     from docx.shared import Inches
     import re
     import os
+    import gc  # Add garbage collection
 
+    # Force matplotlib to use non-interactive backend to reduce memory usage
+    plt.switch_backend('Agg')
     plt.style.use('ggplot')  # 👈 Apply a cleaner visual style
 
     try:
@@ -969,9 +972,13 @@ def _generate_report(project_id, template_path, data_file_path):
             import json
             import re
             import warnings
+            import gc
             
             # Suppress Matplotlib warnings
             warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
+            
+            # Force matplotlib to use non-interactive backend
+            plt.switch_backend('Agg')
 
             try:
                 chart_tag_lower = chart_tag.lower()
@@ -4594,7 +4601,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         pass
                     else:
                         # current_app.logger.debug(f"Saved Matplotlib chart without legend")
-                        plt.close(fig_mpl)
+                        pass
+                    
+                    # ALWAYS close the figure to prevent memory leaks
+                    plt.close(fig_mpl)
+                    plt.close('all')  # Close all figures
+                    gc.collect()  # Force garbage collection
 
                 return tmpfile.name
 
@@ -4656,6 +4668,9 @@ def _generate_report(project_id, template_path, data_file_path):
                     "timestamp": datetime.utcnow().isoformat()
                 }
                 
+                # Clean up any remaining matplotlib figures
+                plt.close('all')
+                gc.collect()
                 return None
 
         # Insert charts into paragraphs
@@ -4693,6 +4708,10 @@ def _generate_report(project_id, template_path, data_file_path):
                                 "tag": tag,
                                 "error": specific_error
                             })
+                        
+                        # Clean up after each chart generation
+                        plt.close('all')
+                        gc.collect()
                     except Exception as e:
                         current_app.logger.error(f"⚠️ Failed to insert chart for tag {tag}: {e}")
                         error_msg = f"[Chart failed: {tag}]"
@@ -5160,6 +5179,10 @@ def upload_zip_and_generate_reports(project_id):
     for idx, excel_path in enumerate(excel_files, 1):
         current_app.logger.info(f"🔍 Starting to process file {idx}/{total_files}: {os.path.basename(excel_path)}")
         
+        # Force garbage collection before processing each file
+        gc.collect()
+        plt.close('all')
+        
         # Validate Excel structure first
         is_valid, validation_message = validate_excel_structure(excel_path)
         if not is_valid:
@@ -5238,6 +5261,10 @@ def upload_zip_and_generate_reports(project_id):
         
         # Log progress
         current_app.logger.info(f"Progress: {idx}/{total_files} reports processed")
+        
+        # Force cleanup after each report
+        gc.collect()
+        plt.close('all')
 
     # Create zip file in temporary location with both folder structures
     zip_output_path = os.path.join(temp_dir, f'batch_reports_{project_id}.zip')
@@ -5260,6 +5287,10 @@ def upload_zip_and_generate_reports(project_id):
     
     # Clean up temp directory
     shutil.rmtree(temp_dir)
+    
+    # Final cleanup after batch processing
+    gc.collect()
+    plt.close('all')
 
     current_app.logger.info(f"Batch processing complete. Generated {len(generated_files)} out of {total_files} reports")
     

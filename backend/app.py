@@ -50,13 +50,17 @@ login_manager = LoginManager()
 def create_app():
     app = Flask(__name__, static_folder='../frontend-react/build', static_url_path='')
     
+    # Load configuration based on environment
+    config_name = os.environ.get('FLASK_ENV', 'production')
+    from config import config
+    app.config.from_object(config[config_name])
+    
     # Configure app logging
     if not app.debug:
         app.logger.setLevel(logging.WARNING)
     
     # Load MONGO_URI from environment variable
     app.config["MONGO_URI"] = os.environ["MONGO_URI"]
-    app.config['SECRET_KEY'] = 'your-secret-key-here'
     # Configure cookies to work over HTTP on AWS. When you move to HTTPS, set
     # SESSION_COOKIE_SECURE=True and SESSION_COOKIE_SAMESITE='None'.
     app.config['SESSION_COOKIE_SECURE'] = False
