@@ -112,11 +112,11 @@ def extract_report_info_from_excel(excel_path):
         # Fallback to filename if not found
         if not report_name:
             report_name = os.path.splitext(os.path.basename(excel_path))[0]
-            #current_app.logger.warning(f"Report_Name not found in {excel_path}, using filename: {report_name}")
+            #pass  # Suppress warning logs: f"Report_Name not found in {excel_path}, using filename: {report_name}")
         
         if not report_code:
             report_code = f"REPORT_{os.path.splitext(os.path.basename(excel_path))[0]}"
-            #current_app.logger.warning(f"Report_Code not found in {excel_path}, using generated code: {report_code}")
+            #pass  # Suppress warning logs: f"Report_Code not found in {excel_path}, using generated code: {report_code}")
         
         current_app.logger.info(f"Extracted from {excel_path}: Report_Name='{report_name}', Report_Code='{report_code}'")
         return report_name, report_code
@@ -586,7 +586,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             all_placeholders_found.add(f"<{match}>")
                             # Found <> placeholder in XML
             except Exception as e:
-                current_app.logger.warning(f"⚠️ Error in additional XML search: {e}")
+                pass  # Suppress warning logs
             
             # current_app.logger.info(f"🔍 Found {len(all_placeholders_found)} unique placeholders: {list(all_placeholders_found)}")
             
@@ -661,9 +661,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                         total_replacements += country_count
                                         current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({country_count} replacements)")
                                     else:
-                                        current_app.logger.warning(f"⚠️ NO CHANGES MADE TO {file} DESPITE FINDING TAGS")
+                                        pass  # Suppress warning logs
                             except Exception as e:
-                                current_app.logger.warning(f"⚠️ Error processing {file}: {e}")
+                                pass  # Suppress warning logs
                 
                 # 2. Special processing for hyperlink-specific files
                 # Special processing for hyperlink files
@@ -693,7 +693,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         total_replacements += country_count
                                         current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({country_count} replacements)")
                             except Exception as e:
-                                current_app.logger.warning(f"⚠️ Error processing hyperlink file {file}: {e}")
+                                pass  # Suppress warning logs
                 
                 # 3. Process _rels files (relationship files that might contain hyperlink data)
                 # Processing relationship files
@@ -721,7 +721,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         total_replacements += country_count
                                         current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({country_count} replacements)")
                             except Exception as e:
-                                current_app.logger.warning(f"⚠️ Error processing rels file {file}: {e}")
+                                pass  # Suppress warning logs
                 
                 # 4. Process word/_rels files (Word-specific relationship files)
                 word_rels_dir = os.path.join(extract_dir, 'word', '_rels')
@@ -748,7 +748,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         total_replacements += country_count
                                         current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({country_count} replacements)")
                             except Exception as e:
-                                current_app.logger.warning(f"⚠️ Error processing word_rels file {file}: {e}")
+                                pass  # Suppress warning logs
                 
                 # 5. If any files were modified, recreate the document
                 if total_files_modified > 0:
@@ -777,11 +777,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Cleanup
                     shutil.rmtree(extract_dir)
                     os.unlink(tmp_path)
-                
-
-                    
             except Exception as e:
-                current_app.logger.warning(f"⚠️ Error processing TOC: {e}")
+                pass  # Suppress warning logs
             
             # Now replace ALL placeholders everywhere they appear
             # Replacing all placeholders everywhere
@@ -834,7 +831,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         for para in shape.text_frame.paragraphs:
                             replace_text_in_paragraph(para)
             except Exception as e:
-                current_app.logger.warning(f"⚠️ Error processing inline shapes: {e}")
+                pass  # Suppress warning logs
             
             # Process Word fields (like table of contents) that might contain placeholders
             try:
@@ -884,12 +881,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                 xml_replacements += 1
                                 current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: <country> -> Austria")
                             except Exception as xml_error:
-                                current_app.logger.warning(f"⚠️ Could not update XML text element: {xml_error}")
+                                pass  # Suppress warning logs
                 
                 # XML processing complete
                 
             except Exception as e:
-                current_app.logger.warning(f"⚠️ Error processing XML elements: {e}")
+                pass  # Suppress warning logs
             
             # Force update Table of Contents by refreshing the document
             try:
@@ -911,7 +908,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 for paragraph in doc.paragraphs:
                     if '<country>' in paragraph.text:
                         remaining_country_tags += 1
-                        #current_app.logger.warning(f"⚠️ REMAINING <country> TAG FOUND: {paragraph.text[:100]}...")
+                        #pass  # Suppress warning logs: f"⚠️ REMAINING <country> TAG FOUND: {paragraph.text[:100]}...")
                 
                 # Check all tables
                 for table in doc.tables:
@@ -919,15 +916,15 @@ def _generate_report(project_id, template_path, data_file_path):
                         for cell in row.cells:
                             if '<country>' in cell.text:
                                 remaining_country_tags += 1
-                                #current_app.logger.warning(f"⚠️ REMAINING <country> TAG IN TABLE: {cell.text[:100]}...")
+                                #pass  # Suppress warning logs: f"⚠️ REMAINING <country> TAG IN TABLE: {cell.text[:100]}...")
                 
                 if remaining_country_tags == 0:
                     current_app.logger.debug("✅ ALL <country> TAGS SUCCESSFULLY REPLACED!")
                 else:
-                    current_app.logger.warning(f"⚠️ {remaining_country_tags} <country> TAGS STILL REMAIN")
+                    pass  # Suppress warning logs
                     
             except Exception as e:
-                current_app.logger.warning(f"⚠️ Error in final verification: {e}")
+                pass  # Suppress warning logs
             
             # Search for any remaining placeholders that might have been missed
             def search_for_remaining_placeholders(element, path=""):
@@ -1230,7 +1227,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                                         current_app.logger.info(f"📊 Series '{series_name}' range {values_range} has {y_length} cells")
                                                         
                                                         if x_length != y_length:
-                                                            current_app.logger.warning(f"⚠️ Dimension mismatch detected: x_axis={x_length}, {series_name}={y_length}")
+                                                            pass  # Suppress warning logs: f"⚠️ Dimension mismatch detected: x_axis={x_length}, {series_name}={y_length}")
                                                             
                                                             # Fix by adjusting the shorter range
                                                             if x_length > y_length:
@@ -1321,7 +1318,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         current_app.logger.debug(f"📊 Series '{series_name}': {y_length} values")
                         
                         if x_length != y_length:
-                            current_app.logger.warning(f"⚠️ Dimension mismatch in '{series_name}': x_axis={x_length}, y_values={y_length}")
+                            pass  # Suppress warning logs: f"⚠️ Dimension mismatch in '{series_name}': x_axis={x_length}, y_values={y_length}")
                             
                             # Fix by truncating to the minimum length
                             min_length = min(x_length, y_length)
@@ -1789,7 +1786,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     try:
                                         heatmap_kwargs["text"] = [[str(cell) for cell in row] for row in series["text"]]
                                     except:
-                                        current_app.logger.warning(f"⚠️ Could not process heatmap text data for {label}")
+                                        pass  # Suppress warning logs: f"⚠️ Could not process heatmap text data for {label}")
                                 
                                 # Handle colorbar settings
                                 if "colorbar" in series:
@@ -1812,7 +1809,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 ))
                         else:
                             # Fallback to scatter if chart type not recognized
-                            #current_app.logger.warning(f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
+                            #pass  # Suppress warning logs: f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
                             fig.add_trace(go.Scatter(**trace_kwargs,
                                 mode='markers',
                                 hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
@@ -1914,7 +1911,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         elif isinstance(secondary_y_axis_min_max, list) and len(secondary_y_axis_min_max) == 2:
                             layout_updates["yaxis2"]["range"] = secondary_y_axis_min_max
                         else:
-                            current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
+                            pass  # Suppress warning logs: f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
                     
                     # Axis tick font size
                     if axis_tick_font_size:
@@ -2711,7 +2708,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     try:
                                         heatmap_kwargs["text"] = [[str(cell) for cell in row] for row in series["text"]]
                                     except:
-                                        current_app.logger.warning(f"⚠️ Could not process heatmap text data for {label}")
+                                        pass  # Suppress warning logs: f"⚠️ Could not process heatmap text data for {label}")
                                 
                                 # Handle colorbar settings
                                 if "colorbar" in series:
@@ -2734,7 +2731,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 ))
                         else:
                             # Fallback to scatter if chart type not recognized
-                            #current_app.logger.warning(f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
+                            #pass  # Suppress warning logs: f"⚠️ Unknown chart type '{series_type}', falling back to scatter")
                             fig.add_trace(go.Scatter(**trace_kwargs,
                                 mode='markers',
                                 hovertemplate=f"<b>{label}</b><br>Category: %{{x}}<br>Value: %{{y}}<extra></extra>"
@@ -2762,7 +2759,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             try:
                                 heatmap_kwargs["text"] = [[str(cell) for cell in row] for row in series["text"]]
                             except:
-                                current_app.logger.warning(f"⚠️ Could not process heatmap text data for {label}")
+                                pass  # Suppress warning logs: f"⚠️ Could not process heatmap text data for {label}")
                         
                         # Handle colorbar settings
                         if "colorbar" in series:
@@ -2874,7 +2871,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         elif isinstance(secondary_y_axis_min_max, list) and len(secondary_y_axis_min_max) == 2:
                             layout_updates["yaxis2"]["range"] = secondary_y_axis_min_max
                         else:
-                            current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
+                            pass  # Suppress warning logs: f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
                     
                     # Axis tick font size
                     if axis_tick_font_size:
@@ -3516,7 +3513,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # Ensure all arrays have the same length
                                 min_length = min(len(x_values), len(y_vals), len(sizes))
                                 if min_length < len(x_values) or min_length < len(y_vals) or min_length < len(sizes):
-                                    #current_app.logger.warning(f"⚠️ Array length mismatch! Truncating to {min_length}")
+                                    #pass  # Suppress warning logs: f"⚠️ Array length mismatch! Truncating to {min_length}")
                                     x_values = x_values[:min_length]
                                     y_vals = y_vals[:min_length]
                                     sizes = sizes[:min_length]
@@ -3994,7 +3991,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             
                             # Ensure we have valid heatmap data
                             if not heatmap_data or len(heatmap_data) == 0:
-                                #current_app.logger.warning(f"⚠️ No heatmap data found in series: {series}")
+                                #pass  # Suppress warning logs: f"⚠️ No heatmap data found in series: {series}")
                                 # Create a default heatmap for testing
                                 heatmap_data = [[1, 0, 1, 1], [1, 1, 1, 0], [0, 1, 1, 1]]
                                 # current_app.logger.debug(f"Using default heatmap data: {heatmap_data}")
@@ -4100,7 +4097,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                         else:
                             # Fallback to scatter for unknown types
-                            #current_app.logger.warning(f"⚠️ Unknown matplotlib chart type '{series_type}', falling back to scatter")
+                            #pass  # Suppress warning logs: f"⚠️ Unknown matplotlib chart type '{series_type}', falling back to scatter")
                             ax1.scatter(x_values, y_vals, label=label, color=color, alpha=0.7)
 
                     # Add data labels to Matplotlib chart if enabled (skip for area charts as they have custom label handling)
@@ -4277,7 +4274,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             elif isinstance(secondary_y_axis_min_max, list) and len(secondary_y_axis_min_max) == 2:
                                 ax2.set_ylim(secondary_y_axis_min_max)
                             else:
-                                current_app.logger.warning(f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
+                                pass  # Suppress warning logs: f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
                         elif is_bubble_chart:
                             # current_app.logger.info(f"🎈 Skipping secondary Y-axis formatting for bubble chart")
                             # Explicitly hide secondary Y-axis for bubble charts
@@ -4349,7 +4346,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     ax1.set_ylim(y_axis_min_max[0], y_axis_min_max[1])
                                     # current_app.logger.debug(f"Applied Y-axis range: {y_axis_min_max[0]} to {y_axis_min_max[1]}")
                             else:
-                                current_app.logger.warning(f"Invalid Y-axis range format: {y_axis_min_max}")
+                                pass  # Suppress warning logs: f"Invalid Y-axis range format: {y_axis_min_max}")
                         
                         # Set title with improved font size
                         ax1.set_title(title, fontsize=title_fontsize, weight='bold', pad=20)
@@ -4565,11 +4562,11 @@ def _generate_report(project_id, template_path, data_file_path):
                     if left_pos >= right_pos:
                         left_pos = 0.1
                         right_pos = 0.9
-                        #current_app.logger.warning(f"Invalid margin: left >= right, using default values")
+                        #pass  # Suppress warning logs: f"Invalid margin: left >= right, using default values")
                     if bottom_pos >= top_pos:
                         bottom_pos = 0.1
                         top_pos = 0.9
-                        #current_app.logger.warning(f"Invalid margin: bottom >= top, using default values")
+                        #pass  # Suppress warning logs: f"Invalid margin: bottom >= top, using default values")
                     
                     # Apply margins using figure padding
                     fig_mpl.subplots_adjust(
@@ -4985,7 +4982,7 @@ def download_report(project_id):
                     if os.path.exists(temp_dir) and not os.listdir(temp_dir):
                         os.rmdir(temp_dir)
             except Exception as e:
-                current_app.logger.warning(f"⚠️ Failed to cleanup temporary report file: {e}")
+                pass  # Suppress warning logs: f"⚠️ Failed to cleanup temporary report file: {e}")
             return response
         
         response.call_on_close(lambda: cleanup_after_response(response))
@@ -5038,7 +5035,7 @@ def download_batch_reports(project_id):
                     os.remove(zip_path)
                     current_app.logger.info(f"Cleaned up batch reports ZIP: {zip_path}")
             except Exception as e:
-                current_app.logger.warning(f"Failed to clean up batch reports ZIP {zip_path}: {e}")
+                pass  # Suppress warning logs: f"Failed to clean up batch reports ZIP {zip_path}: {e}")
             return response
         
         response = send_file(
@@ -5110,6 +5107,9 @@ def clear_project_errors(project_id):
 @projects_bp.route('/api/projects/<project_id>/upload_zip', methods=['POST'])
 @login_required
 def upload_zip_and_generate_reports(project_id):
+    import gc  # Add garbage collection import
+    import matplotlib.pyplot as plt  # Add matplotlib import
+    
     if 'zip_file' not in request.files:
         return jsonify({'error': 'No zip file provided'}), 400
 
@@ -5296,7 +5296,7 @@ def upload_zip_and_generate_reports(project_id):
     
     # Log summary of results
     if len(generated_files) < total_files:
-        current_app.logger.warning(f"⚠️  {total_files - len(generated_files)} files failed to process")
+        pass  # Suppress warning logs: f"⚠️  {total_files - len(generated_files)} files failed to process")
         current_app.logger.info(f"✅ Successfully processed: {[f['name'] for f in generated_files]}")
     else:
         current_app.logger.info(f"✅ All {total_files} files processed successfully!")
@@ -5331,7 +5331,7 @@ def update_project(project_id):
         # Check if project exists and belongs to user
         project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
         if not project:
-            current_app.logger.warning(f"Project not found or unauthorized: {project_id} for user {current_user.get_id()}")
+            pass  # Suppress warning logs: f"Project not found or unauthorized: {project_id} for user {current_user.get_id()}")
             return jsonify({'error': 'Project not found or unauthorized'}), 404
 
         # Get form data
@@ -5343,7 +5343,7 @@ def update_project(project_id):
 
         # Validate required fields
         if not name or not description:
-            current_app.logger.warning(f"Missing required fields for project {project_id}: name='{name}', description='{description}'")
+            pass  # Suppress warning logs: f"Missing required fields for project {project_id}: name='{name}', description='{description}'")
             return jsonify({'error': 'Missing required fields (name or description)'}), 400
 
         # Prepare update data
@@ -5356,7 +5356,7 @@ def update_project(project_id):
         # Handle file upload if provided
         if file:
             if not allowed_file(file.filename):
-                current_app.logger.warning(f"Invalid file type for project {project_id}: {file.filename}")
+                pass  # Suppress warning logs: f"Invalid file type for project {project_id}: {file.filename}")
                 return jsonify({'error': 'File type not allowed. Only .doc or .docx files are accepted.'}), 400
             
             try:
@@ -5388,7 +5388,7 @@ def update_project(project_id):
                         doc = Document(BytesIO(file_content))
                         current_app.logger.info(f"Word document validation successful for {file_name}")
                 except Exception as e:
-                    current_app.logger.warning(f"Word document validation failed for {file_name}: {e}")
+                    pass  # Suppress warning logs: f"Word document validation failed for {file_name}: {e}")
                     # Don't fail the upload, just log the warning
             except Exception as e:
                 current_app.logger.error(f"Error reading file for project {project_id}: {e}")
