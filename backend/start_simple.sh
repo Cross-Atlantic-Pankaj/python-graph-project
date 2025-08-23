@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Start script that properly activates virtual environment
-echo "🚀 Starting Graph Project API with virtual environment..."
+# Simple startup script that avoids parentheses issues
+echo "🚀 Starting Graph Project API..."
 
 # Navigate to the project directory
 cd /home/ubuntu/Python-Graph-Project/backend
@@ -29,15 +29,8 @@ else
     pip install gunicorn
 fi
 
-# Start Gunicorn with increased timeout
-echo "🔧 Starting Gunicorn with 5-minute timeout for batch processing..."
-gunicorn \
-    --bind 0.0.0.0:5001 \
-    --timeout 300 \
-    --graceful-timeout 300 \
-    --workers 2 \
-    --preload \
-    --log-level info \
-    "app:create_app()"
+# Start Gunicorn with quotes around the app parameter
+echo "🔧 Starting Gunicorn with 5-minute timeout..."
+gunicorn --bind 0.0.0.0:5001 --timeout 300 --graceful-timeout 300 --workers 2 --preload --log-level info "app:create_app()"
 
-echo "✅ API started with increased timeout limits!"
+echo "✅ API started successfully!"
