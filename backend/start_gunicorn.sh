@@ -20,3 +20,5 @@ echo "🔧 Starting Gunicorn with 5-minute timeout for batch processing..."
 gunicorn --config gunicorn.conf.py app:create_app()
 
 echo "✅ Graph Project API started successfully!"
+
+

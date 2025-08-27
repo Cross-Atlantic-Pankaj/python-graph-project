@@ -169,9 +169,10 @@ def create_expanded_pie_chart(labels, values, colors, expanded_segment, title, v
     
     return fig
 
-def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, other_colors, title, value_format=""):
+def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, other_colors, title, value_format="", chart_meta=None):
     """
     Create a 'bar of pie' chart using Plotly: pie chart with one segment broken down as a bar chart.
+    Enhanced version with better title handling and layout options.
     """
     # Filter out empty/null values from other_labels and other_values
     filtered_data = []
@@ -188,13 +189,37 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
         # If no valid data, use empty lists
         filtered_labels, filtered_values = [], []
     
+    # Enhanced title handling
+    title_left = chart_meta.get("title_left", title) if chart_meta else title
+    title_right = chart_meta.get("title_right", "Breakdown of 'Other'") if chart_meta else "Breakdown of 'Other'"
+    
+    # Enhanced layout options
+    height = chart_meta.get("height", 500) if chart_meta else 500
+    width = chart_meta.get("width", 900) if chart_meta else 900
+    column_widths = chart_meta.get("column_widths", [0.5, 0.5]) if chart_meta else [0.5, 0.5]
+    
+    # Enhanced styling options
+    font_family = chart_meta.get("font_family", "Arial") if chart_meta else "Arial"
+    font_size = chart_meta.get("font_size", 14) if chart_meta else 14
+    font_color = chart_meta.get("font_color", "#333333") if chart_meta else "#333333"
+    chart_background = chart_meta.get("chart_background", "#FFFFFF") if chart_meta else "#FFFFFF"
+    plot_background = chart_meta.get("plot_background", "#F8F9FA") if chart_meta else "#F8F9FA"
+    
+    # Connector styling
+    connector_style = chart_meta.get("connector", {}) if chart_meta else {}
+    connector_color = connector_style.get("color", "#6B7280")
+    connector_width = connector_style.get("width", 1.3)
+    connector_opacity = connector_style.get("opacity", 0.9)
+    
     fig = make_subplots(
         rows=1, cols=2,
         specs=[[{"type": "pie"}, {"type": "bar"}]],
-        column_widths=[0.5, 0.5],
-        subplot_titles=(title, "Breakdown of 'Other'")
+        column_widths=column_widths,
+        subplot_titles=(title_left, title_right),
+        horizontal_spacing=0.1
     )
-    # Main pie chart
+    
+    # Main pie chart with enhanced styling
     fig.add_trace(go.Pie(
         labels=labels,
         values=values,
@@ -202,7 +227,8 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
         textinfo="percent",
         hoverinfo="label+percent+value",
         pull=[0.1 if l == "Other" else 0 for l in labels],
-        name="Main Pie"
+        name="Main Pie",
+        textfont=dict(family=font_family, size=font_size, color=font_color)
     ), row=1, col=1)
     
     # Bar chart for breakdown (only if we have filtered data)
@@ -215,27 +241,27 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
             # Format the value properly for display - show as XX.X% instead of 0.XXX
             if isinstance(value, (int, float)):
                 if value <= 1.0:  # Likely decimal format (0.11)
-                        display_value = f"{value * 100:.1f}%"
-            else:  # Likely already percentage format (11.0)
-                        display_value = f"{value:.1f}%"
-        else:
-                    # Convert string to float and handle
-                    try:
-                        val = float(value)
-                        if val <= 1.0:
-                            display_value = f"{val * 100:.1f}%"
-                        else:
-                            display_value = f"{val:.1f}%"
-                    except:
-                        display_value = str(value)
+                    display_value = f"{value * 100:.1f}%"
+                else:  # Likely already percentage format (11.0)
+                    display_value = f"{value:.1f}%"
+            else:
+                # Convert string to float and handle
+                try:
+                    val = float(value)
+                    if val <= 1.0:
+                        display_value = f"{val * 100:.1f}%"
+                    else:
+                        display_value = f"{val:.1f}%"
+                except:
+                    display_value = str(value)
             
             # Format the x-axis label as percentage
-        if isinstance(label, (int, float)):
+            if isinstance(label, (int, float)):
                 if label <= 1.0:  # Likely decimal format (0.06)
                     formatted_label = f"{label * 100:.1f}%"
                 else:  # Likely already percentage format (6.0)
                     formatted_label = f"{label:.1f}%"
-        else:
+            else:
                 # Convert string to float and handle
                 try:
                     val = float(label)
@@ -246,21 +272,32 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
                 except:
                     formatted_label = str(label)
             
-        fig.add_trace(go.Bar(
-            x=[formatted_label],  # Use formatted label for x-axis
-            y=[value],  # Single y value for each bar
-            marker_color=bar_color,
-            text=[display_value],
-            textposition="auto",
-            name=f"Breakdown {i+1}",
-            showlegend=False  # Hide individual bar legends
-        ), row=1, col=2)
+            fig.add_trace(go.Bar(
+                x=[formatted_label],  # Use formatted label for x-axis
+                y=[value],  # Single y value for each bar
+                marker_color=bar_color,
+                text=[display_value],
+                textposition="auto",
+                name=f"Breakdown {i+1}",
+                showlegend=False,  # Hide individual bar legends
+                textfont=dict(family=font_family, size=font_size, color=font_color)
+            ), row=1, col=2)
     
+    # Enhanced layout with better styling
     fig.update_layout(
-        title_text=title,
+        title_text="",  # Remove main title since we have subplot titles
         showlegend=False,
-        height=500,
-        width=900
+        height=height,
+        width=width,
+        font=dict(family=font_family, size=font_size, color=font_color),
+        paper_bgcolor=chart_background,
+        plot_bgcolor=plot_background,
+        margin=dict(l=50, r=50, t=80, b=50)
+    )
+    
+    # Update subplot titles with better styling
+    fig.update_annotations(
+        font=dict(family=font_family, size=font_size + 2, color=font_color)
     )
     
     # Update Y-axis formatting for the bar chart to show percentages
@@ -268,6 +305,19 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
         fig.update_yaxes(
             tickformat=".1%",  # Format as percentage with 1 decimal place
             row=1, col=2
+        )
+    
+    # Add connector line between pie and bar chart (if connector is enabled)
+    if connector_style.get("style") == "elbow" and filtered_labels:
+        # Calculate connector line coordinates
+        # This is a simplified connector - you can enhance this for more complex paths
+        fig.add_shape(
+            type="line",
+            x0=0.45, y0=0.5,  # Start from pie chart
+            x1=0.55, y1=0.5,  # End at bar chart
+            line=dict(color=connector_color, width=connector_width),
+            opacity=connector_opacity,
+            xref="paper", yref="paper"
         )
     
     return fig
@@ -1272,27 +1322,31 @@ def _generate_report(project_id, template_path, data_file_path):
                     if not series_data:
                         series_data = chart_meta.get("series", [])
                 
-                # Extract x_values from the correct location
-                x_values = series_meta.get("x_axis", [])
-                if not x_values and "series" in series_meta:
-                    # Try to get x_axis from the series object
-                    x_values = series_meta.get("series", {}).get("x_axis", [])
-                
-                # If still no x_values, try to get from chart_meta
-                if not x_values and "series" in chart_meta:
-                    x_values = chart_meta.get("series", {}).get("x_axis", [])
-                
-                # If still no x_values, try to get from the first series data item
-                if not x_values and series_data and len(series_data) > 0:
-                    # Check if x_axis is in the first series
-                    first_series = series_data[0]
-                    if isinstance(first_series, dict) and "x_axis" in first_series:
-                        x_values = first_series["x_axis"]
-                    # Also check if there's a separate x_axis in the series object
-                    elif "series" in series_meta and isinstance(series_meta["series"], dict):
-                        x_values = series_meta["series"].get("x_axis", [])
-                    elif "series" in chart_meta and isinstance(chart_meta["series"], dict):
-                        x_values = chart_meta["series"].get("x_axis", [])
+                # Extract x_values from the correct location (skip for heatmaps)
+                if chart_type != "heatmap":
+                    x_values = series_meta.get("x_axis", [])
+                    if not x_values and "series" in series_meta:
+                        # Try to get x_axis from the series object
+                        x_values = series_meta.get("series", {}).get("x_axis", [])
+                    
+                    # If still no x_values, try to get from chart_meta
+                    if not x_values and "series" in chart_meta:
+                        x_values = chart_meta.get("series", {}).get("x_axis", [])
+                    
+                    # If still no x_values, try to get from the first series data item
+                    if not x_values and series_data and len(series_data) > 0:
+                        # Check if x_axis is in the first series
+                        first_series = series_data[0]
+                        if isinstance(first_series, dict) and "x_axis" in first_series:
+                            x_values = first_series["x_axis"]
+                        # Also check if there's a separate x_axis in the series object
+                        elif "series" in series_meta and isinstance(series_meta["series"], dict):
+                            x_values = series_meta["series"].get("x_axis", [])
+                        elif "series" in chart_meta and isinstance(chart_meta["series"], dict):
+                            x_values = chart_meta["series"].get("x_axis", [])
+                else:
+                    # For heatmaps, don't use x_axis from series - let the heatmap handle its own axis labels
+                    x_values = []
                 
                 # current_app.logger.info(f"🔍 Extracted x_values: {x_values}")
                 
@@ -1337,8 +1391,9 @@ def _generate_report(project_id, template_path, data_file_path):
                     
                     return x_vals, series_data
                 
-                # Apply dimension validation
-                x_values, series_data = validate_and_fix_dimensions(x_values, series_data)
+                # Apply dimension validation (skip for heatmaps)
+                if chart_type != "heatmap":
+                    x_values, series_data = validate_and_fix_dimensions(x_values, series_data)
                 
                 colors = series_meta.get("colors", [])
                 
@@ -1448,7 +1503,8 @@ def _generate_report(project_id, template_path, data_file_path):
                         colors=colors,
                         other_colors=other_colors if other_colors else colors,
                         title=title,
-                        value_format=value_format
+                        value_format=value_format,
+                        chart_meta=chart_meta
                     )
                 
                 def extract_values_from_range(cell_range):
@@ -3445,18 +3501,34 @@ def _generate_report(project_id, template_path, data_file_path):
                         elif i < len(colors):
                             color = colors[i]
 
-                        y_vals = series.get("values")
-                        value_range = series.get("value_range")
-                        if value_range:
-                            # Check if value_range is already extracted (list) or still a string
-                            if isinstance(value_range, list):
-                                y_vals = value_range
-                            else:
-                                y_vals = extract_values_from_range(value_range)
+                        # Skip regular data processing for heatmaps
+                        if series_type == "heatmap":
+                            # Heatmaps use z data directly, skip y_vals processing
+                            y_vals = []  # Not used for heatmaps
+                            mpl_chart_type = "imshow"
+                        else:
+                            # Regular series processing
+                            y_vals = series.get("values")
+                            value_range = series.get("value_range")
+                            if value_range:
+                                # Check if value_range is already extracted (list) or still a string
+                                if isinstance(value_range, list):
+                                    y_vals = value_range
+                                else:
+                                    y_vals = extract_values_from_range(value_range)
+                            
+                            # Ensure y_vals is not None
+                            if y_vals is None:
+                                y_vals = []
+                                current_app.logger.warning(f"⚠️ y_vals is None for series {label}, using empty list")
+                            
+                            # Ensure x_values is not None
+                            if x_values is None:
+                                x_values = []
+                                current_app.logger.warning(f"⚠️ x_values is None for series {label}, using empty list")
 
-                        # Generic chart type handling for Matplotlib
-                        
-                        mpl_chart_type = chart_type_mapping_mpl.get(series_type, "scatter")
+                            # Generic chart type handling for Matplotlib
+                            mpl_chart_type = chart_type_mapping_mpl.get(series_type, "scatter")
                         
                         if mpl_chart_type == "bar":
                             # Add bar border parameters
@@ -3507,16 +3579,16 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # Creating bubble chart for series: {label}
                                 
                                 # Get sizes from the series data structure
-                                sizes = series.get("size", [20] * len(y_vals))
+                                sizes = series.get("size", [20] * len(y_vals)) if y_vals else [20]
                                 # Bubble chart data processed
                                 
                                 # Ensure all arrays have the same length
-                                min_length = min(len(x_values), len(y_vals), len(sizes))
-                                if min_length < len(x_values) or min_length < len(y_vals) or min_length < len(sizes):
+                                min_length = min(len(x_values) if x_values else 0, len(y_vals) if y_vals else 0, len(sizes) if sizes else 0)
+                                if min_length > 0 and (min_length < len(x_values) or min_length < len(y_vals) or min_length < len(sizes)):
                                     #pass  # Suppress warning logs: f"⚠️ Array length mismatch! Truncating to {min_length}")
-                                    x_values = x_values[:min_length]
-                                    y_vals = y_vals[:min_length]
-                                    sizes = sizes[:min_length]
+                                    x_values = x_values[:min_length] if x_values else []
+                                    y_vals = y_vals[:min_length] if y_vals else []
+                                    sizes = sizes[:min_length] if sizes else []
                                     if isinstance(color, list):
                                         color = color[:min_length]
                                 
@@ -3996,8 +4068,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                 heatmap_data = [[1, 0, 1, 1], [1, 1, 1, 0], [0, 1, 1, 1]]
                                 # current_app.logger.debug(f"Using default heatmap data: {heatmap_data}")
                             
-                            # Ensure heatmap_data is a 2D array
-                            if isinstance(heatmap_data[0], (int, float)):
+                            # Ensure heatmap_data is a 2D array and not None
+                            if heatmap_data and len(heatmap_data) > 0 and isinstance(heatmap_data[0], (int, float)):
                                 # Flat list - reshape based on x_axis length
                                 cols = len(x_values) if x_values else 4
                                 rows = len(heatmap_data) // cols
@@ -4011,12 +4083,30 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # current_app.logger.debug(f"Cols: {cols}, Rows: {rows}")
                             
                             # Get colorscale from series or use default
-                            colorscale = series.get("colorscale", "RdYlGn")
+                            colorscale = series.get("colorscale", "Blues")
                             # current_app.logger.debug(f"Using colorscale: {colorscale}")
                             
+                            # Create custom colorscale for better contrast like ChatGPT
+                            if colorscale == "Blues":
+                                from matplotlib.colors import LinearSegmentedColormap
+                                # Create a custom blue colorscale with better contrast
+                                colors = ['#E3F2FD', '#2196F3']  # Light blue to dark blue
+                                n_bins = 100
+                                custom_cmap = LinearSegmentedColormap.from_list("custom_blues", colors, N=n_bins)
+                                cmap_to_use = custom_cmap
+                            else:
+                                cmap_to_use = colorscale
+                            
                             # Create heatmap with enhanced styling
-                            im = ax1.imshow(heatmap_data, cmap=colorscale, aspect='auto', 
-                                           interpolation='nearest', alpha=0.8)
+                            # Force 'none' interpolation to avoid internal lines when show_cell_borders is true
+                            show_cell_borders = chart_meta.get("show_cell_borders", False)
+                            if show_cell_borders:
+                                interpolation_method = "none"  # Force none interpolation for clean borders
+                            else:
+                                interpolation_method = chart_meta.get("interpolation", "none")
+                            
+                            im = ax1.imshow(heatmap_data, cmap=cmap_to_use, aspect='auto', 
+                                           interpolation=interpolation_method, alpha=1.0)
                             
                             # Axis labels from config
                             x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
@@ -4034,28 +4124,114 @@ def _generate_report(project_id, template_path, data_file_path):
                                                fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
                                                labelpad=y_labelpad)
                             
-                            # Set axis labels
-                            if x_values:
-                                ax1.set_xticks(range(len(x_values)))
-                                ax1.set_xticklabels(x_values, rotation=0, ha='center')
+                            # Set axis labels with proper validation
+                            if heatmap_data and len(heatmap_data) > 0:
+                                # Get the actual dimensions of the heatmap data
+                                num_rows = len(heatmap_data)
+                                num_cols = len(heatmap_data[0]) if heatmap_data[0] else 0
+                                
+                                # Validate and set X-axis labels
+                                if x_values and len(x_values) > 0:
+                                    # Ensure x_values matches the number of columns
+                                    if len(x_values) == num_cols:
+                                        ax1.set_xticks(range(len(x_values)))
+                                        ax1.set_xticklabels(x_values, rotation=0, ha='center')
+                                    else:
+                                        # Create default x labels if mismatch
+                                        default_x_labels = [f"Col {i+1}" for i in range(num_cols)]
+                                        ax1.set_xticks(range(len(default_x_labels)))
+                                        ax1.set_xticklabels(default_x_labels, rotation=0, ha='center')
+                                        current_app.logger.warning(f"⚠️ X-axis labels count ({len(x_values)}) doesn't match heatmap columns ({num_cols}), using default labels")
+                                else:
+                                    # Create default x labels
+                                    default_x_labels = [f"Col {i+1}" for i in range(num_cols)]
+                                    ax1.set_xticks(range(len(default_x_labels)))
+                                    ax1.set_xticklabels(default_x_labels, rotation=0, ha='center')
+                                
+                                # Validate and set Y-axis labels
+                                y_labels = series.get("y", [])
+                                if not y_labels:
+                                    # Create default y labels based on heatmap rows
+                                    y_labels = [f"Employee {i+1}" for i in range(num_rows)]
+                                
+                                if y_labels and len(y_labels) > 0:
+                                    # Ensure y_labels matches the number of rows
+                                    if len(y_labels) == num_rows:
+                                        ax1.set_yticks(range(len(y_labels)))
+                                        ax1.set_yticklabels(y_labels)
+                                    else:
+                                        # Create default y labels if mismatch
+                                        default_y_labels = [f"Row {i+1}" for i in range(num_rows)]
+                                        ax1.set_yticks(range(len(default_y_labels)))
+                                        ax1.set_yticklabels(default_y_labels)
+                                        current_app.logger.warning(f"⚠️ Y-axis labels count ({len(y_labels)}) doesn't match heatmap rows ({num_rows}), using default labels")
+                                else:
+                                    # Create default y labels
+                                    default_y_labels = [f"Row {i+1}" for i in range(num_rows)]
+                                    ax1.set_yticks(range(len(default_y_labels)))
+                                    ax1.set_yticklabels(default_y_labels)
                             
-                            # Create employee labels (Y-axis) - use series labels if available
-                            y_labels = series.get("y", [])
-                            if not y_labels:
-                                num_employees = len(heatmap_data)
-                                y_labels = [f"Employee {i+1}" for i in range(num_employees)]
+                            # Respect show_gridlines and show_cell_borders for heatmap
+                            show_gridlines = chart_meta.get("show_gridlines", False)
+                            show_cell_borders = chart_meta.get("show_cell_borders", False)
+                            show_secondary_axis = chart_meta.get("show_secondary_axis", False)
                             
-                            ax1.set_yticks(range(len(y_labels)))
-                            ax1.set_yticklabels(y_labels)
-                            
-                            # Respect show_gridlines for heatmap explicitly (override style defaults)
-                            if not chart_meta.get("show_gridlines", False):
+                            if not show_gridlines and not show_cell_borders:
+                                # Completely disable all grid lines and axis lines for clean heatmap
                                 try:
                                     ax1.grid(visible=False, which='both', axis='both')
                                 except TypeError:
                                     # Fallback for older Matplotlib
                                     ax1.grid(False)
                                 ax1.set_axisbelow(True)
+                                
+                                # Remove all axis lines for clean appearance
+                                ax1.spines['top'].set_visible(False)
+                                ax1.spines['right'].set_visible(False)
+                                ax1.spines['bottom'].set_visible(False)
+                                ax1.spines['left'].set_visible(False)
+                                
+                                # Remove tick marks but keep labels
+                                ax1.tick_params(axis='both', which='both', length=0)
+                            elif show_cell_borders:
+                                # Add cell border lines (white lines between cells) but remove internal lines
+                                ax1.set_xticks(np.arange(-0.5, len(heatmap_data[0]), 1), minor=True)
+                                ax1.set_yticks(np.arange(-0.5, len(heatmap_data), 1), minor=True)
+                                ax1.grid(which="minor", color="white", linestyle='-', linewidth=2)
+                                
+                                # Remove all internal tick marks and lines
+                                ax1.tick_params(axis='both', which='major', length=0)
+                                ax1.tick_params(axis='both', which='minor', length=0)
+                                
+                                # Remove axis spines to eliminate internal lines
+                                ax1.spines['top'].set_visible(False)
+                                ax1.spines['right'].set_visible(False)
+                                ax1.spines['bottom'].set_visible(False)
+                                ax1.spines['left'].set_visible(False)
+                                
+                                # Additional aggressive removal of internal lines
+                                ax1.set_xticks([])  # Remove all x ticks
+                                ax1.set_yticks([])  # Remove all y ticks
+                                
+                                # Re-add only the label positions without ticks
+                                ax1.set_xticks(range(len(x_values)) if x_values else range(len(heatmap_data[0])))
+                                ax1.set_yticks(range(len(y_labels)) if y_labels else range(len(heatmap_data)))
+                                
+                                # Set tick labels without tick marks
+                                if x_values and len(x_values) > 0:
+                                    ax1.set_xticklabels(x_values, rotation=0, ha='center')
+                                if y_labels and len(y_labels) > 0:
+                                    ax1.set_yticklabels(y_labels)
+                                
+                                # Remove all tick marks again
+                                ax1.tick_params(axis='both', which='both', length=0, width=0)
+                                
+                                # Disable secondary y-axis to prevent internal lines
+                                if not show_secondary_axis and hasattr(ax1, 'secondary_yaxis'):
+                                    ax1.secondary_yaxis('right').set_visible(False)
+                            elif show_gridlines:
+                                # Add regular grid lines
+                                ax1.grid(True, which='major', color='gray', linestyle='-', linewidth=0.5, alpha=0.3)
                             
                             # Add colorbar if showscale is enabled
                             showscale = series.get("showscale", True)
@@ -4065,24 +4241,28 @@ def _generate_report(project_id, template_path, data_file_path):
                                                     fontsize=chart_meta.get("legend_font_size", 10))
                             
                             # Add text annotations on heatmap cells
-                            for i in range(len(heatmap_data)):
-                                for j in range(len(heatmap_data[0])):
-                                    value = heatmap_data[i][j]
-                                    # Determine text color based on background
-                                    if colorscale == "RdYlGn":
-                                        text_color = 'white' if value > 0.5 else 'black'
-                                    else:
-                                        text_color = 'white' if value == 1 else 'black'
-                                    
-                                    # Show actual value or custom text
-                                    if "text" in series and i < len(series["text"]) and j < len(series["text"][i]):
-                                        cell_text = str(series["text"][i][j])
-                                    else:
-                                        cell_text = str(value)
-                                    
-                                    ax1.text(j, i, cell_text, 
-                                           ha='center', va='center', color=text_color, 
-                                           fontweight='bold', fontsize=10)
+                            if heatmap_data and len(heatmap_data) > 0 and len(heatmap_data[0]) > 0:
+                                for i in range(len(heatmap_data)):
+                                    for j in range(len(heatmap_data[0])):
+                                        value = heatmap_data[i][j]
+                                        # Determine text color based on background
+                                        if colorscale == "Blues":
+                                            # For Blues colorscale, use white text on dark blue, black on light blue
+                                            text_color = 'white' if value == 1 else 'black'
+                                        elif colorscale == "RdYlGn":
+                                            text_color = 'white' if value > 0.5 else 'black'
+                                        else:
+                                            text_color = 'white' if value == 1 else 'black'
+                                        
+                                        # Show actual value or custom text
+                                        if "text" in series and i < len(series["text"]) and j < len(series["text"][i]):
+                                            cell_text = str(series["text"][i][j])
+                                        else:
+                                            cell_text = str(value)
+                                        
+                                        ax1.text(j, i, cell_text, 
+                                               ha='center', va='center', color=text_color, 
+                                               fontweight='bold', fontsize=12)
                             
                             # Set title
                             ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20,
@@ -4113,7 +4293,11 @@ def _generate_report(project_id, template_path, data_file_path):
                                 else:
                                     y_vals = extract_values_from_range(value_range)
                             
-                            if y_vals:
+                            # Ensure y_vals is not None for data labels
+                            if y_vals is None:
+                                y_vals = []
+                            
+                            if y_vals and x_values:
                                 # Determine format to use
                                 format_to_use = value_format if value_format else data_label_format
                                 if not format_to_use:
@@ -4122,7 +4306,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # Add data labels based on chart type
                                 if series_type == "bar":
                                     for j, val in enumerate(y_vals):
-                                        if j < len(x_values):
+                                        if j < len(x_values) if x_values else 0:
                                             # Format the value
                                             try:
                                                 if format_to_use == ".1f":
@@ -4148,7 +4332,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 elif series_type == "line":
                                     for j, val in enumerate(y_vals):
-                                        if j < len(x_values):
+                                        if j < len(x_values) if x_values else 0:
                                             # For line charts, use secondary y-axis format if available
                                             line_format = secondary_y_axis_format if secondary_y_axis_format else format_to_use
                                             if not line_format:
@@ -4213,18 +4397,29 @@ def _generate_report(project_id, template_path, data_file_path):
 
                         # Determine if this is a bubble chart early
                         is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
+                        
+                        # Get secondary y-axis control for scatter charts and area charts
+                        show_secondary_axis = chart_meta.get("show_secondary_axis", True)  # Default to True for backward compatibility
+                        
+                        # AGGRESSIVE: If secondary y-axis is disabled for scatter charts or area charts, remove it immediately
+                        if (chart_type == "scatter" or chart_type == "area") and not show_secondary_axis and 'ax2' in locals() and ax2 is not None:
+                            try:
+                                ax2.remove()  # Remove the axis completely
+                                ax2 = None    # Set to None to prevent further operations
+                            except:
+                                pass  # Ignore errors if removal fails
 
                         # Set axis tick font size and control tick visibility
                         tick_fontsize = axis_tick_font_size or int(title_fontsize * 0.8)  # Improved tick size calculation
                         if axis_tick_font_size:
                             ax1.tick_params(axis='x', labelsize=axis_tick_font_size, colors=font_color)  # Removed rotation
                             ax1.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
-                            if ax2 and not is_bubble_chart:
+                            if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
                                 ax2.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
                         else:
                             ax1.tick_params(axis='x', labelsize=tick_fontsize, colors=font_color)  # Removed rotation
                             ax1.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
-                            if ax2 and not is_bubble_chart:
+                            if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
                                 ax2.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
                         
                         # Tick mark control for Matplotlib
@@ -4239,12 +4434,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                 if not show_y_ticks:
                                     ax1.tick_params(axis='y', length=0)  # Hide tick marks
                                     ax1.set_yticklabels([])  # Hide tick labels
-                                    if ax2 and not is_bubble_chart:
+                                    if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
                                         ax2.tick_params(axis='y', length=0)  # Hide secondary y-axis tick marks
                                         ax2.set_yticklabels([])  # Hide secondary y-axis tick labels
                                 else:
                                     ax1.tick_params(axis='y', length=5)  # Show tick marks
-                                    if ax2 and not is_bubble_chart:
+                                    if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
                                      ax2.tick_params(axis='y', length=5)  # Show secondary y-axis tick marks
                         
                         # Apply X-axis label distance using tick parameters
@@ -4260,7 +4455,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         #     # current_app.logger.debug(f"Applied Y-axis tick padding: {y_axis_label_distance}")
                         
                         # Apply secondary y-axis formatting for Matplotlib
-                        if ax2 and not is_bubble_chart:
+                        if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
                             if secondary_y_axis_format:
                                 from matplotlib.ticker import FuncFormatter
                                 def percentage_formatter(x, pos):
@@ -4281,6 +4476,19 @@ def _generate_report(project_id, template_path, data_file_path):
                             if ax2:
                                 ax2.set_visible(False)
                                 # current_app.logger.info(f"🎈 Secondary Y-axis hidden for bubble chart")
+                        elif (chart_type == "scatter" or chart_type == "area") and not show_secondary_axis:
+                            # Hide secondary Y-axis for scatter charts and area charts when explicitly disabled
+                            if ax2:
+                                ax2.set_visible(False)
+                                # Remove all ticks and labels from secondary y-axis
+                                ax2.set_yticks([])
+                                ax2.set_yticklabels([])
+                                # Hide the spine (axis line)
+                                ax2.spines['right'].set_visible(False)
+                                # Force hide the entire secondary y-axis
+                                ax2.set_ylabel("")  # Remove any label
+                                ax2.set_title("")   # Remove any title
+                                # current_app.logger.info(f"📊 Secondary Y-axis hidden for scatter/area chart")
                         
                         # Gridlines
                         # current_app.logger.debug(f"Gridlines setting: {show_gridlines}")
@@ -4298,11 +4506,11 @@ def _generate_report(project_id, template_path, data_file_path):
                             mapped_linestyle = matplotlib_linestyle_map.get(gridline_style, "--")
                             # Show both horizontal and vertical gridlines
                             ax1.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6, axis='both')
-                            if ax2 and not is_bubble_chart:
+                            if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
                                 ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6, axis='both')
                         else:
                             ax1.grid(False)
-                            if ax2:
+                            if ax2 and (show_secondary_axis or chart_type != "scatter"):
                              ax2.grid(False)
                         
                         # Apply primary y-axis formatting for Matplotlib
@@ -4583,6 +4791,23 @@ def _generate_report(project_id, template_path, data_file_path):
                     fig_mpl.subplots_adjust(bottom=fig_mpl.subplotpars.bottom + 0.15)
                     # current_app.logger.debug("Added extra bottom space for legend")
 
+                # Final check: Hide secondary y-axis for scatter charts if explicitly disabled
+                if chart_type == "scatter" and not show_secondary_axis and 'ax2' in locals() and ax2 is not None:
+                    # AGGRESSIVE: Completely remove the secondary y-axis
+                    try:
+                        ax2.remove()  # Remove the axis completely
+                        ax2 = None    # Set to None to prevent further operations
+                    except:
+                        # Fallback: Hide it if removal fails
+                        ax2.set_visible(False)
+                        ax2.set_yticks([])
+                        ax2.set_yticklabels([])
+                        ax2.spines['right'].set_visible(False)
+                        ax2.set_ylabel("")
+                        ax2.set_title("")
+                        # Force redraw
+                        fig_mpl.canvas.draw()
+                
                 tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
                 # Use different bbox_inches parameter based on legend position
                 if show_legend and legend_position == "bottom":
