@@ -1685,7 +1685,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     label = series.get("name", "Pie Chart")
                     labels = series.get("labels", x_values)
                     values = series.get("values", [])
-                    color = series.get("marker", {}).get("color") if "marker" in series else colors
+                    color = series.get("marker", {}).get("colors") if "marker" in series else colors
                     
                     # Apply value format if specified
                     value_format = chart_meta.get("value_format", "")
@@ -2287,7 +2287,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     trace.textfont["size"] = data_label_font_size
                                 if data_label_color:
                                     trace.textfont["color"] = data_label_color
-                
+
                 # Annotations
                 if annotations:
                     layout_updates["annotations"] = []
@@ -2363,7 +2363,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         series = series_data[0]
                         labels = series.get("labels", x_values)
                         values = series.get("values", [])
-                        color = series.get("marker", {}).get("color") if "marker" in series else colors
+                        color = series.get("marker", {}).get("colors") if "marker" in series else colors
                         marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
                         explode = series.get("pull")
                         opacity = series.get("opacity", chart_meta.get("opacity"))
@@ -2514,7 +2514,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             series = series_data[0]
                             labels = series.get("labels", x_values)
                             values = series.get("values", [])
-                            color = series.get("marker", {}).get("color") if "marker" in series else colors
+                            color = series.get("marker", {}).get("colors") if "marker" in series else colors
                             marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
                             explode = series.get("pull")
                             opacity = series.get("opacity", chart_meta.get("opacity"))
@@ -3463,7 +3463,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     trace.textfont["size"] = data_label_font_size
                                 if data_label_color:
                                     trace.textfont["color"] = data_label_color
-                
+
                 # Annotations
                 if annotations:
                     layout_updates["annotations"] = []
@@ -3539,7 +3539,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         series = series_data[0]
                         labels = series.get("labels", x_values)
                         values = series.get("values", [])
-                        color = series.get("marker", {}).get("color") if "marker" in series else colors
+                        color = series.get("marker", {}).get("colors") if "marker" in series else colors
                         marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
                         explode = series.get("pull")
                         opacity = series.get("opacity", chart_meta.get("opacity"))
@@ -3690,7 +3690,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             series = series_data[0]
                             labels = series.get("labels", x_values)
                             values = series.get("values", [])
-                            color = series.get("marker", {}).get("color") if "marker" in series else colors
+                            color = series.get("marker", {}).get("colors") if "marker" in series else colors
                             marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
                             explode = series.get("pull")
                             opacity = series.get("opacity", chart_meta.get("opacity"))
@@ -4539,14 +4539,11 @@ def _generate_report(project_id, template_path, data_file_path):
                         elif mpl_chart_type == "imshow":
                             # Enhanced heatmap implementation
                             heatmap_data = series.get("z", series.get("values", []))
-                            # current_app.logger.debug(f"Heatmap data found: {heatmap_data}")
                             
                             # Ensure we have valid heatmap data
                             if not heatmap_data or len(heatmap_data) == 0:
-                                #pass  # Suppress warning logs: f"⚠️ No heatmap data found in series: {series}")
                                 # Create a default heatmap for testing
                                 heatmap_data = [[1, 0, 1, 1], [1, 1, 1, 0], [0, 1, 1, 1]]
-                                # current_app.logger.debug(f"Using default heatmap data: {heatmap_data}")
                             
                             # Ensure heatmap_data is a 2D array and not None
                             if heatmap_data and len(heatmap_data) > 0 and isinstance(heatmap_data[0], (int, float)):
