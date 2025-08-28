@@ -12,3 +12,4 @@ pandas>=2.0.0
 plotly>=5.15.0
 lxml>=4.9.0
 psutil>=5.9.0
+squarify>=0.4.3

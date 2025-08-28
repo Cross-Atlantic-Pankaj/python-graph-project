@@ -38,6 +38,38 @@ def allowed_file(filename):
 def allowed_report_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_REPORT_EXTENSIONS
 
+def safe_color(color):
+    """Safely handle color values, returning a fallback if None or invalid"""
+    if color is None:
+        return 'blue'
+    if isinstance(color, str) and color.strip() == '':
+        return 'blue'
+    return color
+
+def safe_color_list(colors):
+    """Safely handle color lists, filtering out None values"""
+    if not colors:
+        return ['blue']
+    if isinstance(colors, list):
+        filtered = [c for c in colors if c is not None and c != '']
+        return filtered if filtered else ['blue']
+    return [safe_color(colors)]
+
+def validate_colors_for_plotly(colors):
+    """Validate colors for Plotly, ensuring no None values"""
+    if not colors:
+        return ['blue']
+    if isinstance(colors, list):
+        # Filter out None, empty strings, and invalid values
+        valid_colors = []
+        for color in colors:
+            if color is not None and color != '' and color != 'None':
+                valid_colors.append(color)
+        return valid_colors if valid_colors else ['blue']
+    elif colors is not None and colors != '' and colors != 'None':
+        return [colors]
+    return ['blue']
+
 def validate_excel_structure(file_path):
     """Validate that an Excel file has the required structure for report generation"""
     try:
@@ -233,55 +265,79 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
     
     # Bar chart for breakdown (only if we have filtered data)
     if filtered_labels and filtered_values:
-        # Create individual bar traces for each data point to avoid stacking
-        for i, (label, value) in enumerate(zip(filtered_labels, filtered_values)):
-            # Use individual colors for each bar
-            bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
-            
-            # Format the value properly for display - show as XX.X% instead of 0.XXX
+        # Check if horizontal bars are requested
+        bar_orientation = chart_meta.get("orientation", "vertical") if chart_meta else "vertical"
+        
+        # Convert values to numeric format for proper stacking
+        numeric_values = []
+        for value in filtered_values:
             if isinstance(value, (int, float)):
                 if value <= 1.0:  # Likely decimal format (0.11)
-                    display_value = f"{value * 100:.1f}%"
+                    numeric_values.append(value * 100)
                 else:  # Likely already percentage format (11.0)
-                    display_value = f"{value:.1f}%"
+                    numeric_values.append(value)
             else:
-                # Convert string to float and handle
                 try:
                     val = float(value)
                     if val <= 1.0:
-                        display_value = f"{val * 100:.1f}%"
+                        numeric_values.append(val * 100)
                     else:
-                        display_value = f"{val:.1f}%"
+                        numeric_values.append(val)
                 except:
-                    display_value = str(value)
-            
-            # Format the x-axis label as percentage
+                    numeric_values.append(0)
+        
+        # Format labels for display
+        formatted_labels = []
+        for label in filtered_labels:
             if isinstance(label, (int, float)):
                 if label <= 1.0:  # Likely decimal format (0.06)
-                    formatted_label = f"{label * 100:.1f}%"
+                    formatted_labels.append(f"{label * 100:.1f}%")
                 else:  # Likely already percentage format (6.0)
-                    formatted_label = f"{label:.1f}%"
+                    formatted_labels.append(f"{label:.1f}%")
             else:
-                # Convert string to float and handle
                 try:
                     val = float(label)
                     if val <= 1.0:
-                        formatted_label = f"{val * 100:.1f}%"
+                        formatted_labels.append(f"{val * 100:.1f}%")
                     else:
-                        formatted_label = f"{val:.1f}%"
+                        formatted_labels.append(f"{val:.1f}%")
                 except:
-                    formatted_label = str(label)
-            
-            fig.add_trace(go.Bar(
-                x=[formatted_label],  # Use formatted label for x-axis
-                y=[value],  # Single y value for each bar
-                marker_color=bar_color,
-                text=[display_value],
-                textposition="auto",
-                name=f"Breakdown {i+1}",
-                showlegend=False,  # Hide individual bar legends
-                textfont=dict(family=font_family, size=font_size, color=font_color)
-            ), row=1, col=2)
+                    formatted_labels.append(str(label))
+        
+        # Create individual horizontal bars (one for each category)
+        if bar_orientation.lower() == "horizontal":
+            # Create individual horizontal bar traces for each data point
+            for i, (label, value) in enumerate(zip(formatted_labels, numeric_values)):
+                bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
+                
+                fig.add_trace(go.Bar(
+                    x=[value],  # Single value for this bar
+                    y=[label],  # Category label
+                    orientation="h",
+                    marker_color=bar_color,
+                    text=[f"{value:.1f}%"],
+                    textposition="auto",
+                    name=f"Breakdown {i+1}",
+                    showlegend=False,
+                    textfont=dict(family=font_family, size=font_size, color=font_color),
+                    hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
+                ), row=1, col=2)
+        else:
+            # Create individual vertical bar traces for each data point
+            for i, (label, value) in enumerate(zip(formatted_labels, numeric_values)):
+                bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
+                
+                fig.add_trace(go.Bar(
+                    x=[label],  # Category label
+                    y=[value],  # Single value for this bar
+                    marker_color=bar_color,
+                    text=[f"{value:.1f}%"],
+                    textposition="auto",
+                    name=f"Breakdown {i+1}",
+                    showlegend=False,
+                    textfont=dict(family=font_family, size=font_size, color=font_color),
+                    hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
+                ), row=1, col=2)
     
     # Enhanced layout with better styling
     fig.update_layout(
@@ -300,12 +356,32 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
         font=dict(family=font_family, size=font_size + 2, color=font_color)
     )
     
-    # Update Y-axis formatting for the bar chart to show percentages
+    # Update axis formatting for the bar chart to show percentages
     if filtered_values and isinstance(filtered_values[0], (int, float)) and filtered_values[0] <= 1.0:
-        fig.update_yaxes(
-            tickformat=".1%",  # Format as percentage with 1 decimal place
-            row=1, col=2
-        )
+        if bar_orientation.lower() == "horizontal":
+            # For horizontal bars, format x-axis (values) as percentages
+            fig.update_xaxes(
+                tickformat=".1f",  # Format as percentage with 1 decimal place (no % symbol since values are already multiplied by 100)
+                title="Revenue (%)",
+                row=1, col=2
+            )
+            # Update y-axis title for horizontal bars
+            fig.update_yaxes(
+                title="Categories",
+                row=1, col=2
+            )
+        else:
+            # For vertical bars, format y-axis (values) as percentages
+            fig.update_yaxes(
+                tickformat=".1f",  # Format as percentage with 1 decimal place (no % symbol since values are already multiplied by 100)
+                title="Revenue (%)",
+                row=1, col=2
+            )
+            # Update x-axis title for vertical bars
+            fig.update_xaxes(
+                title="Categories",
+                row=1, col=2
+            )
     
     # Add connector line between pie and bar chart (if connector is enabled)
     if connector_style.get("style") == "elbow" and filtered_labels:
@@ -1164,6 +1240,28 @@ def _generate_report(project_id, template_path, data_file_path):
                 secondary_y_axis_min_max = data_dict.get("secondary_y_axis_min_max") or chart_config.get("secondary_y_axis_min_max") or chart_meta.get("secondary_y_axis_min_max")
                 disable_secondary_y = data_dict.get("disable_secondary_y") or chart_config.get("disable_secondary_y") or chart_meta.get("disable_secondary_y", False)
                 # current_app.logger.info(f"🔧 disable_secondary_y setting: {disable_secondary_y}")
+                
+                # --- Safe ax2 operation wrapper ---
+                def safe_ax2_operation(operation, *args, **kwargs):
+                    """Safely execute ax2 operations, skipping if ax2 is None or disabled"""
+                    if ax2 is not None and not disable_secondary_y:
+                        try:
+                            return operation(*args, **kwargs)
+                        except Exception as e:
+                            current_app.logger.debug(f"Safe ax2 operation failed: {e}")
+                            return None
+                    return None
+                
+                # --- Global ax2 safety check ---
+                def safe_ax2_text(*args, **kwargs):
+                    """Safely call ax2.text(), skipping if ax2 is None"""
+                    if ax2 is not None:
+                        try:
+                            return ax2.text(*args, **kwargs)
+                        except Exception as e:
+                            current_app.logger.debug(f"ax2.text() failed: {e}")
+                            return None
+                    return None
                 sort_order = data_dict.get("sort_order") or chart_config.get("sort_order") or chart_meta.get("sort_order")
                 data_grouping = data_dict.get("data_grouping") or chart_config.get("data_grouping") or chart_meta.get("data_grouping")
                 annotations = data_dict.get("annotations", []) or chart_config.get("annotations", []) or chart_meta.get("annotations", [])
@@ -1220,18 +1318,32 @@ def _generate_report(project_id, template_path, data_file_path):
                             current_app.logger.error(f"Error extracting range {cell_range}: {e}")
                             return []
 
-                # --- Robust recursive Excel cell range extraction for all chart types and fields ---
+                # --- Robust recursive Excel cell range and single cell extraction for all chart types and fields ---
                 def extract_cell_ranges(obj, sheet):
-                    """Recursively walk through nested dicts/lists and extract cell ranges from strings"""
+                    """Recursively walk through nested dicts/lists and extract cell ranges and single cells from strings"""
                     if isinstance(obj, dict):
                         for k, v in obj.items():
-                            if isinstance(v, str) and re.match(r"^[A-Z]+\d+:[A-Z]+\d+$", v):
-                                try:
-                                    extracted = extract_excel_range(sheet, v)
-                                    obj[k] = extracted
-                                except Exception as e:
-                                    # Failed to extract data from cell range
-                                    pass
+                            if isinstance(v, str):
+                                # Check for cell range pattern (e.g., "A1:B10")
+                                if re.match(r"^[A-Z]+\d+:[A-Z]+\d+$", v):
+                                    try:
+                                        extracted = extract_excel_range(sheet, v)
+                                        obj[k] = extracted
+                                    except Exception as e:
+                                        # Failed to extract data from cell range
+                                        pass
+                                # Check for single cell pattern (e.g., "U13")
+                                elif re.match(r"^[A-Z]+\d+$", v):
+                                    try:
+                                        cell_value = sheet[v].value
+                                        if cell_value is not None:
+                                            obj[k] = cell_value
+                                        else:
+                                            # Keep original value if cell is empty
+                                            pass
+                                    except Exception as e:
+                                        # Failed to extract data from single cell
+                                        pass
                             else:
                                 extract_cell_ranges(v, sheet)
                     elif isinstance(obj, list):
@@ -1391,9 +1503,13 @@ def _generate_report(project_id, template_path, data_file_path):
                     
                     return x_vals, series_data
                 
-                # Apply dimension validation (skip for heatmaps)
-                if chart_type != "heatmap":
+                # Apply dimension validation (skip for heatmaps and treemaps)
+                if chart_type not in ["heatmap", "treemap"]:
                     x_values, series_data = validate_and_fix_dimensions(x_values, series_data)
+                else:
+                    # Debug logging for treemap
+                    if chart_type == "treemap":
+                        current_app.logger.debug(f"Treemap chart detected - x_values: {x_values}, series_data length: {len(series_data) if series_data else 0}")
                 
                 colors = series_meta.get("colors", [])
                 
@@ -1474,8 +1590,28 @@ def _generate_report(project_id, template_path, data_file_path):
                         # Check if all values are between 0-1 (likely percentages in decimal form)
                         if all(isinstance(v, (int, float)) and 0 <= v <= 1 for v in other_values if v is not None):
                             print(f"DEBUG: Converting decimal values to percentages: {other_values}")
-                            other_values = [v * 100 if v is not None else v for v in other_values]
+                            other_values = [v * 100 if v is not None and isinstance(v, (int, float)) else v for v in other_values]
                             print(f"DEBUG: Converted to: {other_values}")
+                        else:
+                            # Handle string values that might be percentages
+                            converted_values = []
+                            for v in other_values:
+                                if v is not None:
+                                    try:
+                                        if isinstance(v, str):
+                                            # Try to convert string to float
+                                            float_val = float(v)
+                                            if 0 <= float_val <= 1:
+                                                converted_values.append(float_val * 100)
+                                            else:
+                                                converted_values.append(float_val)
+                                        else:
+                                            converted_values.append(v)
+                                    except (ValueError, TypeError):
+                                        converted_values.append(v)
+                                else:
+                                    converted_values.append(v)
+                            other_values = converted_values
                     
                     # Check for empty/null values
                     if other_labels and other_values:
@@ -1589,7 +1725,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         
                         # Pie colors
                         if color:
-                            pie_kwargs["marker"] = dict(colors=color) if isinstance(color, list) else dict(colors=[color])
+                            if isinstance(color, list):
+                                safe_colors = [c for c in color if c is not None]
+                                if safe_colors:
+                                    pie_kwargs["marker"] = dict(colors=safe_colors)
+                            elif color is not None:
+                                pie_kwargs["marker"] = dict(colors=[color])
                         
                         # Add pull effect for specific segments if needed
                         if "pull" in chart_meta:
@@ -1856,6 +1997,87 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 fig.add_trace(go.Heatmap(**heatmap_kwargs,
                                     hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Value: %{{z}}<extra></extra>"
+                                ))
+                                
+                            elif series_type == "treemap":
+                                # Treemap specific settings
+                                labels = series.get("labels", [])
+                                values = series.get("values", [])
+                                parents = series.get("parents", [])
+                                text = series.get("text", labels)
+                                
+                                # Ensure all arrays have the same length
+                                min_length = min(len(labels), len(values)) if labels and values else 0
+                                if min_length == 0:
+                                    current_app.logger.error("Empty labels or values for treemap")
+                                    continue
+                                
+                                if len(parents) < min_length:
+                                    parents = parents + [""] * (min_length - len(parents))
+                                if len(text) < min_length:
+                                    text = text + [""] * (min_length - len(text))
+                                
+                                # Truncate arrays to the minimum length
+                                labels = labels[:min_length]
+                                values = values[:min_length]
+                                parents = parents[:min_length]
+                                text = text[:min_length]
+                                
+                                treemap_kwargs = {
+                                    "labels": labels,
+                                    "parents": parents,
+                                    "values": values,
+                                    "ids": series.get("ids", [f"id_{i}" for i in range(min_length)]),
+                                    "name": label,
+                                    "text": text,
+                                    "branchvalues": series.get("branchvalues", "total"),
+                                    "textinfo": series.get("textinfo", "label+value+percent parent"),
+                                    "texttemplate": series.get("texttemplate", "%{label}<br>%{value}"),
+                                    "pathbar": series.get("pathbar", {"visible": True})
+                                }
+                                
+                                # Handle tiling configuration properly for Plotly
+                                tiling_config = series.get("tiling", {})
+                                if tiling_config:
+                                    # Remove invalid 'orientation' property and use valid Plotly tiling properties
+                                    valid_tiling = {}
+                                    if "packing" in tiling_config:
+                                        valid_tiling["packing"] = tiling_config["packing"]
+                                    if "squarifyratio" in tiling_config:
+                                        valid_tiling["squarifyratio"] = tiling_config["squarifyratio"]
+                                    if "pad" in tiling_config:
+                                        valid_tiling["pad"] = tiling_config["pad"]
+                                    if "flip" in tiling_config:
+                                        valid_tiling["flip"] = tiling_config["flip"]
+                                    
+                                    if valid_tiling:
+                                        treemap_kwargs["tiling"] = valid_tiling
+                                
+                                # Handle marker colors
+                                if "marker" in series and isinstance(series["marker"], dict):
+                                    marker_config = series["marker"]
+                                    treemap_kwargs["marker"] = {}
+                                    
+                                    if "colors" in marker_config:
+                                        # Filter out None values from colors
+                                        safe_colors = [c for c in marker_config["colors"] if c is not None]
+                                        if safe_colors:
+                                            treemap_kwargs["marker"]["colors"] = safe_colors
+                                    
+                                    if "line" in marker_config and isinstance(marker_config["line"], dict):
+                                        treemap_kwargs["marker"]["line"] = marker_config["line"]
+                                
+                                # Handle colors from other sources if not in marker
+                                elif color:
+                                    if isinstance(color, list):
+                                        safe_colors = [c for c in color if c is not None]
+                                        if safe_colors:
+                                            treemap_kwargs["marker"] = {"colors": safe_colors}
+                                    elif color is not None:
+                                        treemap_kwargs["marker"] = {"colors": [color]}
+                                
+                                fig.add_trace(go.Treemap(**treemap_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>Label: %{{label}}<br>Value: %{{value}}<br>Parent: %{{parent}}<extra></extra>"
                                 ))
                                 
                             else:
@@ -2167,8 +2389,21 @@ def _generate_report(project_id, template_path, data_file_path):
 
                         # Build autopct based on textinfo/value_format
                         def make_autopct(fmt:str, include_percent:bool, include_value:bool):
+                            # Capture the current values in the closure
+                            current_values = values.copy() if isinstance(values, list) else list(values) if values else []
+                            
                             def _inner(pct):
-                                total = sum(values) if values else 0
+                                # Ensure values are numeric before calculating total
+                                numeric_values = []
+                                for v in current_values:
+                                    if v is not None:
+                                        try:
+                                            numeric_values.append(float(v))
+                                        except (ValueError, TypeError):
+                                            # Skip non-numeric values
+                                            continue
+                                
+                                total = sum(numeric_values) if numeric_values else 0
                                 val = pct * total / 100.0
                                 parts = []
                                 if include_value:
@@ -2178,7 +2413,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         parts.append(f"{val:.1f}")
                                 if include_percent:
                                     parts.append(f"{pct:.1f}%")
-                                return " " .join(parts)
+                                return " ".join(parts)
                             return _inner
 
                         include_label = "label" in (textinfo or "")
@@ -2305,8 +2540,21 @@ def _generate_report(project_id, template_path, data_file_path):
 
                             # Build autopct based on textinfo/value_format
                             def make_autopct(fmt:str, include_percent:bool, include_value:bool):
+                                # Capture the current values in the closure
+                                current_values = values.copy() if isinstance(values, list) else list(values) if values else []
+                                
                                 def _inner(pct):
-                                    total = sum(values) if values else 0
+                                    # Ensure values are numeric before calculating total
+                                    numeric_values = []
+                                    for v in current_values:
+                                        if v is not None:
+                                            try:
+                                                numeric_values.append(float(v))
+                                            except (ValueError, TypeError):
+                                                # Skip non-numeric values
+                                                continue
+                                    
+                                    total = sum(numeric_values) if numeric_values else 0
                                     val = pct * total / 100.0
                                     parts = []
                                     if include_value:
@@ -2316,7 +2564,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                             parts.append(f"{val:.1f}")
                                     if include_percent:
                                         parts.append(f"{pct:.1f}%")
-                                    return " " .join(parts)
+                                    return " ".join(parts)
                                 return _inner
 
                             include_label = "label" in (textinfo or "")
@@ -2470,21 +2718,24 @@ def _generate_report(project_id, template_path, data_file_path):
                         # Format x-axis labels as percentages
                         formatted_x_labels = []
                         for label in filtered_labels:
-                            if isinstance(label, (int, float)):
-                                if label <= 1.0:  # Likely decimal format (0.06)
-                                    formatted_x_labels.append(f"{label * 100:.1f}%")
-                                else:  # Likely already percentage format (6.0)
-                                    formatted_x_labels.append(f"{label:.1f}%")
+                            if label is not None:
+                                if isinstance(label, (int, float)):
+                                    if label <= 1.0:  # Likely decimal format (0.06)
+                                        formatted_x_labels.append(f"{label * 100:.1f}%")
+                                    else:  # Likely already percentage format (6.0)
+                                        formatted_x_labels.append(f"{label:.1f}%")
+                                else:
+                                    # Convert string to float and handle
+                                    try:
+                                        val = float(label)
+                                        if val <= 1.0:
+                                            formatted_x_labels.append(f"{val * 100:.1f}%")
+                                        else:
+                                            formatted_x_labels.append(f"{val:.1f}%")
+                                    except (ValueError, TypeError):
+                                        formatted_x_labels.append(str(label))
                             else:
-                                # Convert string to float and handle
-                                try:
-                                    val = float(label)
-                                    if val <= 1.0:
-                                        formatted_x_labels.append(f"{val * 100:.1f}%")
-                                    else:
-                                        formatted_x_labels.append(f"{val:.1f}%")
-                                except:
-                                    formatted_x_labels.append(str(label))
+                                formatted_x_labels.append("")
                         ax2.set_xticklabels(formatted_x_labels, rotation=0)
                     # Add data labels with proper formatting
                     value_format = chart_meta.get("value_format", ".2f")
@@ -2492,36 +2743,223 @@ def _generate_report(project_id, template_path, data_file_path):
                     data_label_color = chart_meta.get("data_label_color", "#000000")
                     for bar, v in zip(bars, filtered_values):
                         # Format percentage values as XX.X% instead of 0.XXX
-                        if isinstance(v, (int, float)):
-                            if v <= 1.0:  # Likely decimal format (0.11)
-                                formatted_value = f"{v * 100:.1f}%"
-                            else:  # Likely already percentage format (11.0)
-                                formatted_value = f"{v:.1f}%"
-                        else:
-                            # Convert string to float and handle
+                        if v is not None:
+                            if isinstance(v, (int, float)):
+                                if v <= 1.0:  # Likely decimal format (0.11)
+                                    formatted_value = f"{v * 100:.1f}%"
+                                else:  # Likely already percentage format (11.0)
+                                    formatted_value = f"{v:.1f}%"
+                            else:
+                                    # Convert string to float and handle
+                                try:
+                                    val = float(v)
+                                    if val <= 1.0:
+                                        formatted_value = f"{val * 100:.1f}%"
+                                    else:
+                                        formatted_value = f"{val:.1f}%"
+                                except:
+                                    formatted_value = str(v)
+                            ax2.text(bar.get_x() + bar.get_width()/2, v, formatted_value, ha='center', va='bottom', fontweight='bold', fontsize=data_label_font_size, color=data_label_color)
+
+                elif chart_type == "treemap":
+                    # Matplotlib version of treemap
+                    current_app.logger.debug(f"Processing Matplotlib treemap - x_values: {x_values}, series_data: {series_data}")
+                    mpl_figsize = figsize if figsize else (12, 8)
+                    fig_mpl, ax = plt.subplots(figsize=mpl_figsize, dpi=200)
+                    
+                    # Apply background colors to Matplotlib figure
+                    if chart_background:
+                        fig_mpl.patch.set_facecolor(chart_background)
+                    if plot_background:
+                        ax.set_facecolor(plot_background)
+                    
+                    # Extract treemap data from series
+                    if len(series_data) == 1:
+                        series = series_data[0]
+                        labels = series.get("labels", [])
+                        values = series.get("values", [])
+                        parents = series.get("parents", [])
+                        colors = series.get("marker", {}).get("colors", []) if "marker" in series else []
+                        # Filter out None values from colors array
+                        colors = [color for color in colors if color is not None]
+                        
+                        # Validate that we have the required data
+                        if not labels or not values:
+                            current_app.logger.error("Missing required treemap data: labels or values")
+                            ax.text(0.5, 0.5, "Missing treemap data", ha='center', va='center', 
+                                   fontsize=font_size or 14, transform=ax.transAxes)
+                            return None
+                        
+                        # Ensure all arrays have the same length
+                        min_length = min(len(labels), len(values))
+                        if len(parents) < min_length:
+                            parents = parents + [""] * (min_length - len(parents))
+                        
+                        # Truncate arrays to the minimum length
+                        labels = labels[:min_length]
+                        values = values[:min_length]
+                        parents = parents[:min_length]
+                        
+                        # Debug logging
+                        current_app.logger.debug(f"Treemap data lengths - labels: {len(labels)}, values: {len(values)}, parents: {len(parents)}")
+                        current_app.logger.debug(f"Treemap labels: {labels}")
+                        current_app.logger.debug(f"Treemap values: {values}")
+                        
+                        # Create a hierarchical structure for treemap
+                        import squarify
+                        
+                        # Filter out None values and create a flat structure for squarify
+                        valid_data = []
+                        
+                        # Check if arrays are empty
+                        if not labels or not values:
+                            current_app.logger.error("Empty labels or values arrays for treemap")
+                            ax.text(0.5, 0.5, "No data available for treemap", ha='center', va='center', 
+                                   fontsize=font_size or 14, transform=ax.transAxes)
+                            return None
+                        
+                        # Ensure all arrays have the same length before processing
+                        min_length = min(len(labels), len(values), len(parents))
+                        labels = labels[:min_length]
+                        values = values[:min_length]
+                        parents = parents[:min_length]
+                        
+                        # Define a fallback color palette for when colors are missing or None
+                        fallback_colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', 
+                                         '#FF8E8E', '#6ED5D5', '#8EDDDD', '#6BC5E1', '#A8E6CF', '#FFB3B3']
+                        
+                        for i, (label, value, parent) in enumerate(zip(labels, values, parents)):
+                            if value is not None:
+                                try:
+                                    # Convert value to float, handling both string and numeric inputs
+                                    float_value = float(value) if isinstance(value, (int, float, str)) else 0.0
+                                    if float_value > 0:
+                                        # Get color with fallback
+                                        if i < len(colors) and colors[i] is not None:
+                                            color = colors[i]
+                                        else:
+                                            # Use fallback color from palette
+                                            color = fallback_colors[i % len(fallback_colors)]
+                                        
+                                        valid_data.append({
+                                            'label': str(label),
+                                            'value': float_value,
+                                            'parent': str(parent),
+                                            'color': color
+                                        })
+                                except (ValueError, TypeError):
+                                    # Skip invalid values
+                                    continue
+                        
+                        if valid_data:
+                            # Sort by value for better visualization
+                            valid_data.sort(key=lambda x: x['value'], reverse=True)
+                            
+                            # Extract values and labels for squarify
+                            sizes = [item['value'] for item in valid_data]
+                            labels_for_plot = [item['label'] for item in valid_data]
+                            colors_for_plot = [item['color'] for item in valid_data if item['color'] is not None]
+                            
+                            # Validate sizes array
+                            if not sizes or not all(isinstance(s, (int, float)) for s in sizes):
+                                current_app.logger.error("Invalid sizes array for treemap")
+                                ax.text(0.5, 0.5, "Invalid data for treemap", ha='center', va='center', 
+                                       fontsize=font_size or 14, transform=ax.transAxes)
+                                return None
+                            
+                            # Create treemap using squarify
                             try:
-                                val = float(v)
-                                if val <= 1.0:
-                                    formatted_value = f"{val * 100:.1f}%"
+                                current_app.logger.debug(f"Squarify plot - sizes: {sizes}, labels: {labels_for_plot}, colors: {colors_for_plot}")
+                                current_app.logger.debug(f"Squarify plot - sizes length: {len(sizes)}, labels length: {len(labels_for_plot)}, colors length: {len(colors_for_plot) if colors_for_plot else 0}")
+                                
+                                # Final validation to ensure arrays are in sync
+                                if len(sizes) != len(labels_for_plot):
+                                    current_app.logger.error(f"Array length mismatch: sizes={len(sizes)}, labels={len(labels_for_plot)}")
+                                    ax.text(0.5, 0.5, "Data array length mismatch", ha='center', va='center', 
+                                           fontsize=font_size or 14, transform=ax.transAxes)
+                                    return None
+                                
+                                # Only use colors if we have exactly the same number of colors as data points
+                                if colors_for_plot and len(colors_for_plot) == len(sizes) and all(color is not None for color in colors_for_plot):
+                                    squarify.plot(sizes=sizes, label=labels_for_plot, color=colors_for_plot, alpha=0.8, ax=ax)
                                 else:
-                                    formatted_value = f"{val:.1f}%"
-                            except:
-                                formatted_value = str(v)
-                        ax2.text(bar.get_x() + bar.get_width()/2, v, formatted_value, ha='center', va='bottom', fontweight='bold', fontsize=data_label_font_size, color=data_label_color)
+                                    # Use default matplotlib colors
+                                    squarify.plot(sizes=sizes, label=labels_for_plot, alpha=0.8, ax=ax)
+                            except Exception as e:
+                                current_app.logger.error(f"Error creating treemap plot: {e}")
+                                # Fallback to simple text display
+                                ax.text(0.5, 0.5, f"Error creating treemap: {str(e)}", ha='center', va='center', 
+                                       fontsize=font_size or 14, transform=ax.transAxes)
+                                return None
+                            
+                            # Add title
+                            ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
+                            
+                            # Remove axis ticks and labels for cleaner look
+                            ax.set_xticks([])
+                            ax.set_yticks([])
+                            ax.set_xlabel('')
+                            ax.set_ylabel('')
+                            
+                            # Add value labels on rectangles
+                            if chart_meta.get("data_labels", True):
+                                data_label_font_size = chart_meta.get("data_label_font_size", 10)
+                                data_label_color = chart_meta.get("data_label_color", "#000000")
+                                
+                                # Get the rectangles from squarify
+                                try:
+                                    rectangles = squarify.squarify(sizes, 0, 0, 1, 1)
+                                except Exception as e:
+                                    current_app.logger.error(f"Error generating treemap rectangles: {e}")
+                                    # Skip data labels if rectangles can't be generated
+                                    rectangles = []
+                                
+                                # Only process rectangles if we have valid data
+                                if rectangles and len(rectangles) == len(labels_for_plot):
+                                    for rect, label, value in zip(rectangles, labels_for_plot, sizes):
+                                        try:
+                                            # Extract coordinates from dictionary (squarify returns dict, not tuple)
+                                            x = float(rect['x'])
+                                            y = float(rect['y'])
+                                            w = float(rect['dx'])
+                                            h = float(rect['dy'])
+                                            # Add label in the center of each rectangle
+                                            ax.text(x + w/2, y + h/2, f"{label}\n{value}", 
+                                                   ha='center', va='center', 
+                                                   fontsize=data_label_font_size, 
+                                                   color=data_label_color,
+                                                   fontweight='bold',
+                                                   fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
+                                        except (ValueError, TypeError, KeyError) as e:
+                                            # Skip this rectangle if coordinates are invalid
+                                            current_app.logger.warning(f"Skipping treemap rectangle with invalid coordinates: {rect}, error: {e}")
+                                            continue
+                        else:
+                            # No valid data
+                            ax.text(0.5, 0.5, "No data available", ha='center', va='center', 
+                                   fontsize=font_size or 14, transform=ax.transAxes)
 
                 else:
                     # Bar, line, area charts
                     mpl_figsize = figsize if figsize else (10, 6)
                     # current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
                     fig_mpl, ax1 = plt.subplots(figsize=mpl_figsize, dpi=200)
-                    ax2 = ax1.twinx()
+                    
+                    # Only create secondary y-axis if not disabled
+                    ax2 = None
+                    if not disable_secondary_y:
+                        ax2 = ax1.twinx()
                     
                     # Apply background colors to Matplotlib figure
                     if chart_background:
                         fig_mpl.patch.set_facecolor(chart_background)
                     if plot_background:
                         ax1.set_facecolor(plot_background)
-                        ax2.set_facecolor(plot_background)
+                        if ax2:
+                            ax2.set_facecolor(plot_background)
+
+                    # Define colors array for matplotlib section
+                    colors = series_meta.get("colors", [])
 
                     for i, series in enumerate(series_data):
                         label = series.get("name", f"Series {i+1}")
@@ -2538,7 +2976,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             color = series["marker"]["color"]
                         elif bar_colors:
                             color = bar_colors
-                        elif i < len(colors):
+                        elif i < len(colors) and colors[i] is not None:
                             color = colors[i]
 
                         y_vals = series.get("values")
@@ -3127,8 +3565,21 @@ def _generate_report(project_id, template_path, data_file_path):
 
                         # Build autopct based on textinfo/value_format
                         def make_autopct(fmt:str, include_percent:bool, include_value:bool):
+                            # Capture the current values in the closure
+                            current_values = values.copy() if isinstance(values, list) else list(values) if values else []
+                            
                             def _inner(pct):
-                                total = sum(values) if values else 0
+                                # Ensure values are numeric before calculating total
+                                numeric_values = []
+                                for v in current_values:
+                                    if v is not None:
+                                        try:
+                                            numeric_values.append(float(v))
+                                        except (ValueError, TypeError):
+                                            # Skip non-numeric values
+                                            continue
+                                
+                                total = sum(numeric_values) if numeric_values else 0
                                 val = pct * total / 100.0
                                 parts = []
                                 if include_value:
@@ -3138,7 +3589,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         parts.append(f"{val:.1f}")
                                 if include_percent:
                                     parts.append(f"{pct:.1f}%")
-                                return " " .join(parts)
+                                return " ".join(parts)
                             return _inner
 
                         include_label = "label" in (textinfo or "")
@@ -3265,8 +3716,21 @@ def _generate_report(project_id, template_path, data_file_path):
 
                             # Build autopct based on textinfo/value_format
                             def make_autopct(fmt:str, include_percent:bool, include_value:bool):
+                                # Capture the current values in the closure
+                                current_values = values.copy() if isinstance(values, list) else list(values) if values else []
+                                
                                 def _inner(pct):
-                                    total = sum(values) if values else 0
+                                    # Ensure values are numeric before calculating total
+                                    numeric_values = []
+                                    for v in current_values:
+                                        if v is not None:
+                                            try:
+                                                numeric_values.append(float(v))
+                                            except (ValueError, TypeError):
+                                                # Skip non-numeric values
+                                                continue
+                                    
+                                    total = sum(numeric_values) if numeric_values else 0
                                     val = pct * total / 100.0
                                     parts = []
                                     if include_value:
@@ -3276,7 +3740,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                             parts.append(f"{val:.1f}")
                                     if include_percent:
                                         parts.append(f"{pct:.1f}%")
-                                    return " " .join(parts)
+                                    return " ".join(parts)
                                 return _inner
 
                             include_label = "label" in (textinfo or "")
@@ -3430,21 +3894,24 @@ def _generate_report(project_id, template_path, data_file_path):
                         # Format x-axis labels as percentages
                         formatted_x_labels = []
                         for label in filtered_labels:
-                            if isinstance(label, (int, float)):
-                                if label <= 1.0:  # Likely decimal format (0.06)
-                                    formatted_x_labels.append(f"{label * 100:.1f}%")
-                                else:  # Likely already percentage format (6.0)
-                                    formatted_x_labels.append(f"{label:.1f}%")
+                            if label is not None:
+                                if isinstance(label, (int, float)):
+                                    if label <= 1.0:  # Likely decimal format (0.06)
+                                        formatted_x_labels.append(f"{label * 100:.1f}%")
+                                    else:  # Likely already percentage format (6.0)
+                                        formatted_x_labels.append(f"{label:.1f}%")
+                                else:
+                                    # Convert string to float and handle
+                                    try:
+                                        val = float(label)
+                                        if val <= 1.0:
+                                            formatted_x_labels.append(f"{val * 100:.1f}%")
+                                        else:
+                                            formatted_x_labels.append(f"{val:.1f}%")
+                                    except (ValueError, TypeError):
+                                        formatted_x_labels.append(str(label))
                             else:
-                                # Convert string to float and handle
-                                try:
-                                    val = float(label)
-                                    if val <= 1.0:
-                                        formatted_x_labels.append(f"{val * 100:.1f}%")
-                                    else:
-                                        formatted_x_labels.append(f"{val:.1f}%")
-                                except:
-                                    formatted_x_labels.append(str(label))
+                                formatted_x_labels.append("")
                         ax2.set_xticklabels(formatted_x_labels, rotation=0)
                     # Add data labels with proper formatting
                     value_format = chart_meta.get("value_format", ".2f")
@@ -3452,36 +3919,45 @@ def _generate_report(project_id, template_path, data_file_path):
                     data_label_color = chart_meta.get("data_label_color", "#000000")
                     for bar, v in zip(bars, filtered_values):
                         # Format percentage values as XX.X% instead of 0.XXX
-                        if isinstance(v, (int, float)):
-                            if v <= 1.0:  # Likely decimal format (0.11)
-                                formatted_value = f"{v * 100:.1f}%"
-                            else:  # Likely already percentage format (11.0)
-                                formatted_value = f"{v:.1f}%"
-                        else:
-                            # Convert string to float and handle
-                            try:
-                                val = float(v)
-                                if val <= 1.0:
-                                    formatted_value = f"{val * 100:.1f}%"
-                                else:
-                                    formatted_value = f"{val:.1f}%"
-                            except:
-                                formatted_value = str(v)
-                        ax2.text(bar.get_x() + bar.get_width()/2, v, formatted_value, ha='center', va='bottom', fontweight='bold', fontsize=data_label_font_size, color=data_label_color)
+                        if v is not None:
+                            if isinstance(v, (int, float)):
+                                if v <= 1.0:  # Likely decimal format (0.11)
+                                    formatted_value = f"{v * 100:.1f}%"
+                                else:  # Likely already percentage format (11.0)
+                                    formatted_value = f"{v:.1f}%"
+                            else:
+                                    # Convert string to float and handle
+                                try:
+                                    val = float(v)
+                                    if val <= 1.0:
+                                        formatted_value = f"{val * 100:.1f}%"
+                                    else:
+                                        formatted_value = f"{val:.1f}%"
+                                except:
+                                    formatted_value = str(v)
+                            ax2.text(bar.get_x() + bar.get_width()/2, v, formatted_value, ha='center', va='bottom', fontweight='bold', fontsize=data_label_font_size, color=data_label_color)
 
                 else:
                     # Bar, line, area charts
                     mpl_figsize = figsize if figsize else (10, 6)
                     # current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
                     fig_mpl, ax1 = plt.subplots(figsize=mpl_figsize, dpi=200)
-                    ax2 = ax1.twinx()
+                    
+                    # Only create secondary y-axis if not disabled
+                    ax2 = None
+                    if not disable_secondary_y:
+                        ax2 = ax1.twinx()
                     
                     # Apply background colors to Matplotlib figure
                     if chart_background:
                         fig_mpl.patch.set_facecolor(chart_background)
                     if plot_background:
                         ax1.set_facecolor(plot_background)
-                        ax2.set_facecolor(plot_background)
+                        if ax2:
+                            ax2.set_facecolor(plot_background)
+
+                    # Define colors array for matplotlib section
+                    colors = series_meta.get("colors", [])
 
                     for i, series in enumerate(series_data):
                         label = series.get("name", f"Series {i+1}")
@@ -3498,7 +3974,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             color = series["marker"]["color"]
                         elif bar_colors:
                             color = bar_colors
-                        elif i < len(colors):
+                        elif i < len(colors) and colors[i] is not None:
                             color = colors[i]
 
                         # Skip regular data processing for heatmaps
@@ -3537,19 +4013,21 @@ def _generate_report(project_id, template_path, data_file_path):
                             
                             if chart_type == "stacked_column":
                                 # For stacked column, use bottom parameter
+                                bar_color = color if color is not None else 'blue'
                                 if i == 0:
-                                    ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
+                                    ax1.bar(x_values, y_vals, label=label, color=bar_color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
                                     bottom_vals = y_vals
                                 else:
-                                    ax1.bar(x_values, y_vals, bottom=bottom_vals, label=label, color=color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
+                                    ax1.bar(x_values, y_vals, bottom=bottom_vals, label=label, color=bar_color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
                                     bottom_vals = [sum(x) for x in zip(bottom_vals, y_vals)]
                             else:
                                 if isinstance(color, list):
                                     for j, val in enumerate(y_vals):
-                                        bar_color = color[j % len(color)]
+                                        bar_color = color[j % len(color)] if color[j % len(color)] is not None else 'blue'
                                         ax1.bar(x_values[j], val, color=bar_color, alpha=0.7, label=label if j == 0 else "", edgecolor=edgecolor, linewidth=linewidth)
                                 else:
-                                    ax1.bar(x_values, y_vals, label=label, color=color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
+                                    bar_color = color if color is not None else 'blue'
+                                    ax1.bar(x_values, y_vals, label=label, color=bar_color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
                                     
                         elif mpl_chart_type == "barh":
                             # Horizontal bar chart
@@ -3559,18 +4037,20 @@ def _generate_report(project_id, template_path, data_file_path):
                             
                             if isinstance(color, list):
                                 for j, val in enumerate(y_vals):
-                                    bar_color = color[j % len(color)]
+                                    bar_color = color[j % len(color)] if color[j % len(color)] is not None else 'blue'
                                     ax1.barh(x_values[j], val, color=bar_color, alpha=0.7, label=label if j == 0 else "", edgecolor=edgecolor, linewidth=linewidth)
                             else:
-                                ax1.barh(x_values, y_vals, label=label, color=color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
+                                bar_color = color if color is not None else 'blue'
+                                ax1.barh(x_values, y_vals, label=label, color=bar_color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
                                 
                         elif mpl_chart_type == "plot":
                             # Line chart
                             marker = 'o' if series_type == "scatter_line" else None
+                            line_color = color if color is not None else 'blue'
                             if ax2:
-                                ax2.plot(x_values, y_vals, label=label, color=color, marker=marker, linewidth=2)
+                                ax2.plot(x_values, y_vals, label=label, color=line_color, marker=marker, linewidth=2)
                             else:
-                                ax1.plot(x_values, y_vals, label=label, color=color, marker=marker, linewidth=2)
+                                ax1.plot(x_values, y_vals, label=label, color=line_color, marker=marker, linewidth=2)
                             
                         elif mpl_chart_type == "scatter":
                             # Scatter plot and Bubble chart
@@ -4174,7 +4654,8 @@ def _generate_report(project_id, template_path, data_file_path):
                             # Respect show_gridlines and show_cell_borders for heatmap
                             show_gridlines = chart_meta.get("show_gridlines", False)
                             show_cell_borders = chart_meta.get("show_cell_borders", False)
-                            show_secondary_axis = chart_meta.get("show_secondary_axis", False)
+                            # Use disable_secondary_y field to control secondary y-axis visibility
+                            disable_secondary_y = chart_meta.get("disable_secondary_y", False)
                             
                             if not show_gridlines and not show_cell_borders:
                                 # Completely disable all grid lines and axis lines for clean heatmap
@@ -4227,7 +4708,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 ax1.tick_params(axis='both', which='both', length=0, width=0)
                                 
                                 # Disable secondary y-axis to prevent internal lines
-                                if not show_secondary_axis and hasattr(ax1, 'secondary_yaxis'):
+                                if disable_secondary_y and hasattr(ax1, 'secondary_yaxis'):
                                     ax1.secondary_yaxis('right').set_visible(False)
                             elif show_gridlines:
                                 # Add regular grid lines
@@ -4355,12 +4836,13 @@ def _generate_report(project_id, template_path, data_file_path):
                                             
                                             # Add text label above line point (ENHANCED VERSION)
                                             label_color = data_label_color or '#000000'
-                                            ax2.text(j, val, formatted_val, 
-                                                    ha='center', va='bottom', 
-                                                    fontsize=data_label_font_size or int(title_fontsize * 0.9),  # Improved scaling
-                                                    color=label_color,
-                                                    fontweight='bold',
-                                                    bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
+                                            if ax2:
+                                                ax2.text(j, val, formatted_val, 
+                                                        ha='center', va='bottom', 
+                                                        fontsize=data_label_font_size or int(title_fontsize * 0.9),  # Improved scaling
+                                                        color=label_color,
+                                                        fontweight='bold',
+                                                        bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
                                             # current_app.logger.debug(f"Added line data label with color: {label_color}")
 
                                             # Set labels and styling
@@ -4384,8 +4866,9 @@ def _generate_report(project_id, template_path, data_file_path):
                             ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Primary Y")), 
                                          fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
                             if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
-                                ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), 
-                                             fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
+                                if ax2:
+                                    ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), 
+                                                 fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
 
                             # Apply axis scale type if provided
                             xaxis_type_cfg = chart_meta.get("xaxis_type")
@@ -4399,10 +4882,11 @@ def _generate_report(project_id, template_path, data_file_path):
                         is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
                         
                         # Get secondary y-axis control for scatter charts and area charts
-                        show_secondary_axis = chart_meta.get("show_secondary_axis", True)  # Default to True for backward compatibility
+                        # Use disable_secondary_y field to control secondary y-axis visibility for all chart types
+                        disable_secondary_y = chart_meta.get("disable_secondary_y", False)
                         
-                        # AGGRESSIVE: If secondary y-axis is disabled for scatter charts or area charts, remove it immediately
-                        if (chart_type == "scatter" or chart_type == "area") and not show_secondary_axis and 'ax2' in locals() and ax2 is not None:
+                        # AGGRESSIVE: If secondary y-axis is disabled for any chart type, remove it immediately
+                        if disable_secondary_y and 'ax2' in locals() and ax2 is not None:
                             try:
                                 ax2.remove()  # Remove the axis completely
                                 ax2 = None    # Set to None to prevent further operations
@@ -4414,12 +4898,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         if axis_tick_font_size:
                             ax1.tick_params(axis='x', labelsize=axis_tick_font_size, colors=font_color)  # Removed rotation
                             ax1.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
-                            if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
+                            if ax2 and not is_bubble_chart and not disable_secondary_y:
                                 ax2.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
                         else:
                             ax1.tick_params(axis='x', labelsize=tick_fontsize, colors=font_color)  # Removed rotation
                             ax1.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
-                            if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
+                            if ax2 and not is_bubble_chart and not disable_secondary_y:
                                 ax2.tick_params(axis='y', labelsize=tick_fontsize, colors=font_color)
                         
                         # Tick mark control for Matplotlib
@@ -4434,12 +4918,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                 if not show_y_ticks:
                                     ax1.tick_params(axis='y', length=0)  # Hide tick marks
                                     ax1.set_yticklabels([])  # Hide tick labels
-                                    if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
+                                    if ax2 and not is_bubble_chart and not disable_secondary_y:
                                         ax2.tick_params(axis='y', length=0)  # Hide secondary y-axis tick marks
                                         ax2.set_yticklabels([])  # Hide secondary y-axis tick labels
                                 else:
                                     ax1.tick_params(axis='y', length=5)  # Show tick marks
-                                    if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
+                                    if ax2 and not is_bubble_chart and not disable_secondary_y:
                                      ax2.tick_params(axis='y', length=5)  # Show secondary y-axis tick marks
                         
                         # Apply X-axis label distance using tick parameters
@@ -4455,7 +4939,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         #     # current_app.logger.debug(f"Applied Y-axis tick padding: {y_axis_label_distance}")
                         
                         # Apply secondary y-axis formatting for Matplotlib
-                        if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
+                        if ax2 and not is_bubble_chart and not disable_secondary_y:
                             if secondary_y_axis_format:
                                 from matplotlib.ticker import FuncFormatter
                                 def percentage_formatter(x, pos):
@@ -4476,8 +4960,8 @@ def _generate_report(project_id, template_path, data_file_path):
                             if ax2:
                                 ax2.set_visible(False)
                                 # current_app.logger.info(f"🎈 Secondary Y-axis hidden for bubble chart")
-                        elif (chart_type == "scatter" or chart_type == "area") and not show_secondary_axis:
-                            # Hide secondary Y-axis for scatter charts and area charts when explicitly disabled
+                        elif disable_secondary_y:
+                            # Hide secondary Y-axis for all chart types when explicitly disabled
                             if ax2:
                                 ax2.set_visible(False)
                                 # Remove all ticks and labels from secondary y-axis
@@ -4506,11 +4990,11 @@ def _generate_report(project_id, template_path, data_file_path):
                             mapped_linestyle = matplotlib_linestyle_map.get(gridline_style, "--")
                             # Show both horizontal and vertical gridlines
                             ax1.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6, axis='both')
-                            if ax2 and not is_bubble_chart and (show_secondary_axis or chart_type != "scatter"):
+                            if ax2 and not is_bubble_chart and not disable_secondary_y:
                                 ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6, axis='both')
                         else:
                             ax1.grid(False)
-                            if ax2 and (show_secondary_axis or chart_type != "scatter"):
+                            if ax2 and not disable_secondary_y:
                              ax2.grid(False)
                         
                         # Apply primary y-axis formatting for Matplotlib
@@ -4614,15 +5098,23 @@ def _generate_report(project_id, template_path, data_file_path):
                     if x_axis_label_distance:
                         # Convert the distance to a fraction of the figure height
                         # Higher x_axis_label_distance values will push labels further down
-                        adjustment = x_axis_label_distance / 500.0  # Increased conversion factor for more visible effect
-                        fig_mpl.subplots_adjust(bottom=current_bottom - adjustment)
-                        # current_app.logger.debug(f"Applied X-axis adjustment: {adjustment}")
+                        try:
+                            x_distance = float(x_axis_label_distance) if isinstance(x_axis_label_distance, (int, float, str)) else 0.0
+                            adjustment = x_distance / 500.0  # Increased conversion factor for more visible effect
+                            fig_mpl.subplots_adjust(bottom=current_bottom - adjustment)
+                            # current_app.logger.debug(f"Applied X-axis adjustment: {adjustment}")
+                        except (ValueError, TypeError):
+                            pass
                     
                     if y_axis_label_distance:
                         # Convert the distance to a fraction of the figure width
-                        adjustment = y_axis_label_distance / 500.0  # Increased conversion factor
-                        fig_mpl.subplots_adjust(left=current_left - adjustment)
-                        # current_app.logger.debug(f"Applied Y-axis adjustment: {adjustment}")
+                        try:
+                            y_distance = float(y_axis_label_distance) if isinstance(y_axis_label_distance, (int, float, str)) else 0.0
+                            adjustment = y_distance / 500.0  # Increased conversion factor
+                            fig_mpl.subplots_adjust(left=current_left - adjustment)
+                            # current_app.logger.debug(f"Applied Y-axis adjustment: {adjustment}")
+                        except (ValueError, TypeError):
+                            pass
                 
                 # Apply tight_layout but preserve manual adjustments
                 fig_mpl.tight_layout()
@@ -4630,34 +5122,42 @@ def _generate_report(project_id, template_path, data_file_path):
                 # Re-apply manual adjustments after tight_layout with larger effect (skip heatmaps)
                 if (x_axis_label_distance or y_axis_label_distance) and chart_type != "heatmap":
                     if x_axis_label_distance:
-                        adjustment = x_axis_label_distance / 300.0  # Even larger effect after tight_layout
-                        fig_mpl.subplots_adjust(bottom=fig_mpl.subplotpars.bottom - adjustment)
-                        # Also re-apply x-axis label padding and nudge its position downward
                         try:
-                            x_labelpad = x_axis_label_distance / 10.0 if x_axis_label_distance else 5.0
-                            ax1.xaxis.labelpad = x_labelpad
-                            # Move label further down in axes coordinates
-                            x_label_nudge = -0.10 - (x_axis_label_distance / 1200.0)
-                            ax1.xaxis.set_label_coords(0.5, x_label_nudge)
-                        except Exception:
+                            x_distance = float(x_axis_label_distance) if isinstance(x_axis_label_distance, (int, float, str)) else 0.0
+                            adjustment = x_distance / 300.0  # Even larger effect after tight_layout
+                            fig_mpl.subplots_adjust(bottom=fig_mpl.subplotpars.bottom - adjustment)
+                            # Also re-apply x-axis label padding and nudge its position downward
+                            try:
+                                x_labelpad = x_distance / 10.0 if x_distance else 5.0
+                                ax1.xaxis.labelpad = x_labelpad
+                                # Move label further down in axes coordinates
+                                x_label_nudge = -0.10 - (x_distance / 1200.0)
+                                ax1.xaxis.set_label_coords(0.5, x_label_nudge)
+                            except Exception:
+                                pass
+                            # current_app.logger.debug(f"Re-applied X-axis adjustment: {adjustment}")
+                        except (ValueError, TypeError):
                             pass
-                        # current_app.logger.debug(f"Re-applied X-axis adjustment: {adjustment}")
                     
                     if y_axis_label_distance:
-                        adjustment = y_axis_label_distance / 300.0  # Even larger effect after tight_layout
-                        fig_mpl.subplots_adjust(left=fig_mpl.subplotpars.left - adjustment)
-                        # Ensure the y-label itself moves away from the axis ticks
                         try:
-                            # Re-apply labelpad explicitly after tight_layout
-                            y_labelpad = y_axis_label_distance / 10.0 if y_axis_label_distance else 5.0
-                            ax1.yaxis.labelpad = y_labelpad
-                            # Additionally, nudge the label position in axes coordinates for a clearer visual effect
-                            # Negative x moves it further left; scale factor tuned for visibility
-                            coord_nudge = -0.02 - (y_axis_label_distance / 1200.0)
-                            ax1.yaxis.set_label_coords(coord_nudge, 0.5)
-                        except Exception:
+                            y_distance = float(y_axis_label_distance) if isinstance(y_axis_label_distance, (int, float, str)) else 0.0
+                            adjustment = y_distance / 300.0  # Even larger effect after tight_layout
+                            fig_mpl.subplots_adjust(left=fig_mpl.subplotpars.left - adjustment)
+                            # Ensure the y-label itself moves away from the axis ticks
+                            try:
+                                # Re-apply labelpad explicitly after tight_layout
+                                y_labelpad = y_distance / 10.0 if y_distance else 5.0
+                                ax1.yaxis.labelpad = y_labelpad
+                                # Additionally, nudge the label position in axes coordinates for a clearer visual effect
+                                # Negative x moves it further left; scale factor tuned for visibility
+                                coord_nudge = -0.02 - (y_distance / 1200.0)
+                                ax1.yaxis.set_label_coords(coord_nudge, 0.5)
+                            except Exception:
+                                pass
+                            # current_app.logger.debug(f"Re-applied Y-axis adjustment: {adjustment}")
+                        except (ValueError, TypeError):
                             pass
-                        # current_app.logger.debug(f"Re-applied Y-axis adjustment: {adjustment}")
 
                 # Add annotations if specified
                 if annotations:
@@ -4791,8 +5291,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     fig_mpl.subplots_adjust(bottom=fig_mpl.subplotpars.bottom + 0.15)
                     # current_app.logger.debug("Added extra bottom space for legend")
 
-                # Final check: Hide secondary y-axis for scatter charts if explicitly disabled
-                if chart_type == "scatter" and not show_secondary_axis and 'ax2' in locals() and ax2 is not None:
+                # Final check: Hide secondary y-axis for all chart types if explicitly disabled
+                if disable_secondary_y and 'ax2' in locals() and ax2 is not None:
                     # AGGRESSIVE: Completely remove the secondary y-axis
                     try:
                         ax2.remove()  # Remove the axis completely
@@ -4856,6 +5356,9 @@ def _generate_report(project_id, template_path, data_file_path):
                     user_message = "Excel file format error - check if file is corrupted"
                 elif "pandas" in error_msg.lower():
                     user_message = "Data reading error - check Excel file format"
+                elif "NoneType" in error_type and "text" in error_msg.lower():
+                    user_message = "Secondary y-axis disabled - chart generated without secondary axis"
+                    current_app.logger.info(f"🔄 Chart '{chart_tag}' generated without secondary y-axis (disable_secondary_y=True)")
                 else:
                     user_message = error_msg
                 
@@ -5636,6 +6139,10 @@ def update_project(project_id):
                 current_app.logger.error(f"Failed to retrieve updated project {project_id}")
                 return jsonify({'error': 'Failed to retrieve updated project'}), 500
 
+            # Remove binary file_content to prevent JSON serialization error
+            if 'file_content' in updated_project:
+                del updated_project['file_content']
+
             updated_project['id'] = str(updated_project['_id'])
             del updated_project['_id']
 
@@ -5685,6 +6192,10 @@ def get_project(project_id):
     project = current_app.mongo.db.projects.find_one({'_id': project_id_obj, 'user_id': current_user.get_id()})
     if not project:
         return jsonify({'error': 'Project not found or unauthorized'}), 404
+
+    # Remove binary file_content to prevent JSON serialization error
+    if 'file_content' in project:
+        del project['file_content']
 
     project['id'] = str(project['_id'])
     del project['_id']
