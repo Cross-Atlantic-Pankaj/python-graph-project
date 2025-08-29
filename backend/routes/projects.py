@@ -19,7 +19,7 @@ import zipfile
 import shutil
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
+import squarify
 
 import re
 
@@ -1086,6 +1086,7 @@ def _generate_report(project_id, template_path, data_file_path):
         # Data mapping completed silently
 
         def generate_chart(data_dict, chart_tag):
+            current_app.logger.info(f"🚀 GENERATE_CHART CALLED with tag: {chart_tag}")
             import plotly.graph_objects as go
             import matplotlib.pyplot as plt
             from openpyxl.utils import column_index_from_string
@@ -1110,7 +1111,9 @@ def _generate_report(project_id, template_path, data_file_path):
 
                 chart_meta = chart_config.get("chart_meta", {})
                 series_meta = chart_config.get("series", {})
-                chart_type = chart_type_map.get(chart_tag_lower, "").lower().strip()
+                
+                # Allow chart_type to be overridden from JSON configuration
+                chart_type = chart_config.get("chart_type", chart_type_map.get(chart_tag_lower, "")).lower().strip()
                 title = chart_meta.get("chart_title", chart_tag)
 
                 # --- Comprehensive attribute detection logging ---
@@ -1132,7 +1135,7 @@ def _generate_report(project_id, template_path, data_file_path):
                     "orientation", "bar_border_color", "bar_border_width", "barmode", "line_width", 
                     "marker_size", "line_style", "fill_opacity", "hole", "startangle", "pull", 
                     "bins", "box_points", "violin_points", "bubble_size", "waterfall_measure", 
-                    "funnel_measure", "sunburst_path", "treemap_path", "sankey_source", 
+                    "funnel_measure", "sunburst_path", "sankey_source", 
                     "sankey_target", "sankey_value", "table_header", "indicator_mode", 
                     "indicator_delta", "indicator_gauge", "3d_projection", "z_values", 
                     "lat", "lon", "locations", "open_values", "high_values", "low_values", 
@@ -1178,11 +1181,11 @@ def _generate_report(project_id, template_path, data_file_path):
                     "waterfall": "bar",
                     "funnel": "bar",
                     "sunburst": "pie",
-                    "treemap": "bar",
                     "icicle": "bar",
                     "sankey": "bar",
                     "table": "table",
-                    "indicator": "bar"
+                    "indicator": "bar",
+                    "treemap": "treemap"
                 }
 
                 # --- Extract custom fields from chart_config ---
@@ -1503,13 +1506,9 @@ def _generate_report(project_id, template_path, data_file_path):
                     
                     return x_vals, series_data
                 
-                # Apply dimension validation (skip for heatmaps and treemaps)
-                if chart_type not in ["heatmap", "treemap"]:
+                # Apply dimension validation (skip for heatmaps)
+                if chart_type not in ["heatmap"]:
                     x_values, series_data = validate_and_fix_dimensions(x_values, series_data)
-                else:
-                    # Debug logging for treemap
-                    if chart_type == "treemap":
-                        current_app.logger.debug(f"Treemap chart detected - x_values: {x_values}, series_data length: {len(series_data) if series_data else 0}")
                 
                 colors = series_meta.get("colors", [])
                 
@@ -1679,8 +1678,8 @@ def _generate_report(project_id, template_path, data_file_path):
                             x_vals, y_vals = zip(*sorted_pairs)
                     return list(x_vals), list(y_vals)
 
-                # Special handling for pie charts (single trace)
-                if chart_type == "pie" and len(series_data) == 1:
+                # Special handling for pie charts and treemaps (single trace)
+                if (chart_type == "pie" or chart_type == "treemap") and len(series_data) == 1:
                     series = series_data[0]
                     label = series.get("name", "Pie Chart")
                     labels = series.get("labels", x_values)
@@ -1739,6 +1738,58 @@ def _generate_report(project_id, template_path, data_file_path):
                         fig.add_trace(go.Pie(**pie_kwargs,
                             hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}{str(value_format) if value_format else ''}<extra></extra>"
                         ))
+                
+                elif chart_type == "treemap":
+                    series = series_data[0]
+                    label = series.get("name", "Treemap Chart")
+                    labels = series.get("labels", x_values)
+                    values = series.get("values", [])
+                    color = series.get("marker", {}).get("colors") if "marker" in series else colors
+                    
+                    # Treemap specific settings
+                    treemap_kwargs = {
+                        "labels": labels,
+                        "values": values,
+                        "name": label,
+                        "textinfo": "label+value+percent parent" if chart_meta.get("data_labels", True) else "none",
+                        "textposition": "middle center",
+                        "branchvalues": "total",
+                        "pathbar": dict(visible=True),  # Show path bar for navigation
+                        "tiling": dict(packing="squarify", squarifyratio=1)  # Better layout algorithm
+                    }
+                    
+                    # Add hierarchical data support
+                    if "parent" in series:
+                        treemap_kwargs["parents"] = series["parent"]
+                    
+                    # Add enhanced colors if available
+                    if color:
+                        if isinstance(color, list):
+                            treemap_kwargs["marker"] = dict(colors=color)
+                        else:
+                            treemap_kwargs["marker"] = dict(colors=[color])
+                    else:
+                        # Use enhanced color palette for better visual appeal
+                        enhanced_colors = [
+                            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+                            '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
+                            '#F8C471', '#82E0AA', '#F1948A', '#85C1E9', '#D7BDE2'
+                        ]
+                        # Apply colors based on data length
+                        if len(labels) <= len(enhanced_colors):
+                            treemap_kwargs["marker"] = dict(colors=enhanced_colors[:len(labels)])
+                    
+                    # Add hover template with enhanced information
+                    hover_template = f"<b>{label}</b><br>"
+                    hover_template += "Category: %{label}<br>"
+                    hover_template += "Value: %{value}<br>"
+                    if "parent" in series:
+                        hover_template += "Parent: %{parent}<br>"
+                    hover_template += "Percentage: %{percentParent:.1f}%<extra></extra>"
+                    
+                    fig.add_trace(go.Treemap(**treemap_kwargs,
+                        hovertemplate=hover_template
+                    ))
                 
                 # Handle stacked column, area, and other multi-series charts
                 else:
@@ -1863,9 +1914,9 @@ def _generate_report(project_id, template_path, data_file_path):
                             "waterfall": go.Waterfall,
                             "funnel": go.Funnel,
                             "sunburst": go.Sunburst,
-                            "treemap": go.Treemap,
                             "icicle": go.Icicle,
                             "sankey": go.Sankey,
+                            "treemap": go.Treemap,
                             "table": go.Table,
                             "indicator": go.Indicator
                         }
@@ -1911,7 +1962,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     "labels": x_vals,
                                     "values": y_vals,
                                     "name": label,
-                                    "textinfo": "label+percent+value" if data_labels else "none",
+                                    "textinfo": "label+value+percent parent" if data_labels else "none",
                                     "textposition": "outside",
                                     "hole": hole if hole is not None else (0.4 if series_type == "donut" else 0.0)
                                 }
@@ -2001,83 +2052,21 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                             elif series_type == "treemap":
                                 # Treemap specific settings
-                                labels = series.get("labels", [])
-                                values = series.get("values", [])
-                                parents = series.get("parents", [])
-                                text = series.get("text", labels)
-                                
-                                # Ensure all arrays have the same length
-                                min_length = min(len(labels), len(values)) if labels and values else 0
-                                if min_length == 0:
-                                    current_app.logger.error("Empty labels or values for treemap")
-                                    continue
-                                
-                                if len(parents) < min_length:
-                                    parents = parents + [""] * (min_length - len(parents))
-                                if len(text) < min_length:
-                                    text = text + [""] * (min_length - len(text))
-                                
-                                # Truncate arrays to the minimum length
-                                labels = labels[:min_length]
-                                values = values[:min_length]
-                                parents = parents[:min_length]
-                                text = text[:min_length]
-                                
                                 treemap_kwargs = {
-                                    "labels": labels,
-                                    "parents": parents,
-                                    "values": values,
-                                    "ids": series.get("ids", [f"id_{i}" for i in range(min_length)]),
+                                    "labels": x_vals,
+                                    "values": y_vals,
                                     "name": label,
-                                    "text": text,
-                                    "branchvalues": series.get("branchvalues", "total"),
-                                    "textinfo": series.get("textinfo", "label+value+percent parent"),
-                                    "texttemplate": series.get("texttemplate", "%{label}<br>%{value}"),
-                                    "pathbar": series.get("pathbar", {"visible": True})
+                                    "textinfo": "label+value+percent parent" if data_labels else "none",
+                                    "textposition": "middle center",
+                                    "branchvalues": "total"
                                 }
                                 
-                                # Handle tiling configuration properly for Plotly
-                                tiling_config = series.get("tiling", {})
-                                if tiling_config:
-                                    # Remove invalid 'orientation' property and use valid Plotly tiling properties
-                                    valid_tiling = {}
-                                    if "packing" in tiling_config:
-                                        valid_tiling["packing"] = tiling_config["packing"]
-                                    if "squarifyratio" in tiling_config:
-                                        valid_tiling["squarifyratio"] = tiling_config["squarifyratio"]
-                                    if "pad" in tiling_config:
-                                        valid_tiling["pad"] = tiling_config["pad"]
-                                    if "flip" in tiling_config:
-                                        valid_tiling["flip"] = tiling_config["flip"]
-                                    
-                                    if valid_tiling:
-                                        treemap_kwargs["tiling"] = valid_tiling
-                                
-                                # Handle marker colors
-                                if "marker" in series and isinstance(series["marker"], dict):
-                                    marker_config = series["marker"]
-                                    treemap_kwargs["marker"] = {}
-                                    
-                                    if "colors" in marker_config:
-                                        # Filter out None values from colors
-                                        safe_colors = [c for c in marker_config["colors"] if c is not None]
-                                        if safe_colors:
-                                            treemap_kwargs["marker"]["colors"] = safe_colors
-                                    
-                                    if "line" in marker_config and isinstance(marker_config["line"], dict):
-                                        treemap_kwargs["marker"]["line"] = marker_config["line"]
-                                
-                                # Handle colors from other sources if not in marker
-                                elif color:
-                                    if isinstance(color, list):
-                                        safe_colors = [c for c in color if c is not None]
-                                        if safe_colors:
-                                            treemap_kwargs["marker"] = {"colors": safe_colors}
-                                    elif color is not None:
-                                        treemap_kwargs["marker"] = {"colors": [color]}
+                                # Add treemap specific attributes
+                                if color:
+                                    treemap_kwargs["marker"] = dict(colors=color) if isinstance(color, list) else dict(colors=[color])
                                 
                                 fig.add_trace(go.Treemap(**treemap_kwargs,
-                                    hovertemplate=f"<b>{label}</b><br>Label: %{{label}}<br>Value: %{{value}}<br>Parent: %{{parent}}<extra></extra>"
+                                    hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}<extra></extra>"
                                 ))
                                 
                             else:
@@ -2761,184 +2750,6 @@ def _generate_report(project_id, template_path, data_file_path):
                                     formatted_value = str(v)
                             ax2.text(bar.get_x() + bar.get_width()/2, v, formatted_value, ha='center', va='bottom', fontweight='bold', fontsize=data_label_font_size, color=data_label_color)
 
-                elif chart_type == "treemap":
-                    # Matplotlib version of treemap
-                    current_app.logger.debug(f"Processing Matplotlib treemap - x_values: {x_values}, series_data: {series_data}")
-                    mpl_figsize = figsize if figsize else (12, 8)
-                    fig_mpl, ax = plt.subplots(figsize=mpl_figsize, dpi=200)
-                    
-                    # Apply background colors to Matplotlib figure
-                    if chart_background:
-                        fig_mpl.patch.set_facecolor(chart_background)
-                    if plot_background:
-                        ax.set_facecolor(plot_background)
-                    
-                    # Extract treemap data from series
-                    if len(series_data) == 1:
-                        series = series_data[0]
-                        labels = series.get("labels", [])
-                        values = series.get("values", [])
-                        parents = series.get("parents", [])
-                        colors = series.get("marker", {}).get("colors", []) if "marker" in series else []
-                        # Filter out None values from colors array
-                        colors = [color for color in colors if color is not None]
-                        
-                        # Validate that we have the required data
-                        if not labels or not values:
-                            current_app.logger.error("Missing required treemap data: labels or values")
-                            ax.text(0.5, 0.5, "Missing treemap data", ha='center', va='center', 
-                                   fontsize=font_size or 14, transform=ax.transAxes)
-                            return None
-                        
-                        # Ensure all arrays have the same length
-                        min_length = min(len(labels), len(values))
-                        if len(parents) < min_length:
-                            parents = parents + [""] * (min_length - len(parents))
-                        
-                        # Truncate arrays to the minimum length
-                        labels = labels[:min_length]
-                        values = values[:min_length]
-                        parents = parents[:min_length]
-                        
-                        # Debug logging
-                        current_app.logger.debug(f"Treemap data lengths - labels: {len(labels)}, values: {len(values)}, parents: {len(parents)}")
-                        current_app.logger.debug(f"Treemap labels: {labels}")
-                        current_app.logger.debug(f"Treemap values: {values}")
-                        
-                        # Create a hierarchical structure for treemap
-                        import squarify
-                        
-                        # Filter out None values and create a flat structure for squarify
-                        valid_data = []
-                        
-                        # Check if arrays are empty
-                        if not labels or not values:
-                            current_app.logger.error("Empty labels or values arrays for treemap")
-                            ax.text(0.5, 0.5, "No data available for treemap", ha='center', va='center', 
-                                   fontsize=font_size or 14, transform=ax.transAxes)
-                            return None
-                        
-                        # Ensure all arrays have the same length before processing
-                        min_length = min(len(labels), len(values), len(parents))
-                        labels = labels[:min_length]
-                        values = values[:min_length]
-                        parents = parents[:min_length]
-                        
-                        # Define a fallback color palette for when colors are missing or None
-                        fallback_colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', '#DDA0DD', 
-                                         '#FF8E8E', '#6ED5D5', '#8EDDDD', '#6BC5E1', '#A8E6CF', '#FFB3B3']
-                        
-                        for i, (label, value, parent) in enumerate(zip(labels, values, parents)):
-                            if value is not None:
-                                try:
-                                    # Convert value to float, handling both string and numeric inputs
-                                    float_value = float(value) if isinstance(value, (int, float, str)) else 0.0
-                                    if float_value > 0:
-                                        # Get color with fallback
-                                        if i < len(colors) and colors[i] is not None:
-                                            color = colors[i]
-                                        else:
-                                            # Use fallback color from palette
-                                            color = fallback_colors[i % len(fallback_colors)]
-                                        
-                                        valid_data.append({
-                                            'label': str(label),
-                                            'value': float_value,
-                                            'parent': str(parent),
-                                            'color': color
-                                        })
-                                except (ValueError, TypeError):
-                                    # Skip invalid values
-                                    continue
-                        
-                        if valid_data:
-                            # Sort by value for better visualization
-                            valid_data.sort(key=lambda x: x['value'], reverse=True)
-                            
-                            # Extract values and labels for squarify
-                            sizes = [item['value'] for item in valid_data]
-                            labels_for_plot = [item['label'] for item in valid_data]
-                            colors_for_plot = [item['color'] for item in valid_data if item['color'] is not None]
-                            
-                            # Validate sizes array
-                            if not sizes or not all(isinstance(s, (int, float)) for s in sizes):
-                                current_app.logger.error("Invalid sizes array for treemap")
-                                ax.text(0.5, 0.5, "Invalid data for treemap", ha='center', va='center', 
-                                       fontsize=font_size or 14, transform=ax.transAxes)
-                                return None
-                            
-                            # Create treemap using squarify
-                            try:
-                                current_app.logger.debug(f"Squarify plot - sizes: {sizes}, labels: {labels_for_plot}, colors: {colors_for_plot}")
-                                current_app.logger.debug(f"Squarify plot - sizes length: {len(sizes)}, labels length: {len(labels_for_plot)}, colors length: {len(colors_for_plot) if colors_for_plot else 0}")
-                                
-                                # Final validation to ensure arrays are in sync
-                                if len(sizes) != len(labels_for_plot):
-                                    current_app.logger.error(f"Array length mismatch: sizes={len(sizes)}, labels={len(labels_for_plot)}")
-                                    ax.text(0.5, 0.5, "Data array length mismatch", ha='center', va='center', 
-                                           fontsize=font_size or 14, transform=ax.transAxes)
-                                    return None
-                                
-                                # Only use colors if we have exactly the same number of colors as data points
-                                if colors_for_plot and len(colors_for_plot) == len(sizes) and all(color is not None for color in colors_for_plot):
-                                    squarify.plot(sizes=sizes, label=labels_for_plot, color=colors_for_plot, alpha=0.8, ax=ax)
-                                else:
-                                    # Use default matplotlib colors
-                                    squarify.plot(sizes=sizes, label=labels_for_plot, alpha=0.8, ax=ax)
-                            except Exception as e:
-                                current_app.logger.error(f"Error creating treemap plot: {e}")
-                                # Fallback to simple text display
-                                ax.text(0.5, 0.5, f"Error creating treemap: {str(e)}", ha='center', va='center', 
-                                       fontsize=font_size or 14, transform=ax.transAxes)
-                                return None
-                            
-                            # Add title
-                            ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
-                            
-                            # Remove axis ticks and labels for cleaner look
-                            ax.set_xticks([])
-                            ax.set_yticks([])
-                            ax.set_xlabel('')
-                            ax.set_ylabel('')
-                            
-                            # Add value labels on rectangles
-                            if chart_meta.get("data_labels", True):
-                                data_label_font_size = chart_meta.get("data_label_font_size", 10)
-                                data_label_color = chart_meta.get("data_label_color", "#000000")
-                                
-                                # Get the rectangles from squarify
-                                try:
-                                    rectangles = squarify.squarify(sizes, 0, 0, 1, 1)
-                                except Exception as e:
-                                    current_app.logger.error(f"Error generating treemap rectangles: {e}")
-                                    # Skip data labels if rectangles can't be generated
-                                    rectangles = []
-                                
-                                # Only process rectangles if we have valid data
-                                if rectangles and len(rectangles) == len(labels_for_plot):
-                                    for rect, label, value in zip(rectangles, labels_for_plot, sizes):
-                                        try:
-                                            # Extract coordinates from dictionary (squarify returns dict, not tuple)
-                                            x = float(rect['x'])
-                                            y = float(rect['y'])
-                                            w = float(rect['dx'])
-                                            h = float(rect['dy'])
-                                            # Add label in the center of each rectangle
-                                            ax.text(x + w/2, y + h/2, f"{label}\n{value}", 
-                                                   ha='center', va='center', 
-                                                   fontsize=data_label_font_size, 
-                                                   color=data_label_color,
-                                                   fontweight='bold',
-                                                   fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
-                                        except (ValueError, TypeError, KeyError) as e:
-                                            # Skip this rectangle if coordinates are invalid
-                                            current_app.logger.warning(f"Skipping treemap rectangle with invalid coordinates: {rect}, error: {e}")
-                                            continue
-                        else:
-                            # No valid data
-                            ax.text(0.5, 0.5, "No data available", ha='center', va='center', 
-                                   fontsize=font_size or 14, transform=ax.transAxes)
-
                 else:
                     # Bar, line, area charts
                     mpl_figsize = figsize if figsize else (10, 6)
@@ -3082,9 +2893,9 @@ def _generate_report(project_id, template_path, data_file_path):
                             "waterfall": go.Waterfall,
                             "funnel": go.Funnel,
                             "sunburst": go.Sunburst,
-                            "treemap": go.Treemap,
                             "icicle": go.Icicle,
                             "sankey": go.Sankey,
+                            "treemap": go.Treemap,
                             "table": go.Table,
                             "indicator": go.Indicator
                         }
@@ -3130,7 +2941,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     "labels": x_vals,
                                     "values": y_vals,
                                     "name": label,
-                                    "textinfo": "label+percent+value" if data_labels else "none",
+                                    "textinfo": "label+value+percent parent" if data_labels else "none",
                                     "textposition": "outside",
                                     "hole": hole if hole is not None else (0.4 if series_type == "donut" else 0.0)
                                 }
@@ -3216,6 +3027,25 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 fig.add_trace(go.Heatmap(**heatmap_kwargs,
                                     hovertemplate=f"<b>{label}</b><br>X: %{{x}}<br>Y: %{{y}}<br>Value: %{{z}}<extra></extra>"
+                                ))
+                                
+                            elif series_type == "treemap":
+                                # Treemap specific settings
+                                treemap_kwargs = {
+                                    "labels": x_vals,
+                                    "values": y_vals,
+                                    "name": label,
+                                    "textinfo": "label+value+percent parent" if data_labels else "none",
+                                    "textposition": "middle center",
+                                    "branchvalues": "total"
+                                }
+                                
+                                # Add treemap specific attributes
+                                if color:
+                                    treemap_kwargs["marker"] = dict(colors=color) if isinstance(color, list) else dict(colors=[color])
+                                
+                                fig.add_trace(go.Treemap(**treemap_kwargs,
+                                    hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}<extra></extra>"
                                 ))
                                 
                             else:
@@ -4536,222 +4366,223 @@ def _generate_report(project_id, template_path, data_file_path):
                             # Violin plot
                             ax1.violinplot(y_vals, positions=[i])
                             
-                        elif mpl_chart_type == "imshow":
-                            # Enhanced heatmap implementation
-                            heatmap_data = series.get("z", series.get("values", []))
-                            
-                            # Ensure we have valid heatmap data
-                            if not heatmap_data or len(heatmap_data) == 0:
-                                # Create a default heatmap for testing
-                                heatmap_data = [[1, 0, 1, 1], [1, 1, 1, 0], [0, 1, 1, 1]]
-                            
-                            # Ensure heatmap_data is a 2D array and not None
-                            if heatmap_data and len(heatmap_data) > 0 and isinstance(heatmap_data[0], (int, float)):
-                                # Flat list - reshape based on x_axis length
-                                cols = len(x_values) if x_values else 4
-                                rows = len(heatmap_data) // cols
-                                if len(heatmap_data) % cols != 0:
-                                    rows += 1
-                                # Pad with zeros if needed
-                                padded_data = heatmap_data + [0] * (rows * cols - len(heatmap_data))
-                                heatmap_data = [padded_data[i:i+cols] for i in range(0, len(padded_data), cols)]
-                                # current_app.logger.debug(f"Reshaped heatmap data: {heatmap_data}")
-                                # current_app.logger.debug(f"X values: {x_values}")
-                                # current_app.logger.debug(f"Cols: {cols}, Rows: {rows}")
-                            
-                            # Get colorscale from series or use default
-                            colorscale = series.get("colorscale", "Blues")
-                            # current_app.logger.debug(f"Using colorscale: {colorscale}")
-                            
-                            # Create custom colorscale for better contrast like ChatGPT
-                            if colorscale == "Blues":
-                                from matplotlib.colors import LinearSegmentedColormap
-                                # Create a custom blue colorscale with better contrast
-                                colors = ['#E3F2FD', '#2196F3']  # Light blue to dark blue
-                                n_bins = 100
-                                custom_cmap = LinearSegmentedColormap.from_list("custom_blues", colors, N=n_bins)
-                                cmap_to_use = custom_cmap
-                            else:
-                                cmap_to_use = colorscale
-                            
-                            # Create heatmap with enhanced styling
-                            # Force 'none' interpolation to avoid internal lines when show_cell_borders is true
-                            show_cell_borders = chart_meta.get("show_cell_borders", False)
-                            if show_cell_borders:
-                                interpolation_method = "none"  # Force none interpolation for clean borders
-                            else:
-                                interpolation_method = chart_meta.get("interpolation", "none")
-                            
-                            im = ax1.imshow(heatmap_data, cmap=cmap_to_use, aspect='auto', 
-                                           interpolation=interpolation_method, alpha=1.0)
-                            
-                            # Axis labels from config
-                            x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
-                            y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
-                            if x_axis_title:
-                                # Apply x_axis_label_distance for heatmaps
-                                x_labelpad = x_axis_label_distance if x_axis_label_distance else 5.0  # Use the value directly
-                                ax1.set_xlabel(x_axis_title, fontsize=font_size or 12, color=font_color if font_color else None,
-                                               fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
-                                               labelpad=x_labelpad)
-                            if y_axis_title:
-                                # Apply y_axis_label_distance for heatmaps
-                                y_labelpad = y_axis_label_distance if y_axis_label_distance else 5.0  # Use the value directly
-                                ax1.set_ylabel(y_axis_title, fontsize=font_size or 12, color=font_color if font_color else None,
-                                               fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
-                                               labelpad=y_labelpad)
-                            
-                            # Set axis labels with proper validation
-                            if heatmap_data and len(heatmap_data) > 0:
-                                # Get the actual dimensions of the heatmap data
-                                num_rows = len(heatmap_data)
-                                num_cols = len(heatmap_data[0]) if heatmap_data[0] else 0
-                                
-                                # Validate and set X-axis labels
-                                if x_values and len(x_values) > 0:
-                                    # Ensure x_values matches the number of columns
-                                    if len(x_values) == num_cols:
-                                        ax1.set_xticks(range(len(x_values)))
-                                        ax1.set_xticklabels(x_values, rotation=0, ha='center')
-                                    else:
-                                        # Create default x labels if mismatch
-                                        default_x_labels = [f"Col {i+1}" for i in range(num_cols)]
-                                        ax1.set_xticks(range(len(default_x_labels)))
-                                        ax1.set_xticklabels(default_x_labels, rotation=0, ha='center')
-                                        current_app.logger.warning(f"⚠️ X-axis labels count ({len(x_values)}) doesn't match heatmap columns ({num_cols}), using default labels")
-                                else:
-                                    # Create default x labels
-                                    default_x_labels = [f"Col {i+1}" for i in range(num_cols)]
-                                    ax1.set_xticks(range(len(default_x_labels)))
-                                    ax1.set_xticklabels(default_x_labels, rotation=0, ha='center')
-                                
-                                # Validate and set Y-axis labels
-                                y_labels = series.get("y", [])
-                                if not y_labels:
-                                    # Create default y labels based on heatmap rows
-                                    y_labels = [f"Employee {i+1}" for i in range(num_rows)]
-                                
-                                if y_labels and len(y_labels) > 0:
-                                    # Ensure y_labels matches the number of rows
-                                    if len(y_labels) == num_rows:
-                                        ax1.set_yticks(range(len(y_labels)))
-                                        ax1.set_yticklabels(y_labels)
-                                    else:
-                                        # Create default y labels if mismatch
-                                        default_y_labels = [f"Row {i+1}" for i in range(num_rows)]
-                                        ax1.set_yticks(range(len(default_y_labels)))
-                                        ax1.set_yticklabels(default_y_labels)
-                                        current_app.logger.warning(f"⚠️ Y-axis labels count ({len(y_labels)}) doesn't match heatmap rows ({num_rows}), using default labels")
-                                else:
-                                    # Create default y labels
-                                    default_y_labels = [f"Row {i+1}" for i in range(num_rows)]
-                                    ax1.set_yticks(range(len(default_y_labels)))
-                                    ax1.set_yticklabels(default_y_labels)
-                            
-                            # Respect show_gridlines and show_cell_borders for heatmap
-                            show_gridlines = chart_meta.get("show_gridlines", False)
-                            show_cell_borders = chart_meta.get("show_cell_borders", False)
-                            # Use disable_secondary_y field to control secondary y-axis visibility
-                            disable_secondary_y = chart_meta.get("disable_secondary_y", False)
-                            
-                            if not show_gridlines and not show_cell_borders:
-                                # Completely disable all grid lines and axis lines for clean heatmap
-                                try:
-                                    ax1.grid(visible=False, which='both', axis='both')
-                                except TypeError:
-                                    # Fallback for older Matplotlib
-                                    ax1.grid(False)
-                                ax1.set_axisbelow(True)
-                                
-                                # Remove all axis lines for clean appearance
-                                ax1.spines['top'].set_visible(False)
-                                ax1.spines['right'].set_visible(False)
-                                ax1.spines['bottom'].set_visible(False)
-                                ax1.spines['left'].set_visible(False)
-                                
-                                # Remove tick marks but keep labels
-                                ax1.tick_params(axis='both', which='both', length=0)
-                            elif show_cell_borders:
-                                # Add cell border lines (white lines between cells) but remove internal lines
-                                ax1.set_xticks(np.arange(-0.5, len(heatmap_data[0]), 1), minor=True)
-                                ax1.set_yticks(np.arange(-0.5, len(heatmap_data), 1), minor=True)
-                                ax1.grid(which="minor", color="white", linestyle='-', linewidth=2)
-                                
-                                # Remove all internal tick marks and lines
-                                ax1.tick_params(axis='both', which='major', length=0)
-                                ax1.tick_params(axis='both', which='minor', length=0)
-                                
-                                # Remove axis spines to eliminate internal lines
-                                ax1.spines['top'].set_visible(False)
-                                ax1.spines['right'].set_visible(False)
-                                ax1.spines['bottom'].set_visible(False)
-                                ax1.spines['left'].set_visible(False)
-                                
-                                # Additional aggressive removal of internal lines
-                                ax1.set_xticks([])  # Remove all x ticks
-                                ax1.set_yticks([])  # Remove all y ticks
-                                
-                                # Re-add only the label positions without ticks
-                                ax1.set_xticks(range(len(x_values)) if x_values else range(len(heatmap_data[0])))
-                                ax1.set_yticks(range(len(y_labels)) if y_labels else range(len(heatmap_data)))
-                                
-                                # Set tick labels without tick marks
-                                if x_values and len(x_values) > 0:
-                                    ax1.set_xticklabels(x_values, rotation=0, ha='center')
-                                if y_labels and len(y_labels) > 0:
-                                    ax1.set_yticklabels(y_labels)
-                                
-                                # Remove all tick marks again
-                                ax1.tick_params(axis='both', which='both', length=0, width=0)
-                                
-                                # Disable secondary y-axis to prevent internal lines
-                                if disable_secondary_y and hasattr(ax1, 'secondary_yaxis'):
-                                    ax1.secondary_yaxis('right').set_visible(False)
-                            elif show_gridlines:
-                                # Add regular grid lines
-                                ax1.grid(True, which='major', color='gray', linestyle='-', linewidth=0.5, alpha=0.3)
-                            
-                            # Add colorbar if showscale is enabled
-                            showscale = series.get("showscale", True)
-                            if showscale:
-                                cbar = plt.colorbar(im, ax=ax1, shrink=0.8)
-                                cbar.set_label(series.get("name", "Value"), rotation=270, labelpad=15,
-                                                    fontsize=chart_meta.get("legend_font_size", 10))
-                            
-                            # Add text annotations on heatmap cells
-                            if heatmap_data and len(heatmap_data) > 0 and len(heatmap_data[0]) > 0:
-                                for i in range(len(heatmap_data)):
-                                    for j in range(len(heatmap_data[0])):
-                                        value = heatmap_data[i][j]
-                                        # Determine text color based on background
-                                        if colorscale == "Blues":
-                                            # For Blues colorscale, use white text on dark blue, black on light blue
-                                            text_color = 'white' if value == 1 else 'black'
-                                        elif colorscale == "RdYlGn":
-                                            text_color = 'white' if value > 0.5 else 'black'
-                                        else:
-                                            text_color = 'white' if value == 1 else 'black'
-                                        
-                                        # Show actual value or custom text
-                                        if "text" in series and i < len(series["text"]) and j < len(series["text"][i]):
-                                            cell_text = str(series["text"][i][j])
-                                        else:
-                                            cell_text = str(value)
-                                        
-                                        ax1.text(j, i, cell_text, 
-                                               ha='center', va='center', color=text_color, 
-                                               fontweight='bold', fontsize=12)
-                            
-                            # Set title
-                            ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20,
-                                          color=font_color if font_color else None,
-                                          fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                         elif mpl_chart_type == "contour":
                             # Contour plot (simplified)
                             if len(y_vals) > 0:
                                 # Create a simple 2D array for contour
                                 contour_data = [y_vals] if len(y_vals) > 0 else [[0]]
                                 ax1.contour(contour_data)
+                                
+                        elif mpl_chart_type == "treemap":
+                            # Enhanced Treemap chart using squarify with full customization support
+                            # For treemaps, get data directly from series
+                            values = series.get("values", [])
+                            labels = series.get("labels", [])
+                            
+                            # Debug logging
+                            current_app.logger.debug(f"🔍 Treemap Debug - Series: {series}")
+                            current_app.logger.debug(f"🔍 Treemap Debug - Values: {values}")
+                            current_app.logger.debug(f"🔍 Treemap Debug - Labels: {labels}")
+                            current_app.logger.debug(f"🔍 Treemap Debug - X_values: {x_values}")
+                            
+                            # Fallback: if values are not in series, try y_vals
+                            if not values and y_vals:
+                                values = y_vals
+                                current_app.logger.debug(f"🔍 Treemap Debug - Using y_vals as values: {values}")
+                            
+                            # If labels are not in series, try to use x_values as labels
+                            if not labels and x_values:
+                                labels = x_values
+                                current_app.logger.debug(f"🔍 Treemap Debug - Using x_values as labels: {labels}")
+                            
+                            # Ensure we have valid data for treemap
+                            if values and labels and len(values) == len(labels):
+                                # Convert values to numeric and filter out invalid data
+                                valid_data = []
+                                valid_labels = []
+                                valid_colors = []
+                                
+                                # Enhanced color palette for better visual appeal
+                                enhanced_colors = [
+                                    '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+                                    '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9',
+                                    '#F8C471', '#82E0AA', '#F1948A', '#85C1E9', '#D7BDE2'
+                                ]
+                                
+                                for i, (label, value) in enumerate(zip(labels, values)):
+                                    try:
+                                        numeric_value = float(value)
+                                        if numeric_value > 0:  # Only include positive values
+                                            valid_data.append(numeric_value)
+                                            valid_labels.append(str(label))
+                                            # Use custom color if available, otherwise use enhanced palette
+                                            if isinstance(color, list) and i < len(color):
+                                                valid_colors.append(color[i])
+                                            elif color:
+                                                valid_colors.append(color)
+                                            else:
+                                                # Use enhanced color palette for better visual appeal
+                                                color_index = i % len(enhanced_colors)
+                                                valid_colors.append(enhanced_colors[color_index])
+                                    except (ValueError, TypeError):
+                                        continue
+                                
+                                if valid_data:
+                                    # Get customization options
+                                    treemap_alpha = fill_opacity if fill_opacity is not None else 0.8
+                                    treemap_font_size = data_label_font_size if data_label_font_size else 10
+                                    treemap_font_weight = 'bold'
+                                    
+                                    # Create enhanced treemap with customizable styling
+                                    squarify.plot(
+                                        sizes=valid_data,
+                                        label=valid_labels,
+                                        color=valid_colors,
+                                        alpha=treemap_alpha,
+                                        ax=ax1,
+                                        text_kwargs={'fontsize': treemap_font_size, 'fontweight': treemap_font_weight}
+                                    )
+                                    
+                                    # Apply background colors if specified
+                                    if chart_background:
+                                        fig_mpl.patch.set_facecolor(chart_background)
+                                    if plot_background:
+                                        ax1.set_facecolor(plot_background)
+                                    
+                                    # Add title with customizable styling
+                                    title_font_size = font_size or 16
+                                    title_color = font_color if font_color else '#2C3E50'
+                                    title_font_family = chart_meta.get("font_family") if chart_meta.get("font_family") else None
+                                    
+                                    ax1.set_title(title, fontsize=title_font_size, weight='bold', pad=20, 
+                                                color=title_color, fontname=title_font_family)
+                                    ax1.set_xlabel('')
+                                    ax1.set_ylabel('')
+                                    
+                                    # Handle axis ticks visibility
+                                    if show_x_ticks is False:
+                                        ax1.set_xticks([])
+                                    if show_y_ticks is False:
+                                        ax1.set_yticks([])
+                                    
+                                    # Remove axis spines for cleaner look (treemap specific)
+                                    ax1.spines['top'].set_visible(False)
+                                    ax1.spines['right'].set_visible(False)
+                                    ax1.spines['bottom'].set_visible(False)
+                                    ax1.spines['left'].set_visible(False)
+                                    
+                                    # Apply grid lines based on customization settings
+                                    if show_gridlines is not None:
+                                        if show_gridlines:
+                                            grid_alpha = 0.1
+                                            grid_style = gridline_style if gridline_style else '-'
+                                            grid_color = gridline_color if gridline_color else 'gray'
+                                            grid_width = 0.5
+                                            ax1.grid(True, alpha=grid_alpha, linestyle=grid_style, 
+                                                    linewidth=grid_width, color=grid_color)
+                                        else:
+                                            ax1.grid(False)
+                                    else:
+                                        # Default subtle grid for treemap
+                                        ax1.grid(True, alpha=0.1, linestyle='-', linewidth=0.5)
+                                    
+                                    # Add data labels if enabled with enhanced formatting
+                                    if show_data_labels:
+                                        # Calculate positions for labels (simplified)
+                                        for i, (size, label) in enumerate(zip(valid_data, valid_labels)):
+                                            # Format the value
+                                            try:
+                                                if value_format == ".1f":
+                                                    formatted_val = f"{size:.1f}"
+                                                elif value_format == ".0f":
+                                                    formatted_val = f"{size:.0f}"
+                                                elif value_format == ".0%":
+                                                    formatted_val = f"{size:.0%}"
+                                                else:
+                                                    formatted_val = f"{size:.1f}"
+                                            except:
+                                                formatted_val = str(size)
+                                            
+                                            # Add enhanced text label with better styling
+                                            label_color = data_label_color or '#2C3E50'
+                                            label_font_size = data_label_font_size or 9
+                                            
+                                            # Create text box with customizable styling
+                                            bbox_props = dict(
+                                                boxstyle="round,pad=0.2", 
+                                                facecolor='white', 
+                                                alpha=0.9,
+                                                edgecolor='gray',
+                                                linewidth=0.5
+                                            )
+                                            
+                                            ax1.text(0.5, 0.5, f"{label}\n{formatted_val}", 
+                                                    ha='center', va='center', 
+                                                    fontsize=label_font_size,
+                                                    color=label_color,
+                                                    fontweight='bold',
+                                                    transform=ax1.transAxes,
+                                                    bbox=bbox_props)
+                                    
+                                    # Handle legend visibility and positioning
+                                    show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                                    if show_legend and len(valid_data) > 1:
+                                        # Create custom legend
+                                        legend_elements = []
+                                        for i, (label, color) in enumerate(zip(valid_labels, valid_colors)):
+                                            from matplotlib.patches import Patch
+                                            legend_elements.append(Patch(facecolor=color, label=label, alpha=treemap_alpha))
+                                        
+                                        # Get legend customization options
+                                        legend_position = chart_meta.get("legend_position", "right")
+                                        legend_font_size = chart_meta.get("legend_font_size", 8)
+                                        
+                                        # Position legend based on setting
+                                        if legend_position == "bottom":
+                                            ax1.legend(handles=legend_elements, 
+                                                     loc='lower center', 
+                                                     bbox_to_anchor=(0.5, -0.15), 
+                                                     fontsize=legend_font_size,
+                                                     frameon=True, fancybox=True, shadow=True)
+                                        elif legend_position == "top":
+                                            ax1.legend(handles=legend_elements, 
+                                                     loc='upper center', 
+                                                     bbox_to_anchor=(0.5, 1.02), 
+                                                     fontsize=legend_font_size,
+                                                     frameon=True, fancybox=True, shadow=True)
+                                        elif legend_position == "left":
+                                            ax1.legend(handles=legend_elements, 
+                                                     loc='center left', 
+                                                     bbox_to_anchor=(-0.05, 0.5), 
+                                                     fontsize=legend_font_size,
+                                                     frameon=True, fancybox=True, shadow=True)
+                                        else:  # right (default)
+                                            ax1.legend(handles=legend_elements, 
+                                                     loc='center left', 
+                                                     bbox_to_anchor=(1.05, 0.5), 
+                                                     fontsize=legend_font_size,
+                                                     frameon=True, fancybox=True, shadow=True)
+                                    
+                                    # Apply margin settings if specified
+                                    if margin:
+                                        plt.subplots_adjust(**margin)
+                                    
+                                    # Adjust layout to accommodate legend
+                                    plt.tight_layout()
+                                    
+                                else:
+                                    # No valid data for treemap
+                                    ax1.text(0.5, 0.5, "No valid data for treemap", 
+                                            ha='center', va='center', 
+                                            fontsize=font_size or 12,
+                                            transform=ax1.transAxes)
+                            else:
+                                # Invalid data structure for treemap
+                                current_app.logger.warning(f"⚠️ Invalid treemap data structure - Values: {values}, Labels: {labels}")
+                                ax1.text(0.5, 0.5, "Invalid data structure for treemap", 
+                                        ha='center', va='center', 
+                                        fontsize=font_size or 12,
+                                        transform=ax1.transAxes)
                                 
                         else:
                             # Fallback to scatter for unknown types
@@ -4922,77 +4753,6 @@ def _generate_report(project_id, template_path, data_file_path):
                                     ax1.tick_params(axis='y', length=5)  # Show tick marks
                                     if ax2 and not is_bubble_chart and not disable_secondary_y:
                                      ax2.tick_params(axis='y', length=5)  # Show secondary y-axis tick marks
-                        
-                        # Apply X-axis label distance using tick parameters
-                        # if x_axis_label_distance:
-                        #     # Use tick label padding to control distance
-                        #     ax1.tick_params(axis='x', pad=5)  # Fixed: Use small default padding
-                        #     # current_app.logger.debug(f"Applied X-axis tick padding: {x_axis_label_distance}")
-                        
-                        # Apply Y-axis label distance using tick parameters
-                        # if y_axis_label_distance:
-                        #     # Use tick label padding to control distance
-                        #     ax1.tick_params(axis='y', pad=5)  # Fixed: Use small default padding
-                        #     # current_app.logger.debug(f"Applied Y-axis tick padding: {y_axis_label_distance}")
-                        
-                        # Apply secondary y-axis formatting for Matplotlib
-                        if ax2 and not is_bubble_chart and not disable_secondary_y:
-                            if secondary_y_axis_format:
-                                from matplotlib.ticker import FuncFormatter
-                                def percentage_formatter(x, pos):
-                                    return f'{x:.0%}'
-                                ax2.yaxis.set_major_formatter(FuncFormatter(percentage_formatter))
-                        if secondary_y_axis_min_max:
-                            # Handle "auto" value for secondary y-axis min/max
-                            if secondary_y_axis_min_max == "auto":
-                                # Don't set range for auto - let Matplotlib auto-scale
-                                pass
-                            elif isinstance(secondary_y_axis_min_max, list) and len(secondary_y_axis_min_max) == 2:
-                                ax2.set_ylim(secondary_y_axis_min_max)
-                            else:
-                                pass  # Suppress warning logs: f"Invalid secondary_y_axis_min_max format: {secondary_y_axis_min_max}")
-                        elif is_bubble_chart:
-                            # current_app.logger.info(f"🎈 Skipping secondary Y-axis formatting for bubble chart")
-                            # Explicitly hide secondary Y-axis for bubble charts
-                            if ax2:
-                                ax2.set_visible(False)
-                                # current_app.logger.info(f"🎈 Secondary Y-axis hidden for bubble chart")
-                        elif disable_secondary_y:
-                            # Hide secondary Y-axis for all chart types when explicitly disabled
-                            if ax2:
-                                ax2.set_visible(False)
-                                # Remove all ticks and labels from secondary y-axis
-                                ax2.set_yticks([])
-                                ax2.set_yticklabels([])
-                                # Hide the spine (axis line)
-                                ax2.spines['right'].set_visible(False)
-                                # Force hide the entire secondary y-axis
-                                ax2.set_ylabel("")  # Remove any label
-                                ax2.set_title("")   # Remove any title
-                                # current_app.logger.info(f"📊 Secondary Y-axis hidden for scatter/area chart")
-                        
-                        # Gridlines
-                        # current_app.logger.debug(f"Gridlines setting: {show_gridlines}")
-                        if show_gridlines:
-                            # Map gridline styles to valid Matplotlib linestyles
-                            matplotlib_linestyle_map = {
-                                "solid": "-",
-                                "dashed": "--", 
-                                "dash": "--",  # Map 'dash' to '--'
-                                "dashdot": "-.",
-                                "dotted": ":",
-                                "dot": ":",
-                                "dotdash": "-."
-                            }
-                            mapped_linestyle = matplotlib_linestyle_map.get(gridline_style, "--")
-                            # Show both horizontal and vertical gridlines
-                            ax1.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6, axis='both')
-                            if ax2 and not is_bubble_chart and not disable_secondary_y:
-                                ax2.grid(True, linestyle=mapped_linestyle, color=gridline_color if gridline_color else '#ccc', alpha=0.6, axis='both')
-                        else:
-                            ax1.grid(False)
-                            if ax2 and not disable_secondary_y:
-                             ax2.grid(False)
                         
                         # Apply primary y-axis formatting for Matplotlib
                         if axis_tick_format:
@@ -5408,7 +5168,9 @@ def _generate_report(project_id, template_path, data_file_path):
             for tag in chart_placeholders:
                 if tag.lower() in chart_attr_map:
                     try:
+                        current_app.logger.info(f"🔍 About to call generate_chart for tag: {tag}")
                         chart_img = generate_chart({}, tag)
+                        current_app.logger.info(f"🔍 generate_chart returned: {chart_img is not None}")
                         if chart_img:
                             para.text = re.sub(rf"\$\{{{tag}\}}", "", para.text, flags=re.IGNORECASE)
                             para.add_run().add_picture(chart_img, width=Inches(5.5))
@@ -5453,7 +5215,9 @@ def _generate_report(project_id, template_path, data_file_path):
                         for tag in chart_placeholders:
                             if tag.lower() in chart_attr_map:
                                 try:
+                                    current_app.logger.info(f"🔍 About to call generate_chart for tag: {tag} (table)")
                                     chart_img = generate_chart({}, tag)
+                                    current_app.logger.info(f"🔍 generate_chart returned: {chart_img is not None} (table)")
                                     if chart_img:
                                         para.text = re.sub(rf"\$\{{{tag}\}}", "", para.text, flags=re.IGNORECASE)
                                         para.add_run().add_picture(chart_img, width=Inches(5.5))
