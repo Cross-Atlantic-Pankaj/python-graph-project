@@ -201,10 +201,190 @@ def create_expanded_pie_chart(labels, values, colors, expanded_segment, title, v
     
     return fig
 
+def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None):
+    """
+    Convert ChatGPT JSON format to the format expected by create_bar_of_pie_chart
+    Now supports Excel cell references in the data section
+    """
+    import re
+    import openpyxl
+    from openpyxl.utils import get_column_letter, column_index_from_string
+    
+    def extract_excel_range(sheet, cell_range):
+        """Extract values from Excel cell range"""
+        try:
+            # Parse the range (e.g., "A1:B3")
+            if ':' in cell_range:
+                start_cell, end_cell = cell_range.split(':')
+                start_col = column_index_from_string(re.sub(r'\d+', '', start_cell)) - 1
+                start_row = int(re.sub(r'[A-Z]+', '', start_cell)) - 1
+                end_col = column_index_from_string(re.sub(r'\d+', '', end_cell)) - 1
+                end_row = int(re.sub(r'[A-Z]+', '', end_cell)) - 1
+                
+                values = []
+                for row in range(start_row, end_row + 1):
+                    for col in range(start_col, end_col + 1):
+                        cell_value = sheet.cell(row=row + 1, column=col + 1).value
+                        if cell_value is not None:
+                            values.append(cell_value)
+                return values
+            else:
+                # Single cell
+                col = column_index_from_string(re.sub(r'\d+', '', cell_range)) - 1
+                row = int(re.sub(r'[A-Z]+', '', cell_range)) - 1
+                return [sheet.cell(row=row + 1, column=col + 1).value]
+        except Exception as e:
+            print(f"Error extracting Excel range {cell_range}: {e}")
+            return []
+    
+    chart_meta = chatgpt_json.get("chart_meta", {})
+    data = chatgpt_json.get("data", {})
+    
+    # Extract overall data - check for Excel cell references first
+    overall_data = data.get("overall", [])
+    overall_labels = data.get("overall_labels", [])
+    overall_values = data.get("overall_values", [])
+    
+    # Check if overall_labels and overall_values are Excel cell references
+    if isinstance(overall_labels, str) and re.match(r'^[A-Z]+\d+:[A-Z]+\d+$', overall_labels) and data_file_path:
+        try:
+            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+            sheet = wb[chart_meta.get("source_sheet", "sample")]
+            overall_labels = extract_excel_range(sheet, overall_labels)
+            wb.close()
+        except Exception as e:
+            print(f"Error extracting overall_labels from Excel: {e}")
+    
+    if isinstance(overall_values, str) and re.match(r'^[A-Z]+\d+:[A-Z]+\d+$', overall_values) and data_file_path:
+        try:
+            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+            sheet = wb[chart_meta.get("source_sheet", "sample")]
+            overall_values = extract_excel_range(sheet, overall_values)
+            wb.close()
+        except Exception as e:
+            print(f"Error extracting overall_values from Excel: {e}")
+    
+    # If we don't have data from Excel or arrays, use object format
+    if not overall_labels and not overall_values and overall_data:
+        overall_labels = [item.get("label", "") for item in overall_data]
+        overall_values = [item.get("value", 0) for item in overall_data]
+    
+    # Extract other breakdown data - check for Excel cell references first
+    other_data = data.get("other_breakdown", [])
+    other_labels = data.get("other_labels", [])
+    other_values = data.get("other_values", [])
+    
+    # Check if other_labels and other_values are Excel cell references
+    if isinstance(other_labels, str) and re.match(r'^[A-Z]+\d+:[A-Z]+\d+$', other_labels) and data_file_path:
+        try:
+            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+            sheet = wb[chart_meta.get("source_sheet", "sample")]
+            other_labels = extract_excel_range(sheet, other_labels)
+            wb.close()
+        except Exception as e:
+            print(f"Error extracting other_labels from Excel: {e}")
+    
+    if isinstance(other_values, str) and re.match(r'^[A-Z]+\d+:[A-Z]+\d+$', other_values) and data_file_path:
+        try:
+            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+            sheet = wb[chart_meta.get("source_sheet", "sample")]
+            other_values = extract_excel_range(sheet, other_values)
+            wb.close()
+        except Exception as e:
+            print(f"Error extracting other_values from Excel: {e}")
+    
+    # If we don't have data from Excel or arrays, use object format
+    if not other_labels and not other_values and other_data:
+        other_labels = [item.get("label", "") for item in other_data]
+        other_values = [item.get("value", 0) for item in other_data]
+    
+    # Process cell references in chart_meta attributes
+    if data_file_path:
+        try:
+            wb = openpyxl.load_workbook(data_file_path, data_only=True)
+            sheet = wb[chart_meta.get("source_sheet", "sample")]
+            
+            # Process cell references in chart_meta
+            for key, value in chart_meta.items():
+                if isinstance(value, str):
+                    # Check for single cell reference (e.g., "AR13")
+                    if re.match(r'^[A-Z]+\d+$', value):
+                        cell_value = sheet.cell(
+                            row=int(re.sub(r'[A-Z]+', '', value)), 
+                            column=column_index_from_string(re.sub(r'\d+', '', value))
+                        ).value
+                        if cell_value is not None:
+                            chart_meta[key] = cell_value
+                    # Check for cell range reference (e.g., "A1:B3")
+                    elif re.match(r'^[A-Z]+\d+:[A-Z]+\d+$', value):
+                        cell_values = extract_excel_range(sheet, value)
+                        if cell_values:
+                            chart_meta[key] = cell_values
+            
+            wb.close()
+        except Exception as e:
+            print(f"Error processing cell references in chart_meta: {e}")
+    
+    # Convert to expected format
+    converted_json = {
+        "chart_meta": {
+            "chart_type": "bar_of_pie",
+            "title_left": chart_meta.get("title_left", "Revenue Breakdown"),
+            "title_right": chart_meta.get("title_right", "'Other' Composition"),
+            "expanded_segment": "Other",
+            "other_labels": other_labels,
+            "other_values": other_values,
+            "other_colors": chart_meta.get("palette_other", []),
+            "type_left": chart_meta.get("type_left", "pie"),
+            "stacked": chart_meta.get("type_right") == "stacked_bar",
+            "connector": chart_meta.get("connector", {}),
+            "source_sheet": chart_meta.get("source_sheet", "sample"),  # Pass through source sheet
+            
+            # Pass through all chart control attributes
+            "showlegend": chart_meta.get("showlegend", True),
+            "legend_position": chart_meta.get("legend_position", "bottom"),
+            "legend_font_size": chart_meta.get("legend_font_size", 10),
+            "data_labels": chart_meta.get("data_labels", True),
+            "data_label_format": chart_meta.get("data_label_format", ".1f"),
+            "data_label_font_size": chart_meta.get("data_label_font_size", 10),
+            "data_label_color": chart_meta.get("data_label_color", "#000000"),
+            "x_axis_title": chart_meta.get("x_axis_title", "Categories"),
+            "y_axis_title": chart_meta.get("y_axis_title", "Value"),
+            "show_x_axis": chart_meta.get("show_x_axis", True),
+            "show_y_axis": chart_meta.get("show_y_axis", True),
+            "show_x_ticks": chart_meta.get("show_x_ticks", True),
+            "show_y_ticks": chart_meta.get("show_y_ticks", True),
+            "x_axis_label_distance": chart_meta.get("x_axis_label_distance", 0),
+            "y_axis_label_distance": chart_meta.get("y_axis_label_distance", 0),
+            "axis_tick_font_size": chart_meta.get("axis_tick_font_size", 10),
+            "show_gridlines": chart_meta.get("show_gridlines", False),
+            "gridline_color": chart_meta.get("gridline_color", "#E5E7EB"),
+            "gridline_style": chart_meta.get("gridline_style", "solid"),
+            "height": chart_meta.get("height", 500),
+            "width": chart_meta.get("width", 900),
+            "column_widths": chart_meta.get("column_widths", [0.5, 0.5]),
+            "horizontal_spacing": chart_meta.get("horizontal_spacing", 0.1),
+            "margin": chart_meta.get("margin", dict(l=50, r=50, t=80, b=50)),
+            "font_family": chart_meta.get("font_family", "Arial"),
+            "font_size": chart_meta.get("font_size", 14),
+            "font_color": chart_meta.get("font_color", "#333333"),
+            "chart_background": chart_meta.get("chart_background", "#FFFFFF"),
+            "plot_background": chart_meta.get("plot_background", "#F8F9FA")
+        },
+        "series": {
+            "labels": overall_labels,
+            "values": overall_values,
+            "colors": chart_meta.get("palette_main", [])
+        }
+    }
+    
+    return converted_json
+
 def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, other_colors, title, value_format="", chart_meta=None):
     """
     Create a 'bar of pie' chart using Plotly: pie chart with one segment broken down as a bar chart.
     Enhanced version with better title handling and layout options.
+    Supports both individual bars and stacked bars.
     """
     # Filter out empty/null values from other_labels and other_values
     filtered_data = []
@@ -237,6 +417,54 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
     chart_background = chart_meta.get("chart_background", "#FFFFFF") if chart_meta else "#FFFFFF"
     plot_background = chart_meta.get("plot_background", "#F8F9FA") if chart_meta else "#F8F9FA"
     
+    # Legend controls
+    show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True)) if chart_meta else True
+    legend_position = chart_meta.get("legend_position", "bottom") if chart_meta else "bottom"
+    legend_font_size = chart_meta.get("legend_font_size", 10) if chart_meta else 10
+    
+
+    
+    # Data label controls
+    data_labels = chart_meta.get("data_labels", True) if chart_meta else True
+    data_label_format = chart_meta.get("data_label_format", ".1f") if chart_meta else ".1f"
+    data_label_font_size = chart_meta.get("data_label_font_size", 10) if chart_meta else 10
+    data_label_color = chart_meta.get("data_label_color", "#000000") if chart_meta else "#000000"
+    
+    # Validate data_label_format to ensure it's a valid format specifier
+    if data_label_format and data_label_format not in [".0f", ".1f", ".2f", ".3f", ".4f", ".5f", ".6f", ".7f", ".8f", ".9f", "d", "i", "o", "x", "X", "e", "E", "f", "F", "g", "G", "n", "%"]:
+        # If it's not a valid format specifier, use default
+        data_label_format = ".1f"
+    
+    # Helper function to safely format data labels
+    def safe_format_label(value, format_spec=".1f"):
+        try:
+            return f"{value:{format_spec}}%"
+        except (ValueError, TypeError):
+            return f"{value:.1f}%"
+    
+    # Axis controls
+    x_axis_title = chart_meta.get("x_axis_title", "Categories") if chart_meta else "Categories"
+    y_axis_title = chart_meta.get("y_axis_title", "Value") if chart_meta else "Value"
+    show_x_axis = chart_meta.get("show_x_axis", True) if chart_meta else True
+    show_y_axis = chart_meta.get("show_y_axis", True) if chart_meta else True
+    show_x_ticks = chart_meta.get("show_x_ticks", True) if chart_meta else True
+    show_y_ticks = chart_meta.get("show_y_ticks", True) if chart_meta else True
+    x_axis_label_distance = chart_meta.get("x_axis_label_distance", 0) if chart_meta else 0
+    y_axis_label_distance = chart_meta.get("y_axis_label_distance", 0) if chart_meta else 0
+    axis_tick_font_size = chart_meta.get("axis_tick_font_size", 10) if chart_meta else 10
+    
+    # Grid controls
+    show_gridlines = chart_meta.get("show_gridlines", False) if chart_meta else False
+    gridline_color = chart_meta.get("gridline_color", "#E5E7EB") if chart_meta else "#E5E7EB"
+    gridline_style = chart_meta.get("gridline_style", "solid") if chart_meta else "solid"
+    
+    # Margin and spacing controls
+    margin = chart_meta.get("margin", dict(l=50, r=50, t=80, b=50)) if chart_meta else dict(l=50, r=50, t=80, b=50)
+    horizontal_spacing = chart_meta.get("horizontal_spacing", 0.1) if chart_meta else 0.1
+    
+    # Check if stacked bars are requested
+    is_stacked = chart_meta.get("stacked", False) if chart_meta else False
+    
     # Connector styling
     connector_style = chart_meta.get("connector", {}) if chart_meta else {}
     connector_color = connector_style.get("color", "#6B7280")
@@ -248,19 +476,26 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
         specs=[[{"type": "pie"}, {"type": "bar"}]],
         column_widths=column_widths,
         subplot_titles=(title_left, title_right),
-        horizontal_spacing=0.1
+        horizontal_spacing=horizontal_spacing
     )
+    
+    # Check if donut chart is requested
+    is_donut = chart_meta.get("type_left") == "donut_pie" if chart_meta else False
+    hole_size = 0.4 if is_donut else 0.0
     
     # Main pie chart with enhanced styling
     fig.add_trace(go.Pie(
         labels=labels,
         values=values,
         marker=dict(colors=colors),
-        textinfo="percent",
+        textinfo="percent" if data_labels else "none",
         hoverinfo="label+percent+value",
         pull=[0.1 if l == "Other" else 0 for l in labels],
         name="Main Pie",
-        textfont=dict(family=font_family, size=font_size, color=font_color)
+        hole=hole_size,
+        showlegend=show_legend,
+        textfont=dict(family=font_family, size=font_size, color=font_color),
+        textposition="inside" if data_labels else "none"
     ), row=1, col=1)
     
     # Bar chart for breakdown (only if we have filtered data)
@@ -304,57 +539,176 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
                 except:
                     formatted_labels.append(str(label))
         
-        # Create individual horizontal bars (one for each category)
-        if bar_orientation.lower() == "horizontal":
-            # Create individual horizontal bar traces for each data point
-            for i, (label, value) in enumerate(zip(formatted_labels, numeric_values)):
-                bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
-                
-                fig.add_trace(go.Bar(
-                    x=[value],  # Single value for this bar
-                    y=[label],  # Category label
-                    orientation="h",
-                    marker_color=bar_color,
-                    text=[f"{value:.1f}%"],
-                    textposition="auto",
-                    name=f"Breakdown {i+1}",
-                    showlegend=False,
-                    textfont=dict(family=font_family, size=font_size, color=font_color),
-                    hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
-                ), row=1, col=2)
+        if is_stacked:
+            # Create stacked bar chart with separate traces for each segment
+            if bar_orientation.lower() == "horizontal":
+                # Create stacked horizontal bar with separate traces
+                for i, (label, value) in enumerate(zip(filtered_labels, numeric_values)):
+                    bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
+                    
+                    fig.add_trace(go.Bar(
+                        x=[value],  # Single value for this segment
+                        y=["Other"],  # Single category for stacked bar
+                        orientation="h",
+                        marker_color=bar_color,
+                        text=[safe_format_label(value, data_label_format)] if data_labels else [""],
+                        textposition="inside",
+                        name=label,
+                        showlegend=False,
+                        textfont=dict(family=font_family, size=data_label_font_size, color=data_label_color),
+                        hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
+                    ), row=1, col=2)
+            else:
+                # Create stacked vertical bar with separate traces
+                for i, (label, value) in enumerate(zip(filtered_labels, numeric_values)):
+                    bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
+                    
+                    fig.add_trace(go.Bar(
+                        x=["Other"],  # Single category for stacked bar
+                        y=[value],  # Single value for this segment
+                        marker_color=bar_color,
+                        text=[safe_format_label(value, data_label_format)] if data_labels else [""],
+                        textposition="inside",
+                        name=label,
+                        showlegend=False,
+                        textfont=dict(family=font_family, size=data_label_font_size, color=data_label_color),
+                        hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
+                    ), row=1, col=2)
+            
+            # Set barmode to 'stack' for proper stacking
+            fig.update_layout(barmode='stack')
         else:
-            # Create individual vertical bar traces for each data point
-            for i, (label, value) in enumerate(zip(formatted_labels, numeric_values)):
-                bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
-                
-                fig.add_trace(go.Bar(
-                    x=[label],  # Category label
-                    y=[value],  # Single value for this bar
-                    marker_color=bar_color,
-                    text=[f"{value:.1f}%"],
-                    textposition="auto",
-                    name=f"Breakdown {i+1}",
-                    showlegend=False,
-                    textfont=dict(family=font_family, size=font_size, color=font_color),
-                    hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
-                ), row=1, col=2)
+            # Create individual bars (original behavior)
+            if bar_orientation.lower() == "horizontal":
+                # Create individual horizontal bar traces for each data point
+                for i, (label, value) in enumerate(zip(formatted_labels, numeric_values)):
+                    bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
+                    
+                    fig.add_trace(go.Bar(
+                        x=[value],  # Single value for this bar
+                        y=[label],  # Category label
+                        orientation="h",
+                        marker_color=bar_color,
+                        text=[safe_format_label(value, data_label_format)] if data_labels else [""],
+                        textposition="auto",
+                        name=f"Breakdown {i+1}",
+                        showlegend=False,
+                        textfont=dict(family=font_family, size=data_label_font_size, color=data_label_color),
+                        hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
+                    ), row=1, col=2)
+            else:
+                # Create individual vertical bar traces for each data point
+                for i, (label, value) in enumerate(zip(formatted_labels, numeric_values)):
+                    bar_color = other_colors[i] if other_colors and i < len(other_colors) else None
+                    
+                    fig.add_trace(go.Bar(
+                        x=[label],  # Category label
+                        y=[value],  # Single value for this bar
+                        marker_color=bar_color,
+                        text=[safe_format_label(value, data_label_format)] if data_labels else [""],
+                        textposition="auto",
+                        name=f"Breakdown {i+1}",
+                        showlegend=False,
+                        textfont=dict(family=font_family, size=data_label_font_size, color=data_label_color),
+                        hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
+                    ), row=1, col=2)
     
     # Enhanced layout with better styling
     fig.update_layout(
         title_text="",  # Remove main title since we have subplot titles
-        showlegend=False,
+        showlegend=show_legend,
         height=height,
         width=width,
         font=dict(family=font_family, size=font_size, color=font_color),
         paper_bgcolor=chart_background,
         plot_bgcolor=plot_background,
-        margin=dict(l=50, r=50, t=80, b=50)
+        margin=margin
     )
+    
+    # Force legend visibility based on show_legend setting
+    if not show_legend:
+        # Explicitly hide legend for all traces
+        for trace in fig.data:
+            trace.showlegend = False
+    
+    # Configure legend position and styling
+    if show_legend:
+        # Map legend positions to Plotly coordinates
+        legend_positions = {
+            "top": dict(x=0.5, y=1.1, xanchor="center", yanchor="bottom"),
+            "bottom": dict(x=0.5, y=-0.2, xanchor="center", yanchor="top"),
+            "left": dict(x=-0.2, y=0.5, xanchor="right", yanchor="middle"),
+            "right": dict(x=1.1, y=0.5, xanchor="left", yanchor="middle")
+        }
+        
+        legend_config = {}
+        if legend_position in legend_positions:
+            legend_config.update(legend_positions[legend_position])
+        
+        if legend_font_size:
+            legend_config["font"] = dict(size=legend_font_size, family=font_family, color=font_color)
+        
+        if legend_config:
+            fig.update_layout(legend=legend_config)
     
     # Update subplot titles with better styling
     fig.update_annotations(
         font=dict(family=font_family, size=font_size + 2, color=font_color)
     )
+    
+    # Update bar chart axes with comprehensive controls
+    if show_x_axis:
+        x_axis_config = {
+            "title": dict(text=x_axis_title, font=dict(size=font_size)),
+            "showticklabels": show_x_ticks,
+            "tickfont": dict(size=axis_tick_font_size)
+        }
+        
+        # Apply axis label distance if specified
+        if x_axis_label_distance is not None:
+            x_axis_config["title"] = dict(
+                text=x_axis_title, 
+                font=dict(size=font_size),
+                standoff=x_axis_label_distance
+            )
+        
+        fig.update_xaxes(**x_axis_config, row=1, col=2)
+    else:
+        fig.update_xaxes(visible=False, row=1, col=2)
+    
+    if show_y_axis:
+        y_axis_config = {
+            "title": dict(text=y_axis_title, font=dict(size=font_size)),
+            "showticklabels": show_y_ticks,
+            "tickfont": dict(size=axis_tick_font_size)
+        }
+        
+        # Apply axis label distance if specified
+        if y_axis_label_distance is not None:
+            y_axis_config["title"] = dict(
+                text=y_axis_title, 
+                font=dict(size=font_size),
+                standoff=y_axis_label_distance
+            )
+        
+        fig.update_yaxes(**y_axis_config, row=1, col=2)
+    else:
+        fig.update_yaxes(visible=False, row=1, col=2)
+    
+    # Add gridlines if requested
+    if show_gridlines:
+        fig.update_xaxes(
+            showgrid=True,
+            gridcolor=gridline_color,
+            gridwidth=1,
+            row=1, col=2
+        )
+        fig.update_yaxes(
+            showgrid=True,
+            gridcolor=gridline_color,
+            gridwidth=1,
+            row=1, col=2
+        )
     
     # Update axis formatting for the bar chart to show percentages
     if filtered_values and isinstance(filtered_values[0], (int, float)) and filtered_values[0] <= 1.0:
@@ -1109,12 +1463,22 @@ def _generate_report(project_id, template_path, data_file_path):
                 raw_chart_attr = chart_attr_map.get(chart_tag_lower, "{}")
                 chart_config = json.loads(re.sub(r'//.*?\n|/\*.*?\*/', '', raw_chart_attr, flags=re.DOTALL))
 
-                chart_meta = chart_config.get("chart_meta", {})
-                series_meta = chart_config.get("series", {})
-                
-                # Allow chart_type to be overridden from JSON configuration
-                chart_type = chart_config.get("chart_type", chart_type_map.get(chart_tag_lower, "")).lower().strip()
-                title = chart_meta.get("chart_title", chart_tag)
+                # Check if this is a ChatGPT JSON format and convert it
+                if "data" in chart_config and "validation" in chart_config:
+                    # This is ChatGPT JSON format, convert it
+                    converted_config = convert_chatgpt_json_to_bar_of_pie_format(chart_config, data_file_path)
+                    chart_meta = converted_config.get("chart_meta", {})
+                    series_meta = converted_config.get("series", {})
+                    chart_type = "bar_of_pie"
+                    title = chart_meta.get("title_left", chart_tag)
+                else:
+                    # Standard format
+                    chart_meta = chart_config.get("chart_meta", {})
+                    series_meta = chart_config.get("series", {})
+                    
+                    # Allow chart_type to be overridden from JSON configuration
+                    chart_type = chart_config.get("chart_type", chart_type_map.get(chart_tag_lower, "")).lower().strip()
+                    title = chart_meta.get("chart_title", chart_tag)
 
                 # --- Comprehensive attribute detection logging ---
                 #current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION STARTED")
@@ -1625,6 +1989,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         # Data analysis completed (logging removed for cleaner output)
                     
                     value_format = chart_meta.get("value_format", "")
+                    # For bar of pie charts, use labels from series_meta, fallback to x_values
                     labels = series_meta.get("labels", x_values)
                     values = series_meta.get("values", [])
                     colors = series_meta.get("colors", [])
@@ -1641,6 +2006,14 @@ def _generate_report(project_id, template_path, data_file_path):
                         value_format=value_format,
                         chart_meta=chart_meta
                     )
+                    
+                    # Save Plotly figure as PNG file for Word document insertion
+                    tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
+                    fig.write_image(tmpfile.name, width=900, height=500, scale=2)
+                    plt.close('all')  # Close any matplotlib figures
+                    gc.collect()  # Force garbage collection
+                    
+                    return tmpfile.name
                 
                 def extract_values_from_range(cell_range):
                     start_cell, end_cell = cell_range.split(":")
