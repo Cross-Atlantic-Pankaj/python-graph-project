@@ -343,6 +343,7 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
             # Pass through all chart control attributes
             "showlegend": chart_meta.get("showlegend", True),
             "legend_position": chart_meta.get("legend_position", "bottom"),
+            "legend_orientation": chart_meta.get("legend_orientation", "v"),  # Add legend orientation
             "legend_font_size": chart_meta.get("legend_font_size", 10),
             "data_labels": chart_meta.get("data_labels", True),
             "data_label_format": chart_meta.get("data_label_format", ".1f"),
@@ -418,9 +419,15 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
     plot_background = chart_meta.get("plot_background", "#F8F9FA") if chart_meta else "#F8F9FA"
     
     # Legend controls
-    show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True)) if chart_meta else True
+    show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True)) if chart_meta else True
+    # Convert string "false"/"true" to boolean if needed
+    if isinstance(show_legend_raw, str):
+        show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+    else:
+        show_legend = bool(show_legend_raw)
     legend_position = chart_meta.get("legend_position", "bottom") if chart_meta else "bottom"
     legend_font_size = chart_meta.get("legend_font_size", 10) if chart_meta else 10
+    legend_orientation = chart_meta.get("legend_orientation", "v") if chart_meta else "v"  # "v" for vertical, "h" for horizontal
     
 
     
@@ -554,7 +561,7 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
                         text=[safe_format_label(value, data_label_format)] if data_labels else [""],
                         textposition="inside",
                         name=label,
-                        showlegend=False,
+                        showlegend=show_legend,  # Enable legend for bar traces
                         textfont=dict(family=font_family, size=data_label_font_size, color=data_label_color),
                         hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
                     ), row=1, col=2)
@@ -570,7 +577,7 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
                         text=[safe_format_label(value, data_label_format)] if data_labels else [""],
                         textposition="inside",
                         name=label,
-                        showlegend=False,
+                        showlegend=show_legend,  # Enable legend for bar traces
                         textfont=dict(family=font_family, size=data_label_font_size, color=data_label_color),
                         hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
                     ), row=1, col=2)
@@ -591,8 +598,8 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
                         marker_color=bar_color,
                         text=[safe_format_label(value, data_label_format)] if data_labels else [""],
                         textposition="auto",
-                        name=f"Breakdown {i+1}",
-                        showlegend=False,
+                        name=label,  # Use actual label instead of generic name
+                        showlegend=show_legend,  # Enable legend for bar traces
                         textfont=dict(family=font_family, size=data_label_font_size, color=data_label_color),
                         hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
                     ), row=1, col=2)
@@ -607,8 +614,8 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
                         marker_color=bar_color,
                         text=[safe_format_label(value, data_label_format)] if data_labels else [""],
                         textposition="auto",
-                        name=f"Breakdown {i+1}",
-                        showlegend=False,
+                        name=label,  # Use actual label instead of generic name
+                        showlegend=show_legend,  # Enable legend for bar traces
                         textfont=dict(family=font_family, size=data_label_font_size, color=data_label_color),
                         hovertemplate=f"<b>{label}</b><br>Value: {value:.1f}%<extra></extra>"
                     ), row=1, col=2)
@@ -644,6 +651,19 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
         legend_config = {}
         if legend_position in legend_positions:
             legend_config.update(legend_positions[legend_position])
+        
+        # Add legend orientation for horizontal/vertical layout
+        legend_config["orientation"] = legend_orientation
+        
+        # Additional legend properties for better horizontal layout
+        if legend_orientation == "h":
+            # Override position for horizontal legends
+            legend_config["x"] = 0.5
+            legend_config["y"] = -0.15
+            legend_config["xanchor"] = "center"
+            legend_config["yanchor"] = "top"
+            # Force horizontal layout
+            legend_config["traceorder"] = "normal"
         
         if legend_font_size:
             legend_config["font"] = dict(size=legend_font_size, family=font_family, color=font_color)
@@ -1479,6 +1499,11 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Allow chart_type to be overridden from JSON configuration
                     chart_type = chart_config.get("chart_type", chart_type_map.get(chart_tag_lower, "")).lower().strip()
                     title = chart_meta.get("chart_title", chart_tag)
+                    
+                    # Debug logging for chart type detection
+                    current_app.logger.debug(f"🔥 Chart type detection - chart_config.get('chart_type'): {chart_config.get('chart_type')}")
+                    current_app.logger.debug(f"🔥 Chart type detection - chart_type_map.get(chart_tag_lower): {chart_type_map.get(chart_tag_lower, '')}")
+                    current_app.logger.debug(f"🔥 Chart type detection - Final chart_type: {chart_type}")
 
                 # --- Comprehensive attribute detection logging ---
                 #current_app.logger.info(f"🔍 COMPREHENSIVE CHART ATTRIBUTE DETECTION STARTED")
@@ -1656,6 +1681,11 @@ def _generate_report(project_id, template_path, data_file_path):
                     or chart_meta.get("y_axis_label_distance")
                     or chart_meta.get("primary_y_axis_label_distance")
                 )
+                
+                # Debug logging for axis label distance extraction
+                current_app.logger.debug(f"🔍 Axis Label Distance Extraction - X: {x_axis_label_distance}, Y: {y_axis_label_distance}")
+                current_app.logger.debug(f"🔍 Sources - data_dict: {data_dict.get('x_axis_label_distance')}, chart_config: {chart_config.get('x_axis_label_distance')}, chart_meta: {chart_meta.get('x_axis_label_distance')}")
+                current_app.logger.debug(f"🔍 Y Sources - data_dict: {data_dict.get('y_axis_label_distance')}, chart_config: {chart_config.get('y_axis_label_distance')}, chart_meta: {chart_meta.get('y_axis_label_distance')}")
                 axis_tick_distance = data_dict.get("axis_tick_distance") or chart_config.get("axis_tick_distance") or chart_meta.get("axis_tick_distance")
                 figsize = data_dict.get("figsize") or chart_config.get("figsize") or chart_meta.get("figsize")
                 
@@ -1800,6 +1830,12 @@ def _generate_report(project_id, template_path, data_file_path):
                     series_data = chart_meta.get("series", {}).get("data", [])
                     if not series_data:
                         series_data = chart_meta.get("series", [])
+                
+                # Debug logging for series data extraction
+                current_app.logger.debug(f"🔥 Series data extraction - series_meta.get('data'): {series_meta.get('data', [])}")
+                current_app.logger.debug(f"🔥 Series data extraction - series_meta.get('series'): {series_meta.get('series', [])}")
+                current_app.logger.debug(f"🔥 Series data extraction - chart_meta.get('series'): {chart_meta.get('series', [])}")
+                current_app.logger.debug(f"🔥 Series data extraction - Final series_data: {series_data}")
                 
                 # Extract x_values from the correct location (skip for heatmaps)
                 if chart_type != "heatmap":
@@ -2112,6 +2148,25 @@ def _generate_report(project_id, template_path, data_file_path):
                             hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}{str(value_format) if value_format else ''}<extra></extra>"
                         ))
                 
+                elif chart_type == "heatmap":
+                    # Special handling for heatmaps
+                    current_app.logger.debug(f"🔥 Heatmap chart type detected, processing series data")
+                    if series_data and len(series_data) > 0:
+                        series = series_data[0]
+                        current_app.logger.debug(f"🔥 Heatmap series data: {series}")
+                        
+                        # Validate heatmap data structure
+                        z_data = series.get("z", [])
+                        x_labels = series.get("x", [])
+                        y_labels = series.get("y", [])
+                        
+                        if z_data and x_labels and y_labels:
+                            current_app.logger.debug(f"🔥 Heatmap data validation passed - Z: {len(z_data)}x{len(z_data[0]) if z_data else 0}, X: {len(x_labels)}, Y: {len(y_labels)}")
+                        else:
+                            current_app.logger.warning(f"🔥 Heatmap data validation failed - Z: {z_data}, X: {x_labels}, Y: {y_labels}")
+                    else:
+                        current_app.logger.warning(f"🔥 No series data found for heatmap")
+                
                 elif chart_type == "treemap":
                     series = series_data[0]
                     label = series.get("name", "Treemap Chart")
@@ -2160,9 +2215,20 @@ def _generate_report(project_id, template_path, data_file_path):
                         hover_template += "Parent: %{parent}<br>"
                     hover_template += "Percentage: %{percentParent:.1f}%<extra></extra>"
                     
-                    fig.add_trace(go.Treemap(**treemap_kwargs,
+                    # Add showlegend parameter to the treemap trace
+                    treemap_trace = go.Treemap(**treemap_kwargs,
                         hovertemplate=hover_template
-                    ))
+                    )
+                    
+                    # Apply showlegend setting from chart_meta
+                    show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                    if isinstance(show_legend_raw, str):
+                        show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                    else:
+                        show_legend = bool(show_legend_raw)
+                    
+                    treemap_trace.showlegend = show_legend
+                    fig.add_trace(treemap_trace)
                 
                 # Handle stacked column, area, and other multi-series charts
                 else:
@@ -2483,7 +2549,12 @@ def _generate_report(project_id, template_path, data_file_path):
                     layout_updates["plot_bgcolor"] = plot_background
                 
                 # Legend configuration
-                show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                # Convert string "false"/"true" to boolean if needed
+                if isinstance(show_legend_raw, str):
+                    show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                else:
+                    show_legend = bool(show_legend_raw)
                 # current_app.logger.debug(f"Legend setting: {chart_meta.get('legend')}")
                 # current_app.logger.debug(f"Showlegend setting: {chart_meta.get('showlegend')}")
                 # current_app.logger.debug(f"Final show_legend: {show_legend}")
@@ -2829,7 +2900,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                         
                         # Add legend for pie chart
-                        show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                        show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                        # Convert string "false"/"true" to boolean if needed
+                        if isinstance(show_legend_raw, str):
+                            show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                        else:
+                            show_legend = bool(show_legend_raw)
                         if show_legend:
                             # Initialize legend_loc for pie charts
                             legend_loc = 'best'  # default
@@ -2980,7 +3056,12 @@ def _generate_report(project_id, template_path, data_file_path):
                             ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                             
                             # Add legend for regular pie chart
-                            show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            # Convert string "false"/"true" to boolean if needed
+                            if isinstance(show_legend_raw, str):
+                                show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                            else:
+                                show_legend = bool(show_legend_raw)
                             if show_legend:
                                 # Initialize legend_loc for pie charts
                                 legend_loc = 'best'  # default
@@ -3032,7 +3113,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         autotext.set_fontweight('bold')
                     ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
                     # Move legend outside
-                    show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                    show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                    # Convert string "false"/"true" to boolean if needed
+                    if isinstance(show_legend_raw, str):
+                        show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                    else:
+                        show_legend = bool(show_legend_raw)
                     legend_font_size = chart_meta.get("legend_font_size", 8)
                     if show_legend:
                         ax1.legend(wedges, labels, loc='center left', bbox_to_anchor=(1, 0.5), fontsize=legend_font_size)
@@ -3500,7 +3586,12 @@ def _generate_report(project_id, template_path, data_file_path):
                     layout_updates["plot_bgcolor"] = plot_background
                 
                 # Legend configuration
-                show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                # Convert string "false"/"true" to boolean if needed
+                if isinstance(show_legend_raw, str):
+                    show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                else:
+                    show_legend = bool(show_legend_raw)
                 # current_app.logger.debug(f"Legend setting: {chart_meta.get('legend')}")
                 # current_app.logger.debug(f"Showlegend setting: {chart_meta.get('showlegend')}")
                 # current_app.logger.debug(f"Final show_legend: {show_legend}")
@@ -3846,7 +3937,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                         
                         # Add legend for pie chart
-                        show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                        show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                        # Convert string "false"/"true" to boolean if needed
+                        if isinstance(show_legend_raw, str):
+                            show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                        else:
+                            show_legend = bool(show_legend_raw)
                         if show_legend:
                             # Initialize legend_loc for pie charts
                             legend_loc = 'best'  # default
@@ -3997,7 +4093,12 @@ def _generate_report(project_id, template_path, data_file_path):
                             ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                             
                             # Add legend for regular pie chart
-                            show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            # Convert string "false"/"true" to boolean if needed
+                            if isinstance(show_legend_raw, str):
+                                show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                            else:
+                                show_legend = bool(show_legend_raw)
                             if show_legend:
                                 # Initialize legend_loc for pie charts
                                 legend_loc = 'best'  # default
@@ -4049,7 +4150,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         autotext.set_fontweight('bold')
                     ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
                     # Move legend outside
-                    show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                    show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                    # Convert string "false"/"true" to boolean if needed
+                    if isinstance(show_legend_raw, str):
+                        show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                    else:
+                        show_legend = bool(show_legend_raw)
                     legend_font_size = chart_meta.get("legend_font_size", 8)
                     if show_legend:
                         ax1.legend(wedges, labels, loc='center left', bbox_to_anchor=(1, 0.5), fontsize=legend_font_size)
@@ -4166,11 +4272,16 @@ def _generate_report(project_id, template_path, data_file_path):
                         label = series.get("name", f"Series {i+1}")
                         series_type = series.get("type", "bar").lower()
                         
+                        # Debug logging for series type detection
+                        current_app.logger.debug(f"🔍 Processing series {i}: {label}, type: {series_type}")
+                        
                         # Map heatmap to imshow for Matplotlib
                         if series_type == "heatmap":
                             mpl_chart_type = "imshow"
+                            current_app.logger.debug(f"🔥 Heatmap detected, setting mpl_chart_type to: {mpl_chart_type}")
                         else:
                             mpl_chart_type = chart_type_mapping_mpl.get(series_type, "scatter")
+                            current_app.logger.debug(f"🔍 Regular chart type: {series_type} -> {mpl_chart_type}")
                         
                         color = None
                         if "marker" in series and isinstance(series["marker"], dict) and "color" in series["marker"]:
@@ -4185,6 +4296,11 @@ def _generate_report(project_id, template_path, data_file_path):
                             # Heatmaps use z data directly, skip y_vals processing
                             y_vals = []  # Not used for heatmaps
                             mpl_chart_type = "imshow"
+                            # Debug logging for heatmap data
+                            current_app.logger.debug(f"🔥 Heatmap series detected: {series}")
+                            current_app.logger.debug(f"🔥 Heatmap x data: {series.get('x', [])}")
+                            current_app.logger.debug(f"🔥 Heatmap y data: {series.get('y', [])}")
+                            current_app.logger.debug(f"🔥 Heatmap z data: {series.get('z', [])}")
                         else:
                             # Regular series processing
                             y_vals = series.get("values")
@@ -4398,25 +4514,53 @@ def _generate_report(project_id, template_path, data_file_path):
                                     
                                     # Apply axis label distances specifically for bubble charts
                                     if x_axis_label_distance is not None or y_axis_label_distance is not None:
-                                        # Calculate labelpad values with multiplication for visibility
-                                        x_labelpad = (x_axis_label_distance * 10) if x_axis_label_distance is not None else 50.0
-                                        y_labelpad = (y_axis_label_distance * 10) if y_axis_label_distance is not None else 50.0
+                                        # Calculate labelpad values with more aggressive multiplication for better spacing
+                                        figsize = chart_meta.get("figsize", [12, 8])
+                                        chart_width, chart_height = figsize
+                                        
+                                        # More aggressive multiplication factors for better label separation
+                                        x_multiplier = max(20, chart_width * 3.0)
+                                        y_multiplier = max(20, chart_height * 3.0)
+                                        
+                                        x_labelpad = (x_axis_label_distance * x_multiplier) if x_axis_label_distance is not None else 50.0
+                                        y_labelpad = (y_axis_label_distance * y_multiplier) if y_axis_label_distance is not None else 50.0
                                         
                                         # Get axis titles
                                         x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
                                         y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
+                                        
+                                        # Debug logging for bubble chart axis label distance
+                                        current_app.logger.debug(f"🎈 Bubble Chart Processing - X Distance: {x_axis_label_distance} → {x_labelpad}, Y Distance: {y_axis_label_distance} → {y_labelpad}")
+                                        current_app.logger.debug(f"🎈 Bubble Chart Titles - X: '{x_axis_title}', Y: '{y_axis_title}'")
                                         
                                         # Set axis labels with distance
                                         if x_axis_title:
                                             ax1.set_xlabel(x_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
                                                         fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
                                                         labelpad=x_labelpad)
+                                            current_app.logger.debug(f"🎈 Set X-axis label with labelpad: {x_labelpad}")
                                         if y_axis_title:
                                             ax1.set_ylabel(y_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
                                                         fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
                                                         labelpad=y_labelpad)
+                                            current_app.logger.debug(f"🎈 Set Y-axis label with labelpad: {y_labelpad}")
                                         
-                                        current_app.logger.debug(f"🎈 Bubble Chart Axis Label Distance - X: {x_axis_label_distance} → {x_labelpad}, Y: {y_axis_label_distance} → {y_labelpad}")
+                                        # Additional spacing techniques for y-axis
+                                        if y_axis_label_distance and y_axis_label_distance > 50:
+                                            # Force more space by adjusting the left margin
+                                            current_app.logger.debug(f"🎈 Applying additional y-axis spacing techniques")
+                                            # Adjust the plot position to create more left margin
+                                            ax1.set_position([0.15, 0.1, 0.75, 0.8])  # [left, bottom, width, height]
+                                        
+                                        current_app.logger.debug(f"🎈 Bubble Chart Axis Label Distance Applied Successfully")
+                                        
+                                        # Store the labelpad values for later use to prevent override
+                                        ax1._bubble_x_labelpad = x_labelpad
+                                        ax1._bubble_y_labelpad = y_labelpad
+                                        ax1._bubble_x_title = x_axis_title
+                                        ax1._bubble_y_title = y_axis_title
+                                    else:
+                                        current_app.logger.debug(f"🎈 Bubble Chart - No axis label distance values found")
                             else:
                                 # Enhanced scatter plot with custom styling
                                 # Extract marker properties from series
@@ -4600,10 +4744,14 @@ def _generate_report(project_id, template_path, data_file_path):
                                 for j, (x, y, text) in enumerate(zip(x_vals, y_vals, text_labels)):
                                     if j < len(text_labels):
                                         # Determine label position based on textposition
+                                        # Get custom label offset if specified, otherwise use defaults
+                                        custom_label_offset = chart_meta.get("data_label_offset", None)
+                                        
                                         if "top" in text_position:
-                                            y_offset = 5
+                                            # Increase offset to prevent overlap with data points
+                                            y_offset = custom_label_offset if custom_label_offset is not None else 15
                                         elif "bottom" in text_position:
-                                            y_offset = -5
+                                            y_offset = -custom_label_offset if custom_label_offset is not None else -15
                                         else:
                                             y_offset = 0
                                         
@@ -4618,17 +4766,31 @@ def _generate_report(project_id, template_path, data_file_path):
                                         
                                         # Add text label
                                         label_color = data_label_color or '#000000'
-                                        ax1.text(x, y + y_offset, str(text), 
-                                               ha=ha, va='bottom' if y_offset > 0 else 'top',
-                                               fontsize=data_label_font_size or 10,
-                                               color=label_color,
-                                               fontweight='bold',
-                                               bbox=dict(boxstyle="round,pad=0.3", 
-                                                        facecolor='white', 
-                                                        alpha=0.9,
-                                                        edgecolor='gray',
-                                                        linewidth=0.5),
-                                               zorder=5)
+                                        
+                                        # Check if plain text labels are requested
+                                        plain_text_labels = chart_meta.get("plain_text_labels", False)
+                                        
+                                        if plain_text_labels:
+                                            # Plain text without background box
+                                            ax1.text(x, y + y_offset, str(text), 
+                                                   ha=ha, va='bottom' if y_offset > 0 else 'top',
+                                                   fontsize=data_label_font_size or 10,
+                                                   color=label_color,
+                                                   fontweight='bold',
+                                                   zorder=5)
+                                        else:
+                                            # Text with background box (original behavior)
+                                            ax1.text(x, y + y_offset, str(text), 
+                                                   ha=ha, va='bottom' if y_offset > 0 else 'top',
+                                                   fontsize=data_label_font_size or 10,
+                                                   color=label_color,
+                                                   fontweight='bold',
+                                                   bbox=dict(boxstyle="round,pad=0.3", 
+                                                            facecolor='white', 
+                                                            alpha=0.9,
+                                                            edgecolor='gray',
+                                                            linewidth=0.5),
+                                                   zorder=5)
                         # Set axis labels, title, and legend for area chart (only once after all series)
                         if i == len(series_data) - 1 and mpl_chart_type == "fill_between":  # Only for area charts
                             # Set axis labels
@@ -4658,7 +4820,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                              fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                              
                              # Set legend
-                            show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            # Convert string "false"/"true" to boolean if needed
+                            if isinstance(show_legend_raw, str):
+                                show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                            else:
+                                show_legend = bool(show_legend_raw)
                             if show_legend:
                                  legend_position = chart_meta.get("legend_position", "top")
                                  legend_font_size = chart_meta.get("legend_font_size", 10)
@@ -4670,19 +4837,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                  else:
                                      ax1.legend(loc='best', fontsize=legend_font_size)
 
-                            # Add data labels if text is provided
-                            if text_labels and len(text_labels) == len(y_vals):
-                                # ... existing data label code ...
-                                ax1.annotate(text, (x, y + y_offset), ha=ha, va='center',
-                                            fontsize=data_label_font_size or 10,
-                                            color=label_color,
-                                            fontweight='bold',
-                                            bbox=dict(boxstyle="round,pad=0.3", 
-                                                    facecolor='white', 
-                                                    alpha=0.9,
-                                                    edgecolor='gray',
-                                                    linewidth=0.5),
-                                            zorder=5)
+                            # Data labels are already added in the main series processing loop above
+                            # No need to add them again here to avoid duplication
 
                             # Set axis labels, title, and legend for area chart (only once after all series)
                             if i == len(series_data) - 1:  # Only set once after all series are processed
@@ -4713,7 +4869,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                             fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                             
                             # Set legend
-                            show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                            # Convert string "false"/"true" to boolean if needed
+                            if isinstance(show_legend_raw, str):
+                                show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                            else:
+                                show_legend = bool(show_legend_raw)
                             if show_legend:
                                 legend_position = chart_meta.get("legend_position", "top")
                                 legend_font_size = chart_meta.get("legend_font_size", 10)
@@ -4746,11 +4907,145 @@ def _generate_report(project_id, template_path, data_file_path):
                                 contour_data = [y_vals] if len(y_vals) > 0 else [[0]]
                                 ax1.contour(contour_data)
                                 
+                        elif mpl_chart_type == "imshow":
+                            # Heatmap using matplotlib imshow
+                            current_app.logger.debug(f"🔥 Matplotlib heatmap processing started for series: {label}")
+                            
+                            # For heatmaps, get data directly from series
+                            z_data = series.get("z", [])
+                            x_labels = series.get("x", [])
+                            y_labels = series.get("y", [])
+                            colorscale = series.get("colorscale", "Blues")
+                            showscale = series.get("showscale", True)
+                            opacity = series.get("opacity", 1.0)
+                            
+                            # Debug logging
+                            current_app.logger.debug(f"🔥 Heatmap Debug - Series: {series}")
+                            current_app.logger.debug(f"🔥 Heatmap Debug - Z data: {z_data}")
+                            current_app.logger.debug(f"🔥 Heatmap Debug - X labels: {x_labels}")
+                            current_app.logger.debug(f"🔥 Heatmap Debug - Y labels: {y_labels}")
+                            
+                            # Ensure we have valid data for heatmap
+                            if z_data and x_labels and y_labels:
+                                # Convert z_data to numpy array for better handling
+                                import numpy as np
+                                z_array = np.array(z_data)
+                                
+                                # Validate z_array dimensions
+                                if z_array.size == 0:
+                                    current_app.logger.error(f"🔥 Heatmap Error: Z data is empty")
+                                    ax1.text(0.5, 0.5, "Empty heatmap data", 
+                                            ha='center', va='center', 
+                                            fontsize=font_size or 12,
+                                            transform=ax1.transAxes)
+                                    return
+                                
+                                # Ensure z_array is 2D
+                                if z_array.ndim == 1:
+                                    z_array = z_array.reshape(1, -1)
+                                    current_app.logger.debug(f"🔥 Heatmap: Reshaped 1D array to 2D: {z_array.shape}")
+                                
+                                current_app.logger.debug(f"🔥 Heatmap: Final z_array shape: {z_array.shape}")
+                                current_app.logger.debug(f"🔥 Heatmap: X labels count: {len(x_labels)}")
+                                current_app.logger.debug(f"🔥 Heatmap: Y labels count: {len(y_labels)}")
+                                
+                                # Create heatmap using imshow
+                                current_app.logger.debug(f"🔥 Creating heatmap with imshow...")
+                                im = ax1.imshow(z_array, 
+                                               cmap=colorscale, 
+                                               aspect='auto',
+                                               alpha=opacity)
+                                current_app.logger.debug(f"🔥 Heatmap imshow created successfully")
+                                
+                                # Set x and y axis labels
+                                current_app.logger.debug(f"🔥 Setting heatmap axis labels...")
+                                ax1.set_xticks(range(len(x_labels)))
+                                ax1.set_yticks(range(len(y_labels)))
+                                ax1.set_xticklabels(x_labels, rotation=45, ha='right')
+                                ax1.set_yticklabels(y_labels)
+                                
+                                # Ensure the plot is properly displayed
+                                ax1.set_aspect('auto')
+                                ax1.figure.canvas.draw()
+                                
+                                # Add colorbar if showscale is True
+                                if showscale:
+                                    current_app.logger.debug(f"🔥 Adding colorbar...")
+                                    cbar = plt.colorbar(im, ax=ax1)
+                                    cbar.set_label('Value', rotation=270, labelpad=15)
+                                
+                                # Add text annotations on each cell if text data is provided
+                                text_data = series.get("text", [])
+                                if text_data and len(text_data) == len(z_data) and len(text_data[0]) == len(z_data[0]):
+                                    current_app.logger.debug(f"🔥 Adding text annotations...")
+                                    for i in range(len(z_data)):
+                                        for j in range(len(z_data[0])):
+                                            text = str(text_data[i][j])
+                                            ax1.text(j, i, text, ha='center', va='center', 
+                                                   color='white' if z_array[i, j] > z_array.max() * 0.5 else 'black',
+                                                   fontweight='bold')
+                                
+                                # Apply background colors if specified
+                                if chart_background:
+                                    fig_mpl.patch.set_facecolor(chart_background)
+                                if plot_background:
+                                    ax1.set_facecolor(plot_background)
+                                
+                                # Add title with customizable styling
+                                title_font_size = font_size or 16
+                                title_color = font_color if font_color else '#2C3E50'
+                                title_font_family = chart_meta.get("font_family") if chart_meta.get("font_family") else None
+                                
+                                ax1.set_title(title, fontsize=title_font_size, weight='bold', pad=20, 
+                                            color=title_color, fontname=title_font_family)
+                                
+                                # Set axis labels
+                                x_axis_title = chart_meta.get("x_label", "")
+                                y_axis_title = chart_meta.get("primary_y_label", "")
+                                if x_axis_title:
+                                    ax1.set_xlabel(x_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
+                                                fontname=title_font_family)
+                                if y_axis_title:
+                                    ax1.set_ylabel(y_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
+                                                fontname=title_font_family)
+                                
+                                # Handle gridlines and cell borders
+                                show_gridlines = chart_meta.get("show_gridlines", True)
+                                show_cell_borders = chart_meta.get("show_cell_borders", True)
+                                
+                                if show_gridlines:
+                                    ax1.grid(True, which='both', color='gray', linewidth=0.5, alpha=0.3)
+                                else:
+                                    ax1.grid(False)
+                                
+                                if show_cell_borders:
+                                    # Add cell borders
+                                    for i in range(len(z_data) + 1):
+                                        ax1.axhline(y=i-0.5, color='black', linewidth=0.5, alpha=0.5)
+                                    if z_data and len(z_data[0]) > 0:
+                                        for j in range(len(z_data[0]) + 1):
+                                            ax1.axvline(x=j-0.5, color='black', linewidth=0.5, alpha=0.5)
+                                
+                                current_app.logger.debug(f"🔥 Heatmap created successfully with shape: {z_array.shape}")
+                            else:
+                                current_app.logger.warning(f"⚠️ Invalid heatmap data structure - Z: {z_data}, X: {x_labels}, Y: {y_labels}")
+                                ax1.text(0.5, 0.5, "Invalid data structure for heatmap", 
+                                        ha='center', va='center', 
+                                        fontsize=font_size or 12,
+                                        transform=ax1.transAxes)
+                                
+
                         elif mpl_chart_type == "treemap":
                             # Enhanced Treemap chart using squarify with full customization support
                             # For treemaps, get data directly from series
                             values = series.get("values", [])
                             labels = series.get("labels", [])
+                            
+                            # Debug logging for chart metadata
+                            current_app.logger.debug(f"🔍 Treemap Chart Meta Debug - Full chart_meta: {chart_meta}")
+                            current_app.logger.debug(f"🔍 Treemap Chart Meta Debug - showlegend value: {chart_meta.get('showlegend')}")
+                            current_app.logger.debug(f"🔍 Treemap Chart Meta Debug - showlegend type: {type(chart_meta.get('showlegend'))}")
+                            current_app.logger.debug(f"🔍 Treemap Chart Meta Debug - showlegend converted: {show_legend}")
                             
                             # Debug logging
                             current_app.logger.debug(f"🔍 Treemap Debug - Series: {series}")
@@ -4806,15 +5101,244 @@ def _generate_report(project_id, template_path, data_file_path):
                                     treemap_font_size = data_label_font_size if data_label_font_size else 10
                                     treemap_font_weight = 'bold'
                                     
+                                    # Check legend visibility early to determine plot labels
+                                    show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                                    # Convert string "false"/"true" to boolean if needed
+                                    if isinstance(show_legend_raw, str):
+                                        show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                                    else:
+                                        show_legend = bool(show_legend_raw)
+                                    
+                                    # Debug: log the legend decision
+                                    current_app.logger.debug(f"🔍 Treemap Legend Decision - Raw: {show_legend_raw}, Converted: {show_legend}, Type: {type(show_legend_raw)}")
+                                    
                                     # Create enhanced treemap with customizable styling
-                                    squarify.plot(
-                                        sizes=valid_data,
-                                        label=valid_labels,
-                                        color=valid_colors,
-                                        alpha=treemap_alpha,
-                                        ax=ax1,
-                                        text_kwargs={'fontsize': treemap_font_size, 'fontweight': treemap_font_weight}
-                                    )
+                                    # Always pass labels to squarify.plot() to avoid axis label errors
+                                    # But disable automatic legend creation by setting showlegend=False on the axis
+                                    ax1.set_visible(True)  # Ensure axis is visible
+                                    
+                                    # CRITICAL: Disable automatic legend creation at the matplotlib level
+                                    # This prevents squarify from creating legends automatically
+                                    if not show_legend:
+                                        # Set matplotlib to not show legends automatically
+                                        plt.rcParams['legend.automode'] = False
+                                        # Also try to disable legend creation on the axis
+                                        try:
+                                            ax1.set_legend_handles([])
+                                        except:
+                                            pass
+                                        
+                                        # CRITICAL: Override matplotlib's global legend settings
+                                        # This prevents any automatic legend creation across the entire plot
+                                        try:
+                                            # Disable automatic legend creation globally
+                                            plt.rcParams['legend.automode'] = False
+                                            plt.rcParams['legend.frameon'] = False
+                                            # Also try to disable legend creation on the axis
+                                            ax1.legend_ = None
+                                            if hasattr(ax1, '_legend'):
+                                                ax1._legend = None
+                                        except:
+                                            pass
+                                    
+                                    # For treemaps, we need to be careful about labels
+                                    # When showlegend is False, we must ensure no labels are passed to prevent legend creation
+                                    if show_legend:
+                                        # Only pass labels when we want to show legend
+                                        squarify.plot(
+                                            sizes=valid_data,
+                                            label=valid_labels,
+                                            color=valid_colors,
+                                            alpha=treemap_alpha,
+                                            ax=ax1,
+                                            text_kwargs={'fontsize': treemap_font_size, 'fontweight': treemap_font_weight}
+                                        )
+                                    else:
+                                        # CRITICAL: When legend is disabled, use empty labels to prevent any legend creation
+                                        # This is the key fix - empty labels won't create legend entries
+                                        current_app.logger.debug(f"🔍 Treemap: Using empty labels to prevent legend creation")
+                                        squarify.plot(
+                                            sizes=valid_data,
+                                            label=[''] * len(valid_labels),  # Empty labels prevent legend
+                                            color=valid_colors,
+                                            alpha=treemap_alpha,
+                                            ax=ax1,
+                                            text_kwargs={'fontsize': treemap_font_size, 'fontweight': treemap_font_weight}
+                                        )
+                                        
+                                        # CRITICAL: Immediately after plotting, ensure no legend is created
+                                        # This is the key step to prevent automatic legend creation
+                                        current_app.logger.debug(f"🔍 Treemap: Post-plot legend prevention")
+                                        
+                                        # Remove any plot elements that might have labels
+                                        for artist in ax1.get_children():
+                                            if hasattr(artist, 'get_label') and artist.get_label():
+                                                artist.set_label('')
+                                            if hasattr(artist, '_label') and artist._label:
+                                                artist._label = ''
+                                        
+                                        # Debug: log what plot elements were created
+                                        current_app.logger.debug(f"🔍 Treemap Debug - Plot elements after squarify: {[type(artist).__name__ for artist in ax1.get_children()]}")
+                                        current_app.logger.debug(f"🔍 Treemap Debug - Plot elements with labels: {[artist.get_label() for artist in ax1.get_children() if hasattr(artist, 'get_label') and artist.get_label()]}")
+                                        
+                                        # Check if squarify automatically created a legend
+                                        current_app.logger.debug(f"🔍 Treemap Debug - Axis legend after squarify: {ax1.get_legend()}")
+                                        current_app.logger.debug(f"🔍 Treemap Debug - Figure legends after squarify: {fig_mpl.legends if hasattr(fig_mpl, 'legends') else 'No legends attribute'}")
+                                        
+                                        # CRITICAL: Check if squarify created any plot elements that might automatically create legends
+                                        # This is often the root cause of automatic legend creation
+                                        for i, artist in enumerate(ax1.get_children()):
+                                            if hasattr(artist, 'get_label') and artist.get_label():
+                                                current_app.logger.warning(f"⚠️ Treemap: Found plot element with label '{artist.get_label()}' that might create legend")
+                                                # Force remove the label to prevent legend creation
+                                                artist.set_label('')
+                                        
+                                        # Additional safety: try to prevent matplotlib from creating legends
+                                        # by setting the axis to not show legends
+                                        try:
+                                            # This is a more direct approach to prevent legend creation
+                                            ax1.set_legend_handles([])
+                                        except:
+                                            pass
+                                        
+                                        # Also try to clear any legend handles that might exist
+                                        try:
+                                            ax1.legend_handles = []
+                                        except:
+                                            pass
+                                        
+                                        # CRITICAL: Force remove any legend that might have been created by squarify
+                                        # This is the key fix - squarify might be creating legends automatically
+                                        if ax1.get_legend():
+                                            current_app.logger.warning(f"⚠️ Treemap: Found legend after squarify.plot(), removing it")
+                                            ax1.get_legend().remove()
+                                        ax1.legend_ = None
+                                        
+                                        # Additional safety: ensure no legend exists at all
+                                        current_app.logger.debug(f"🔍 Treemap: Final legend check - ensuring no legend exists")
+                                        if ax1.get_legend():
+                                            current_app.logger.warning(f"⚠️ Treemap: Legend still exists after removal, forcing removal again")
+                                            ax1.get_legend().remove()
+                                            ax1.legend_ = None
+                                        
+                                        # Also try to prevent matplotlib from automatically creating legends
+                                        # by setting the axis to not show legends
+                                        try:
+                                            # This is a more direct approach to prevent legend creation
+                                            ax1.set_legend_handles([])
+                                        except:
+                                            pass
+                                        
+                                        # Also try to clear any legend handles that might exist
+                                        try:
+                                            ax1.legend_handles = []
+                                        except:
+                                            pass
+                                        
+                                        # CRITICAL: Override matplotlib's automatic legend creation
+                                        # This prevents any automatic legends from being created
+                                        try:
+                                            # Disable automatic legend creation
+                                            ax1.legend_ = None
+                                            if hasattr(ax1, '_legend'):
+                                                ax1._legend = None
+                                            # Also try to clear any legend handles
+                                            if hasattr(ax1, 'legend_handles'):
+                                                ax1.legend_handles = []
+                                        except:
+                                            pass
+                                        
+                                        # Also try to prevent matplotlib from automatically creating legends
+                                        # by setting the axis to not show legends
+                                        try:
+                                            # This is a more direct approach to prevent legend creation
+                                            ax1.set_legend_handles([])
+                                        except:
+                                            pass
+                                        
+                                        # Also try to clear any legend handles that might exist
+                                        try:
+                                            ax1.legend_handles = []
+                                        except:
+                                            pass
+                                    
+                                    # Immediately after squarify.plot(), remove any automatic legend creation
+                                    if not show_legend:
+                                        # Force remove any legend that might have been created
+                                        if ax1.get_legend():
+                                            ax1.get_legend().remove()
+                                        # Clear the legend attribute
+                                        ax1.legend_ = None
+                                        
+                                        # Also try to prevent any automatic legend creation
+                                        # by setting the axis to not show legends
+                                        ax1.set_navigate(True)  # Keep navigation enabled
+                                        # Clear any legend-related attributes
+                                        if hasattr(ax1, '_legend'):
+                                            ax1._legend = None
+                                        
+                                        # Additional safety: remove any plot elements that might have labels
+                                        # This prevents matplotlib from automatically creating legends
+                                        for artist in ax1.get_children():
+                                            if hasattr(artist, 'get_label') and artist.get_label():
+                                                artist.set_label('')
+                                            if hasattr(artist, '_label') and artist._label:
+                                                artist._label = ''
+                                    
+                                    # Ensure no automatic legend is added by squarify
+                                    if ax1.get_legend():
+                                        ax1.get_legend().remove()
+                                    
+                                    # Additional legend removal for squarify plots
+                                    if not show_legend:
+                                        # Remove any existing legend
+                                        if ax1.get_legend():
+                                            ax1.get_legend().remove()
+                                        # Clear all legend handles
+                                        ax1.legend_ = None
+                                        # Also try to remove from figure level
+                                        if fig_mpl.legends:
+                                            for legend in fig_mpl.legends:
+                                                legend.remove()
+                                        
+                                        # For squarify plots, we need to be more aggressive
+                                        # Remove labels from all plot elements that might create legends
+                                        for artist in ax1.get_children():
+                                            if hasattr(artist, 'get_label') and artist.get_label():
+                                                artist.set_label('')
+                                            if hasattr(artist, '_label') and artist._label:
+                                                artist._label = ''
+                                        
+                                        # Additional safety: prevent any automatic legend creation
+                                        # by clearing the legend attribute completely
+                                        ax1.legend_ = None
+                                        if hasattr(ax1, '_legend'):
+                                            ax1._legend = None
+                                        
+                                        # Force remove any remaining legends at the figure level
+                                        if hasattr(fig_mpl, 'legends') and fig_mpl.legends:
+                                            for legend in fig_mpl.legends[:]:  # Copy list to avoid modification during iteration
+                                                try:
+                                                    legend.remove()
+                                                except:
+                                                    pass
+                                        
+                                        # Also try to clear any legend-related attributes on the figure
+                                        if hasattr(fig_mpl, '_legend'):
+                                            fig_mpl._legend = None
+                                        
+                                        # Additional safety: try to prevent matplotlib from creating legends
+                                        # by setting the axis to not show legends
+                                        try:
+                                            ax1.set_legend_handles([])
+                                        except:
+                                            pass
+                                        
+                                        # Also try to clear any legend handles that might exist
+                                        try:
+                                            ax1.legend_handles = []
+                                        except:
+                                            pass
                                     
                                     # Apply background colors if specified
                                     if chart_background:
@@ -4897,8 +5421,14 @@ def _generate_report(project_id, template_path, data_file_path):
                                                     transform=ax1.transAxes,
                                                     bbox=bbox_props)
                                     
-                                    # Handle legend visibility and positioning
-                                    show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                                    # Handle legend visibility and positioning (already checked above)
+                                    # Debug logging for legend visibility
+                                    current_app.logger.debug(f"🔍 Treemap Legend Debug - showlegend: {show_legend}")
+                                    current_app.logger.debug(f"🔍 Treemap Legend Debug - valid_data length: {len(valid_data)}")
+                                    current_app.logger.debug(f"🔍 Treemap Legend Debug - Legend condition: {show_legend and len(valid_data) > 1}")
+                                    
+                                    # CRITICAL: Only create legend if explicitly requested AND we have multiple data points
+                                    # This is the key condition that was causing the issue
                                     if show_legend and len(valid_data) > 1:
                                         # Create custom legend
                                         legend_elements = []
@@ -4935,13 +5465,122 @@ def _generate_report(project_id, template_path, data_file_path):
                                                      bbox_to_anchor=(1.05, 0.5), 
                                                      fontsize=legend_font_size,
                                                      frameon=True, fancybox=True, shadow=True)
+                                    else:
+                                        # CRITICAL: When showlegend is False, ensure NO legend is created
+                                        # This is the key fix for the issue
+                                        current_app.logger.debug(f"🔍 Treemap: showlegend is False, ensuring no legend is created")
+                                        
+                                        # Remove any existing legend
+                                        if ax1.get_legend():
+                                            ax1.get_legend().remove()
+                                        # Clear all legend handles
+                                        ax1.legend_ = None
+                                        # Also try to remove from figure level
+                                        if fig_mpl.legends:
+                                            for legend in fig_mpl.legends:
+                                                legend.remove()
+                                        
+                                        # For squarify plots, we need to be more aggressive
+                                        # Remove labels from all plot elements that might create legends
+                                        for artist in ax1.get_children():
+                                            if hasattr(artist, 'get_label') and artist.get_label():
+                                                artist.set_label('')
+                                            if hasattr(artist, '_label') and artist._label:
+                                                artist._label = ''
+                                        
+                                        # Additional safety: prevent any automatic legend creation
+                                        # by clearing the legend attribute completely
+                                        ax1.legend_ = None
+                                        if hasattr(ax1, '_legend'):
+                                            ax1._legend = None
                                     
                                     # Apply margin settings if specified
                                     if margin:
                                         plt.subplots_adjust(**margin)
                                     
-                                    # Adjust layout to accommodate legend
-                                    plt.tight_layout()
+                                    # Ensure no legend is shown if showlegend is False
+                                    if not show_legend:
+                                        # Remove any existing legend
+                                        if ax1.get_legend():
+                                            ax1.get_legend().remove()
+                                        # Also try to remove from figure level
+                                        if fig_mpl.legends:
+                                            for legend in fig_mpl.legends:
+                                                legend.remove()
+                                        
+                                        # Additional safety: clear all legend-related attributes
+                                        ax1.legend_ = None
+                                        if hasattr(ax1, '_legend'):
+                                            ax1._legend = None
+                                        
+                                        # Also try to clear any legend handles that might exist
+                                        try:
+                                            ax1.legend_handles = []
+                                        except:
+                                            pass
+                                    
+                                    # Adjust layout to accommodate legend (only if legend is shown)
+                                    if show_legend:
+                                        plt.tight_layout()
+                                    else:
+                                        # Use tight layout without legend consideration and ensure no legend space
+                                        plt.tight_layout()
+                                        # Double-check no legend was added during layout
+                                        if ax1.get_legend():
+                                            ax1.get_legend().remove()
+                                        
+                                        # Additional safety: remove any legends that might have been created during layout
+                                        if hasattr(fig_mpl, 'legends') and fig_mpl.legends:
+                                            for legend in fig_mpl.legends[:]:
+                                                try:
+                                                    legend.remove()
+                                                except:
+                                                    pass
+                                        
+                                        # Final check: ensure no legend exists
+                                        ax1.legend_ = None
+                                        if hasattr(ax1, '_legend'):
+                                            ax1._legend = None
+                                    
+                                    # One final legend removal check before finishing
+                                    if not show_legend:
+                                        # Remove any legend that might have been created
+                                        if ax1.get_legend():
+                                            ax1.get_legend().remove()
+                                        # Clear any remaining legend attributes
+                                        ax1.legend_ = None
+                                        # Also check figure level
+                                        if hasattr(fig_mpl, 'legends') and fig_mpl.legends:
+                                            for legend in fig_mpl.legends[:]:
+                                                try:
+                                                    legend.remove()
+                                                except:
+                                                    pass
+                                        
+                                        # CRITICAL: Final override to prevent any legend creation
+                                        # This is the last line of defense against automatic legends
+                                        try:
+                                            # Completely disable legend creation on this axis
+                                            ax1.legend_ = None
+                                            if hasattr(ax1, '_legend'):
+                                                ax1._legend = None
+                                            if hasattr(ax1, 'legend_handles'):
+                                                ax1.legend_handles = []
+                                            # Also try to prevent any future legend creation
+                                            ax1.set_legend_handles([])
+                                        except:
+                                            pass
+                                        
+                                        # Debug: log final state
+                                        current_app.logger.debug(f"🔍 Treemap Final Debug - Axis legend: {ax1.get_legend()}")
+                                        current_app.logger.debug(f"🔍 Treemap Final Debug - Figure legends: {fig_mpl.legends if hasattr(fig_mpl, 'legends') else 'No legends attribute'}")
+                                        current_app.logger.debug(f"🔍 Treemap Final Debug - Plot elements with labels: {[artist.get_label() for artist in ax1.get_children() if hasattr(artist, 'get_label') and artist.get_label()]}")
+                                        
+                                        # Final verification: if there's still a legend, force remove it
+                                        if ax1.get_legend():
+                                            current_app.logger.warning(f"⚠️ Treemap: Final check found legend, forcing removal")
+                                            ax1.get_legend().remove()
+                                            ax1.legend_ = None
                                     
                                 else:
                                     # No valid data for treemap
@@ -5052,24 +5691,45 @@ def _generate_report(project_id, template_path, data_file_path):
                             title_fontsize = font_size or 52  # Increased default title size
                             label_fontsize = int((font_size or 52) * 0.9)  # Increased relative size for labels
                             
-                            # Apply axis label distances using labelpad parameter
-                            x_labelpad = x_axis_label_distance if x_axis_label_distance else 5.0  # Use the value directly
-                            y_labelpad = y_axis_label_distance if y_axis_label_distance else 5.0  # Use the value directly
-                            # Make the distance effect much more pronounced by multiplying the values
-                            x_labelpad = (x_axis_label_distance * 10) if x_axis_label_distance is not None else 50.0
-                            y_labelpad = (y_axis_label_distance * 10) if y_axis_label_distance is not None else 50.0
+                            # Check if this is a bubble chart to avoid overriding bubble chart axis label settings
+                            is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
+                            current_app.logger.debug(f"🔍 General Section - is_bubble_chart: {is_bubble_chart}")
                             
-                            # Debug logging
-                            current_app.logger.debug(f"🔍 Axis Label Distance Debug - X: {x_axis_label_distance} → {x_labelpad}, Y: {y_axis_label_distance} → {y_labelpad}")
-                            
-                            ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), 
-                                         fontsize=label_fontsize, color=font_color, labelpad=x_labelpad)
-                            ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Primary Y")), 
-                                         fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
-                            if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
-                                if ax2:
-                                    ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), 
-                                                 fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
+                            # Only apply general axis label settings if NOT a bubble chart
+                            if not is_bubble_chart:
+                                # Apply axis label distances using labelpad parameter
+                                x_labelpad = x_axis_label_distance if x_axis_label_distance else 5.0  # Use the value directly
+                                y_labelpad = y_axis_label_distance if y_axis_label_distance else 5.0  # Use the value directly
+                                # Make the distance effect much more pronounced by multiplying the values
+                                x_labelpad = (x_axis_label_distance * 10) if x_axis_label_distance is not None else 50.0
+                                y_labelpad = (y_axis_label_distance * 10) if y_axis_label_distance is not None else 50.0
+                                
+                                # Debug logging
+                                current_app.logger.debug(f"🔍 Axis Label Distance Debug - X: {x_axis_label_distance} → {x_labelpad}, Y: {y_axis_label_distance} → {y_labelpad}")
+                                
+                                ax1.set_xlabel(chart_meta.get("x_label", chart_config.get("x_axis_title", "X")), 
+                                             fontsize=label_fontsize, color=font_color, labelpad=x_labelpad)
+                                ax1.set_ylabel(chart_meta.get("primary_y_label", chart_config.get("primary_y_label", "Primary Y")), 
+                                             fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
+                                if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
+                                    if ax2:
+                                        ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), 
+                                                     fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
+                            else:
+                                # For bubble charts, just set the font size without overriding the labelpad values
+                                current_app.logger.debug(f"🎈 Skipping general axis label settings for bubble chart - preserving bubble chart specific settings")
+                                
+                                # Check if bubble chart axis labels were already set and restore them
+                                if hasattr(ax1, '_bubble_x_labelpad') and hasattr(ax1, '_bubble_y_labelpad'):
+                                    current_app.logger.debug(f"🎈 Restoring bubble chart axis labels with stored labelpad values")
+                                    if hasattr(ax1, '_bubble_x_title') and ax1._bubble_x_title:
+                                        ax1.set_xlabel(ax1._bubble_x_title, fontsize=label_fontsize, color=font_color, labelpad=ax1._bubble_x_labelpad)
+                                        current_app.logger.debug(f"🎈 Restored X-axis label with labelpad: {ax1._bubble_x_labelpad}")
+                                    if hasattr(ax1, '_bubble_y_title') and ax1._bubble_y_title:
+                                        ax1.set_ylabel(ax1._bubble_y_title, fontsize=label_fontsize, color=font_color, labelpad=ax1._bubble_y_labelpad)
+                                        current_app.logger.debug(f"🎈 Restored Y-axis label with labelpad: {ax1._bubble_y_labelpad}")
+                                else:
+                                    current_app.logger.debug(f"🎈 No stored bubble chart labelpad values found")
 
                             # Apply axis scale type if provided
                             xaxis_type_cfg = chart_meta.get("xaxis_type")
@@ -5079,8 +5739,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             if yaxis_type_cfg in ("log", "log10"):
                                 ax1.set_yscale('log')
 
-                        # Determine if this is a bubble chart early
-                        is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
+                        # is_bubble_chart is already defined above
                         
                         # Get secondary y-axis control for scatter charts and area charts
                         # Use disable_secondary_y field to control secondary y-axis visibility for all chart types
@@ -5174,7 +5833,12 @@ def _generate_report(project_id, template_path, data_file_path):
                         ax1.set_title(title, fontsize=title_fontsize, weight='bold', pad=20)
                         
                         # Legend
-                        show_legend = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                        show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
+                        # Convert string "false"/"true" to boolean if needed
+                        if isinstance(show_legend_raw, str):
+                            show_legend = show_legend_raw.lower() not in ['false', '0', 'no', 'off']
+                        else:
+                            show_legend = bool(show_legend_raw)
                         
                         legend_loc = 'best'
                         if show_legend:
