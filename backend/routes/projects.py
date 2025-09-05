@@ -70,6 +70,84 @@ def validate_colors_for_plotly(colors):
         return [colors]
     return ['blue']
 
+def calculate_optimal_label_distance(chart_type, series_data, x_values, y_values, figsize, font_size=12):
+    """
+    Calculate optimal axis label distances to prevent overlap with data values.
+    
+    Args:
+        chart_type (str): Type of chart (bar, scatter, line, etc.)
+        series_data (list): Chart series data
+        x_values (list): X-axis values
+        y_values (list): Y-axis values
+        figsize (tuple): Figure size (width, height) in inches
+        font_size (int): Font size for labels
+    
+    Returns:
+        tuple: (x_axis_distance, y_axis_distance) in pixels
+    """
+    # Handle None or undefined values safely
+    if x_values is None:
+        x_values = []
+    if y_values is None:
+        y_values = []
+    if figsize is None:
+        figsize = (8, 6)
+    if font_size is None:
+        font_size = 12
+    
+    # If y_values is empty, try to extract from series_data
+    if not y_values and series_data:
+        for series in series_data:
+            series_values = series.get("values", [])
+            if series_values:
+                y_values.extend(series_values)
+    
+    # Convert figsize from inches to pixels (assuming 100 DPI)
+    width_px = figsize[0] * 100 if figsize else 800
+    height_px = figsize[1] * 100 if figsize else 600
+    
+    # Base distances in pixels
+    base_x_distance = 30
+    base_y_distance = 40
+    
+    # Adjust based on chart type
+    if chart_type == "bar":
+        # For bar charts, consider bar width and spacing
+        if x_values and len(x_values) > 1:
+            # Estimate bar width based on number of bars and chart width
+            estimated_bar_width = width_px / (len(x_values) * 1.5)  # 1.5 accounts for spacing
+            base_x_distance = max(base_x_distance, estimated_bar_width * 0.3)
+        
+        if y_values:
+            # For vertical bars, y-axis needs more space for value labels
+            max_y = max(y_values) if y_values else 0
+            if max_y > 1000:  # Large numbers need more space
+                base_y_distance = max(base_y_distance, 60)
+    
+    elif chart_type in ["scatter", "line"]:
+        # For scatter/line charts, consider data point density
+        if x_values and len(x_values) > 10:
+            # Dense data needs more space
+            base_x_distance = max(base_x_distance, 40)
+            base_y_distance = max(base_y_distance, 50)
+    
+    # Adjust based on font size
+    font_factor = font_size / 12.0
+    base_x_distance = int(base_x_distance * font_factor)
+    base_y_distance = int(base_y_distance * font_factor)
+    
+    # Adjust based on chart dimensions
+    if width_px < 600:  # Small charts need more space
+        base_x_distance = int(base_x_distance * 1.2)
+    if height_px < 400:
+        base_y_distance = int(base_y_distance * 1.2)
+    
+    # Ensure minimum distances
+    base_x_distance = max(base_x_distance, 20)
+    base_y_distance = max(base_y_distance, 25)
+    
+    return base_x_distance, base_y_distance
+
 def validate_excel_structure(file_path):
     """Validate that an Excel file has the required structure for report generation"""
     try:
@@ -355,8 +433,8 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
             "show_y_axis": chart_meta.get("show_y_axis", True),
             "show_x_ticks": chart_meta.get("show_x_ticks", True),
             "show_y_ticks": chart_meta.get("show_y_ticks", True),
-            "x_axis_label_distance": chart_meta.get("x_axis_label_distance", 0),
-            "y_axis_label_distance": chart_meta.get("y_axis_label_distance", 0),
+                    "x_axis_label_distance": chart_meta.get("x_axis_label_distance", "auto"),
+        "y_axis_label_distance": chart_meta.get("y_axis_label_distance", "auto"),
             "axis_tick_font_size": chart_meta.get("axis_tick_font_size", 10),
             "show_gridlines": chart_meta.get("show_gridlines", False),
             "gridline_color": chart_meta.get("gridline_color", "#E5E7EB"),
@@ -456,8 +534,8 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
     show_y_axis = chart_meta.get("show_y_axis", True) if chart_meta else True
     show_x_ticks = chart_meta.get("show_x_ticks", True) if chart_meta else True
     show_y_ticks = chart_meta.get("show_y_ticks", True) if chart_meta else True
-    x_axis_label_distance = chart_meta.get("x_axis_label_distance", 0) if chart_meta else 0
-    y_axis_label_distance = chart_meta.get("y_axis_label_distance", 0) if chart_meta else 0
+    x_axis_label_distance = chart_meta.get("x_axis_label_distance", "auto") if chart_meta else "auto"
+    y_axis_label_distance = chart_meta.get("y_axis_label_distance", "auto") if chart_meta else "auto"
     axis_tick_font_size = chart_meta.get("axis_tick_font_size", 10) if chart_meta else 10
     
     # Grid controls
@@ -684,6 +762,15 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
             "tickfont": dict(size=axis_tick_font_size)
         }
         
+        # Handle "auto" values for axis label distances
+        if x_axis_label_distance == "auto":
+            # Calculate optimal label distance for bar chart
+            auto_x_distance, _ = calculate_optimal_label_distance(
+                "bar", [{"labels": filtered_labels, "values": filtered_values}], 
+                filtered_labels, filtered_values, (width/100, height/100), font_size
+            )
+            x_axis_label_distance = auto_x_distance
+        
         # Apply axis label distance if specified
         if x_axis_label_distance is not None:
             x_axis_config["title"] = dict(
@@ -702,6 +789,15 @@ def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, 
             "showticklabels": show_y_ticks,
             "tickfont": dict(size=axis_tick_font_size)
         }
+        
+        # Handle "auto" values for axis label distances
+        if y_axis_label_distance == "auto":
+            # Calculate optimal label distance for bar chart
+            _, auto_y_distance = calculate_optimal_label_distance(
+                "bar", [{"labels": filtered_labels, "values": filtered_values}], 
+                filtered_labels, filtered_values, (width/100, height/100), font_size
+            )
+            y_axis_label_distance = auto_y_distance
         
         # Apply axis label distance if specified
         if y_axis_label_distance is not None:
@@ -1681,6 +1777,12 @@ def _generate_report(project_id, template_path, data_file_path):
                     or chart_meta.get("y_axis_label_distance")
                     or chart_meta.get("primary_y_axis_label_distance")
                 )
+                
+                # Handle "auto" values for axis label distances
+                if x_axis_label_distance == "auto":
+                    x_axis_label_distance = "auto"
+                if y_axis_label_distance == "auto":
+                    y_axis_label_distance = "auto"
                 
                 # Debug logging for axis label distance extraction
                 current_app.logger.debug(f"🔍 Axis Label Distance Extraction - X: {x_axis_label_distance}, Y: {y_axis_label_distance}")
@@ -2745,6 +2847,12 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 # Apply axis label distances
                 if chart_type != "pie":
+                    if x_axis_label_distance == "auto" or y_axis_label_distance == "auto":
+                        # Calculate optimal label distances
+                        x_axis_label_distance, y_axis_label_distance = calculate_optimal_label_distance(
+                            chart_type, series_data, x_values, [], figsize, font_size
+                        )
+                    
                     if x_axis_label_distance or y_axis_label_distance or axis_tick_distance:
                         layout_updates["xaxis"] = layout_updates.get("xaxis", {})
                         layout_updates["yaxis"] = layout_updates.get("yaxis", {})
@@ -3782,6 +3890,12 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 # Apply axis label distances
                 if chart_type != "pie":
+                    if x_axis_label_distance == "auto" or y_axis_label_distance == "auto":
+                        # Calculate optimal label distances
+                        x_axis_label_distance, y_axis_label_distance = calculate_optimal_label_distance(
+                            chart_type, series_data, x_values, [], figsize, font_size
+                        )
+                    
                     if x_axis_label_distance or y_axis_label_distance or axis_tick_distance:
                         layout_updates["xaxis"] = layout_updates.get("xaxis", {})
                         layout_updates["yaxis"] = layout_updates.get("yaxis", {})
@@ -4514,6 +4628,20 @@ def _generate_report(project_id, template_path, data_file_path):
                                     
                                     # Apply axis label distances specifically for bubble charts
                                     if x_axis_label_distance is not None or y_axis_label_distance is not None:
+                                        # Handle "auto" values by calculating optimal distances
+                                        if x_axis_label_distance == "auto" or y_axis_label_distance == "auto":
+                                            # Calculate optimal label distances for bubble chart
+                                            # Use the current series data for calculation
+                                            current_series_data = [{"labels": series.get("labels", []), "values": y_vals}]
+                                            auto_x_distance, auto_y_distance = calculate_optimal_label_distance(
+                                                "scatter", current_series_data, x_values, y_vals, figsize, font_size
+                                            )
+                                            
+                                            if x_axis_label_distance == "auto":
+                                                x_axis_label_distance = auto_x_distance
+                                            if y_axis_label_distance == "auto":
+                                                y_axis_label_distance = auto_y_distance
+                                        
                                         # Calculate labelpad values with more aggressive multiplication for better spacing
                                         figsize = chart_meta.get("figsize", [12, 8])
                                         chart_width, chart_height = figsize
@@ -4797,6 +4925,14 @@ def _generate_report(project_id, template_path, data_file_path):
                             x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
                             y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
                             if x_axis_title:
+                                # Handle "auto" values for axis label distances
+                                if x_axis_label_distance == "auto":
+                                    # Calculate optimal label distance for line chart
+                                    auto_x_distance, _ = calculate_optimal_label_distance(
+                                        "line", series_data, x_values, y_vals, figsize, font_size
+                                    )
+                                    x_axis_label_distance = auto_x_distance
+                                
                                 # Use the actual distance value directly, not divided by 10
                                 x_labelpad = x_axis_label_distance if x_axis_label_distance is not None else 5.0
                                 # Make the distance effect much more pronounced by multiplying the value
@@ -4805,6 +4941,14 @@ def _generate_report(project_id, template_path, data_file_path):
                                              fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
                                              labelpad=x_labelpad)
                             if y_axis_title:
+                                # Handle "auto" values for axis label distances
+                                if y_axis_label_distance == "auto":
+                                    # Calculate optimal label distance for line chart
+                                    _, auto_y_distance = calculate_optimal_label_distance(
+                                        "line", series_data, x_values, y_vals, figsize, font_size
+                                    )
+                                    y_axis_label_distance = auto_y_distance
+                                
                                 # Use the actual distance value directly, not divided by 10
                                 y_labelpad = y_axis_label_distance if y_axis_label_distance is not None else 5.0
                                 # Make the distance effect much more pronounced by multiplying the value
@@ -4846,6 +4990,14 @@ def _generate_report(project_id, template_path, data_file_path):
                                 x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
                                 y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
                                 if x_axis_title:
+                                    # Handle "auto" values for axis label distances
+                                    if x_axis_label_distance == "auto":
+                                        # Calculate optimal label distance for line chart
+                                        auto_x_distance, _ = calculate_optimal_label_distance(
+                                            "line", series_data, x_values, y_vals, figsize, font_size
+                                        )
+                                        x_axis_label_distance = auto_x_distance
+                                    
                                     # Use the actual distance value directly, not divided by 10
                                     x_labelpad = x_axis_label_distance if x_axis_label_distance is not None else 5.0
                                     # Make the distance effect much more pronounced by multiplying the value
@@ -4854,6 +5006,14 @@ def _generate_report(project_id, template_path, data_file_path):
                                                 fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None,
                                                 labelpad=x_labelpad)
                                 if y_axis_title:
+                                    # Handle "auto" values for axis label distances
+                                    if y_axis_label_distance == "auto":
+                                        # Calculate optimal label distance for line chart
+                                        _, auto_y_distance = calculate_optimal_label_distance(
+                                            "line", series_data, x_values, y_vals, figsize, font_size
+                                        )
+                                        y_axis_label_distance = auto_y_distance
+                                    
                                     # Use the actual distance value directly, not divided by 10
                                     y_labelpad = y_axis_label_distance if y_axis_label_distance is not None else 5.0
                                     # Make the distance effect much more pronounced by multiplying the value
@@ -4896,10 +5056,6 @@ def _generate_report(project_id, template_path, data_file_path):
                             if color:
                                 ax1.findobj(plt.matplotlib.patches.Patch)[-1].set_facecolor(color)
                                 
-                        elif mpl_chart_type == "violinplot":
-                            # Violin plot
-                            ax1.violinplot(y_vals, positions=[i])
-                            
                         elif mpl_chart_type == "contour":
                             # Contour plot (simplified)
                             if len(y_vals) > 0:
@@ -4949,13 +5105,43 @@ def _generate_report(project_id, template_path, data_file_path):
                                 current_app.logger.debug(f"🔥 Heatmap: X labels count: {len(x_labels)}")
                                 current_app.logger.debug(f"🔥 Heatmap: Y labels count: {len(y_labels)}")
                                 
-                                # Create heatmap using imshow
+                                # Disable gridlines globally for this heatmap
+                                import matplotlib.pyplot as plt
+                                import numpy as np
+                                plt.rcParams['axes.grid'] = False
+                                plt.rcParams['axes.linewidth'] = 0
+                                
+                                # Create heatmap using imshow with proper orientation and no lines
                                 current_app.logger.debug(f"🔥 Creating heatmap with imshow...")
                                 im = ax1.imshow(z_array, 
                                                cmap=colorscale, 
                                                aspect='auto',
-                                               alpha=opacity)
+                                               alpha=opacity,
+                                               interpolation='nearest',
+                                               extent=[-0.5, len(x_labels)-0.5, -0.5, len(y_labels)-0.5])
                                 current_app.logger.debug(f"🔥 Heatmap imshow created successfully")
+                                
+                                # Completely disable all gridlines and minor gridlines for heatmaps BEFORE setting labels
+                                ax1.grid(False, which='both')
+                                ax1.set_axisbelow(False)
+                                
+                                # Hide tick marks to remove any visual grid-like elements
+                                ax1.tick_params(axis='both', length=0)
+                                
+                                # Disable all axis spines to remove the white border lines
+                                ax1.spines['top'].set_visible(False)
+                                ax1.spines['bottom'].set_visible(False)
+                                ax1.spines['left'].set_visible(False)
+                                ax1.spines['right'].set_visible(False)
+                                
+                                # Disable minor gridlines
+                                ax1.minorticks_off()
+                                
+                                # Additional grid removal for matplotlib heatmaps
+                                ax1.xaxis.grid(False)
+                                ax1.yaxis.grid(False)
+                                ax1.xaxis.set_tick_params(gridOn=False)
+                                ax1.yaxis.set_tick_params(gridOn=False)
                                 
                                 # Set x and y axis labels
                                 current_app.logger.debug(f"🔥 Setting heatmap axis labels...")
@@ -4966,6 +5152,31 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 # Ensure the plot is properly displayed
                                 ax1.set_aspect('auto')
+                                
+                                # Final comprehensive tick line removal
+                                ax1.tick_params(axis='both', which='both', length=0, width=0)
+                                ax1.tick_params(axis='x', bottom=False, top=False, labelbottom=True)
+                                ax1.tick_params(axis='y', left=False, right=False, labelleft=True)
+                                
+                                # Ensure no tick lines are drawn
+                                for tick in ax1.xaxis.get_major_ticks():
+                                    tick.tick1line.set_visible(False)
+                                    tick.tick2line.set_visible(False)
+                                for tick in ax1.yaxis.get_major_ticks():
+                                    tick.tick1line.set_visible(False)
+                                    tick.tick2line.set_visible(False)
+                                
+                                # Remove any remaining tick lines
+                                ax1.tick_params(axis='both', which='both', length=0, width=0)
+                                ax1.tick_params(axis='both', which='major', length=0, width=0)
+                                ax1.tick_params(axis='both', which='minor', length=0, width=0)
+                                
+                                # Final gridline removal after all setup
+                                ax1.grid(False, which='both')
+                                ax1.xaxis.grid(False)
+                                ax1.yaxis.grid(False)
+                                ax1.xaxis.set_tick_params(gridOn=False)
+                                ax1.yaxis.set_tick_params(gridOn=False)
                                 ax1.figure.canvas.draw()
                                 
                                 # Add colorbar if showscale is True
@@ -5013,18 +5224,54 @@ def _generate_report(project_id, template_path, data_file_path):
                                 show_gridlines = chart_meta.get("show_gridlines", True)
                                 show_cell_borders = chart_meta.get("show_cell_borders", True)
                                 
-                                if show_gridlines:
-                                    ax1.grid(True, which='both', color='gray', linewidth=0.5, alpha=0.3)
-                                else:
-                                    ax1.grid(False)
+                                # For heatmaps, always disable gridlines completely
+                                ax1.grid(False, which='both')
+                                ax1.set_axisbelow(False)
+                                
+                                # Hide tick lines but keep tick labels
+                                ax1.tick_params(axis='both', length=0, width=0, which='both')
+                                ax1.tick_params(axis='x', bottom=False, top=False, labelbottom=True)
+                                ax1.tick_params(axis='y', left=False, right=False, labelleft=True)
+                                
+                                # Disable all axis spines to remove the white border lines
+                                ax1.spines['top'].set_visible(False)
+                                ax1.spines['bottom'].set_visible(False)
+                                ax1.spines['left'].set_visible(False)
+                                ax1.spines['right'].set_visible(False)
+                                
+                                # Disable minor gridlines
+                                ax1.minorticks_off()
+                                
+                                # Additional grid removal for matplotlib heatmaps
+                                ax1.xaxis.grid(False)
+                                ax1.yaxis.grid(False)
+                                ax1.xaxis.set_tick_params(gridOn=False)
+                                ax1.yaxis.set_tick_params(gridOn=False)
+                                
+                                # Ensure no tick lines are drawn
+                                for tick in ax1.xaxis.get_major_ticks():
+                                    tick.tick1line.set_visible(False)
+                                    tick.tick2line.set_visible(False)
+                                for tick in ax1.yaxis.get_major_ticks():
+                                    tick.tick1line.set_visible(False)
+                                    tick.tick2line.set_visible(False)
+                                
+                                # Remove any remaining tick lines
+                                ax1.tick_params(axis='both', which='both', length=0, width=0)
+                                ax1.tick_params(axis='both', which='major', length=0, width=0)
+                                ax1.tick_params(axis='both', which='minor', length=0, width=0)
                                 
                                 if show_cell_borders:
-                                    # Add cell borders
+                                    # Add cell borders with customizable color
+                                    border_color = chart_meta.get("cell_border_color", "black")
+                                    border_width = chart_meta.get("cell_border_width", 1.0)  # Increased default width
+                                    border_alpha = chart_meta.get("cell_border_alpha", 1.0)  # Increased default alpha
+                                    
                                     for i in range(len(z_data) + 1):
-                                        ax1.axhline(y=i-0.5, color='black', linewidth=0.5, alpha=0.5)
+                                        ax1.axhline(y=i-0.5, color=border_color, linewidth=border_width, alpha=border_alpha)
                                     if z_data and len(z_data[0]) > 0:
                                         for j in range(len(z_data[0]) + 1):
-                                            ax1.axvline(x=j-0.5, color='black', linewidth=0.5, alpha=0.5)
+                                            ax1.axvline(x=j-0.5, color=border_color, linewidth=border_width, alpha=border_alpha)
                                 
                                 current_app.logger.debug(f"🔥 Heatmap created successfully with shape: {z_array.shape}")
                             else:
@@ -5547,6 +5794,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                         # Remove any legend that might have been created
                                         if ax1.get_legend():
                                             ax1.get_legend().remove()
+                                            ax1.legend_ = None
+                                        
                                         # Clear any remaining legend attributes
                                         ax1.legend_ = None
                                         # Also check figure level
@@ -5697,6 +5946,18 @@ def _generate_report(project_id, template_path, data_file_path):
                             
                             # Only apply general axis label settings if NOT a bubble chart
                             if not is_bubble_chart:
+                                # Handle "auto" values for axis label distances
+                                if x_axis_label_distance == "auto" or y_axis_label_distance == "auto":
+                                    # Calculate optimal label distances for bar chart
+                                    auto_x_distance, auto_y_distance = calculate_optimal_label_distance(
+                                        "bar", series_data, x_values, y_vals, figsize, font_size
+                                    )
+                                    
+                                    if x_axis_label_distance == "auto":
+                                        x_axis_label_distance = auto_x_distance
+                                    if y_axis_label_distance == "auto":
+                                        y_axis_label_distance = auto_y_distance
+                                
                                 # Apply axis label distances using labelpad parameter
                                 x_labelpad = x_axis_label_distance if x_axis_label_distance else 5.0  # Use the value directly
                                 y_labelpad = y_axis_label_distance if y_axis_label_distance else 5.0  # Use the value directly
@@ -5884,6 +6145,26 @@ def _generate_report(project_id, template_path, data_file_path):
                 # current_app.logger.debug(f"X-axis label distance: {x_axis_label_distance}")
                 # current_app.logger.debug(f"Y-axis label distance: {y_axis_label_distance}")
                 
+                # Handle "auto" values for axis label distances
+                if x_axis_label_distance == "auto" or y_axis_label_distance == "auto":
+                    # Calculate optimal label distances for the current chart type
+                    # Create a safe series data structure for calculation
+                    safe_series_data = []
+                    if series_data:
+                        for series in series_data:
+                            safe_series = {"labels": series.get("labels", []), "values": series.get("values", [])}
+                            safe_series_data.append(safe_series)
+                    
+                    # Use safe data for calculation
+                    auto_x_distance, auto_y_distance = calculate_optimal_label_distance(
+                        chart_type, safe_series_data, x_values, y_vals if 'y_vals' in locals() else [], figsize, font_size
+                    )
+                    
+                    if x_axis_label_distance == "auto":
+                        x_axis_label_distance = auto_x_distance
+                    if y_axis_label_distance == "auto":
+                        y_axis_label_distance = auto_y_distance
+                
                 if (x_axis_label_distance or y_axis_label_distance) and chart_type != "heatmap":
                     # Get current subplot parameters
                     current_bottom = fig_mpl.subplotpars.bottom
@@ -6025,7 +6306,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                 y_pos = data_max + (data_range * 0.1)  # 10% above max
                                 # current_app.logger.debug(f"Auto-adjusted annotation Y position from {y_value} to {y_pos} (data range: {data_min}-{data_max})")
                         
-                        # Add annotation text with better positioning for bubble charts
+                        # Add annotation text with better positioning for different chart types
                         if chart_type == "bubble":
                             # For bubble charts, position annotation above the bubble
                             annotation_y_offset = 2000  # Fixed offset for bubble charts
@@ -6034,12 +6315,20 @@ def _generate_report(project_id, template_path, data_file_path):
                                        fontsize=12, color='red', weight='bold',
                                        ha='center', va='bottom',
                                        bbox=dict(boxstyle="round,pad=0.3", facecolor='white', alpha=0.9, edgecolor='red'))
+                        elif chart_type == "area":
+                            # For area charts, position annotation above the data with better styling
+                            annotation_y_offset = data_range * 0.15 if 'data_range' in locals() else 25
+                            ax1.annotate(text, xy=(x_pos, y_pos), xytext=(x_pos, y_pos + annotation_y_offset),
+                                       arrowprops=dict(arrowstyle='->', color='#2c3e50', lw=2),
+                                       fontsize=11, color='#2c3e50', weight='bold',
+                                       ha='center', va='bottom',
+                                       bbox=dict(boxstyle="round,pad=0.4", facecolor='white', alpha=0.9, edgecolor='#3498db'))
                         else:
                             # For other charts, use original positioning
-                         ax1.annotate(text, xy=(x_pos, y_pos), xytext=(x_pos, y_pos + (data_range * 0.05) if 'data_range' in locals() else y_pos + 50),
-                                   arrowprops=dict(arrowstyle='->', color='red'),
-                                   fontsize=12, color='red', weight='bold',
-                                   ha='center', va='bottom')
+                            ax1.annotate(text, xy=(x_pos, y_pos), xytext=(x_pos, y_pos + (data_range * 0.05) if 'data_range' in locals() else y_pos + 50),
+                                       arrowprops=dict(arrowstyle='->', color='red'),
+                                       fontsize=12, color='red', weight='bold',
+                                       ha='center', va='bottom')
                         # current_app.logger.debug(f"Added annotation: '{text}' at position ({x_pos}, {y_pos})")
 
                 # Apply margin settings to Matplotlib (FIXED VERSION)
