@@ -131,6 +131,17 @@ def calculate_optimal_label_distance(chart_type, series_data, x_values, y_values
             base_x_distance = max(base_x_distance, 40)
             base_y_distance = max(base_y_distance, 50)
     
+    elif chart_type == "area":
+        # For area charts, need more space due to filled areas
+        base_x_distance = max(base_x_distance, 50)
+        base_y_distance = max(base_y_distance, 80)  # Area charts need more y-axis space
+        
+        if y_values:
+            # For area charts with large values, need even more space
+            max_y = max(y_values) if y_values else 0
+            if max_y > 1000:  # Large numbers need more space
+                base_y_distance = max(base_y_distance, 100)
+    
     # Adjust based on font size
     font_factor = font_size / 12.0
     base_x_distance = int(base_x_distance * font_factor)
@@ -1592,9 +1603,22 @@ def _generate_report(project_id, template_path, data_file_path):
                     chart_meta = chart_config.get("chart_meta", {})
                     series_meta = chart_config.get("series", {})
                     
+                    # Merge root-level attributes into chart_meta for backward compatibility
+                    # This allows JSON with attributes at root level to work properly
+                    root_attributes = [
+                        "chart_title", "chart_background", "plot_background", "showlegend", 
+                        "show_gridlines", "font_size", "font_color", "font_family",
+                        "data_labels", "data_label_font_size", "data_label_color", 
+                        "fill_opacity", "disable_secondary_y"
+                    ]
+                    for attr in root_attributes:
+                        if attr in chart_config and attr not in chart_meta:
+                            chart_meta[attr] = chart_config[attr]
+                    
                     # Allow chart_type to be overridden from JSON configuration
                     chart_type = chart_config.get("chart_type", chart_type_map.get(chart_tag_lower, "")).lower().strip()
-                    title = chart_meta.get("chart_title", chart_tag)
+                    # Check for chart_title in both chart_meta and root level
+                    title = chart_meta.get("chart_title") or chart_config.get("chart_title", chart_tag)
                     
                     # Debug logging for chart type detection
                     current_app.logger.debug(f"🔥 Chart type detection - chart_config.get('chart_type'): {chart_config.get('chart_type')}")
@@ -1711,7 +1735,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 if isinstance(show_gridlines, str):
                     show_gridlines = show_gridlines.strip().lower() == "true"
                 elif show_gridlines is None:
-                    show_gridlines = True  # Default to showing gridlines if not specified
+                    show_gridlines = False  # Default to hiding gridlines if not specified
                 gridline_color = data_dict.get("gridline_color") or chart_config.get("gridline_color") or chart_meta.get("gridline_color")
                 gridline_style = data_dict.get("gridline_style") or chart_config.get("gridline_style") or chart_meta.get("gridline_style")
                 chart_background = data_dict.get("chart_background") or chart_config.get("chart_background") or chart_meta.get("chart_background")
@@ -1753,7 +1777,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 sort_order = data_dict.get("sort_order") or chart_config.get("sort_order") or chart_meta.get("sort_order")
                 data_grouping = data_dict.get("data_grouping") or chart_config.get("data_grouping") or chart_meta.get("data_grouping")
                 annotations = data_dict.get("annotations", []) or chart_config.get("annotations", []) or chart_meta.get("annotations", [])
-                axis_tick_font_size = data_dict.get("axis_tick_font_size") or chart_config.get("axis_tick_font_size") or chart_meta.get("axis_tick_font_size")
+                axis_tick_font_size = data_dict.get("axis_tick_font_size") or chart_config.get("axis_tick_font_size") or chart_meta.get("axis_tick_font_size") or 10
                 
                 # --- Extract tick mark control settings ---
                 show_x_ticks = data_dict.get("show_x_ticks") if "show_x_ticks" in data_dict else (chart_config.get("show_x_ticks") if "show_x_ticks" in chart_config else chart_meta.get("show_x_ticks"))
@@ -1807,15 +1831,19 @@ def _generate_report(project_id, template_path, data_file_path):
                 def extract_excel_range(sheet, cell_range):
                     # cell_range: e.g., 'E23:E29' or 'AA20:AA23'
                     try:
+                        current_app.logger.debug(f"🔍 Extracting Excel range: {cell_range}")
                         values = []
                         for row in sheet[cell_range]:
                             for cell in row:
-                                            if cell.value is not None:
-                                                values.append(cell.value)
+                                if cell.value is not None:
+                                    # Debug each cell value
+                                    current_app.logger.debug(f"🔍 Cell {cell.coordinate}: '{cell.value}' (type: {type(cell.value)}, repr: {repr(cell.value)})")
+                                    values.append(cell.value)
+                        current_app.logger.debug(f"🔍 Extracted values: {values}")
                         return values
                     except Exception as e:
-                            current_app.logger.error(f"Error extracting range {cell_range}: {e}")
-                            return []
+                        current_app.logger.error(f"❌ Error extracting range {cell_range}: {e}")
+                        return []
 
                 # --- Robust recursive Excel cell range and single cell extraction for all chart types and fields ---
                 def extract_cell_ranges(obj, sheet):
@@ -1828,8 +1856,10 @@ def _generate_report(project_id, template_path, data_file_path):
                                     try:
                                         extracted = extract_excel_range(sheet, v)
                                         obj[k] = extracted
+                                        current_app.logger.debug(f"🔍 Excel extraction: {k} = {v} -> {extracted}")
                                     except Exception as e:
                                         # Failed to extract data from cell range
+                                        current_app.logger.error(f"❌ Failed to extract Excel range {v} for key {k}: {e}")
                                         pass
                                 # Check for single cell pattern (e.g., "U13")
                                 elif re.match(r"^[A-Z]+\d+$", v):
@@ -1913,7 +1943,12 @@ def _generate_report(project_id, template_path, data_file_path):
                     validate_chart_config(chart_meta)
                     
                     # Extract cell ranges from both chart_meta and series_meta
+                    current_app.logger.debug(f"🔍 Starting Excel cell range extraction from: {data_file_path}")
+                    current_app.logger.debug(f"🔍 Using sheet: {chart_meta.get('source_sheet', 'sample')}")
+                    
+                    current_app.logger.debug(f"🔍 Extracting from chart_meta...")
                     extract_cell_ranges(chart_meta, sheet)
+                    current_app.logger.debug(f"🔍 Extracting from series_meta...")
                     extract_cell_ranges(series_meta, sheet)
                     wb.close()
                     
@@ -1932,6 +1967,23 @@ def _generate_report(project_id, template_path, data_file_path):
                     series_data = chart_meta.get("series", {}).get("data", [])
                     if not series_data:
                         series_data = chart_meta.get("series", [])
+                
+                # Ensure Excel cell ranges are extracted from series data regardless of source
+                if series_data and data_file_path:
+                    try:
+                        current_app.logger.debug(f"🔍 Extracting Excel cell ranges from series data...")
+                        wb = openpyxl.load_workbook(data_file_path, data_only=True)
+                        sheet = wb[chart_meta.get("source_sheet", "sample")]
+                        # Extract cell ranges from the series data
+                        for i, series in enumerate(series_data):
+                            if isinstance(series, dict):
+                                current_app.logger.debug(f"🔍 Processing series {i+1}: {series}")
+                                extract_cell_ranges(series, sheet)
+                                current_app.logger.debug(f"🔍 Series {i+1} after extraction: {series}")
+                        wb.close()
+                        current_app.logger.debug(f"🔍 Extracted Excel cell ranges from series data")
+                    except Exception as e:
+                        current_app.logger.error(f"❌ Error extracting Excel cell ranges from series data: {e}")
                 
                 # Debug logging for series data extraction
                 current_app.logger.debug(f"🔥 Series data extraction - series_meta.get('data'): {series_meta.get('data', [])}")
@@ -2276,17 +2328,37 @@ def _generate_report(project_id, template_path, data_file_path):
                     values = series.get("values", [])
                     color = series.get("marker", {}).get("colors") if "marker" in series else colors
                     
+                    # Debug logging for treemap data
+                    current_app.logger.debug(f"🔍 Treemap data - series: {series}")
+                    current_app.logger.debug(f"🔍 Treemap data - labels: {labels} (type: {type(labels)})")
+                    current_app.logger.debug(f"🔍 Treemap data - values: {values} (type: {type(values)})")
+                    
+                    
+                    # Get data label settings from JSON configuration
+                    data_labels = chart_meta.get("data_labels", True)
+                    data_label_font_size = chart_meta.get("data_label_font_size", 12)
+                    data_label_color = chart_meta.get("data_label_color", "#000000")
+                    fill_opacity = chart_meta.get("fill_opacity", 0.8)
+                    
                     # Treemap specific settings
                     treemap_kwargs = {
                         "labels": labels,
                         "values": values,
                         "name": label,
-                        "textinfo": "label+value+percent parent" if chart_meta.get("data_labels", True) else "none",
+                        "textinfo": "label+value+percent parent" if data_labels else "none",
                         "textposition": "middle center",
                         "branchvalues": "total",
                         "pathbar": dict(visible=True),  # Show path bar for navigation
                         "tiling": dict(packing="squarify", squarifyratio=1)  # Better layout algorithm
                     }
+                    
+                    # Add text font configuration from JSON
+                    if data_labels:
+                        treemap_kwargs["textfont"] = {
+                            "family": font_family,
+                            "size": data_label_font_size,
+                            "color": data_label_color
+                        }
                     
                     # Add hierarchical data support
                     if "parent" in series:
@@ -2295,9 +2367,9 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Add enhanced colors if available
                     if color:
                         if isinstance(color, list):
-                            treemap_kwargs["marker"] = dict(colors=color)
+                            treemap_kwargs["marker"] = dict(colors=color, opacity=fill_opacity)
                         else:
-                            treemap_kwargs["marker"] = dict(colors=[color])
+                            treemap_kwargs["marker"] = dict(colors=[color], opacity=fill_opacity)
                     else:
                         # Use enhanced color palette for better visual appeal
                         enhanced_colors = [
@@ -2307,7 +2379,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         ]
                         # Apply colors based on data length
                         if len(labels) <= len(enhanced_colors):
-                            treemap_kwargs["marker"] = dict(colors=enhanced_colors[:len(labels)])
+                            treemap_kwargs["marker"] = dict(colors=enhanced_colors[:len(labels)], opacity=fill_opacity)
                     
                     # Add hover template with enhanced information
                     hover_template = f"<b>{label}</b><br>"
@@ -2592,6 +2664,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                 ))
                                 
                             elif series_type == "treemap":
+                                # Get data label settings from JSON configuration
+                                data_labels = chart_meta.get("data_labels", True)
+                                data_label_font_size = chart_meta.get("data_label_font_size", 12)
+                                data_label_color = chart_meta.get("data_label_color", "#000000")
+                                fill_opacity = chart_meta.get("fill_opacity", 0.8)
+                                
                                 # Treemap specific settings
                                 treemap_kwargs = {
                                     "labels": x_vals,
@@ -2602,9 +2680,17 @@ def _generate_report(project_id, template_path, data_file_path):
                                     "branchvalues": "total"
                                 }
                                 
+                                # Add text font configuration from JSON
+                                if data_labels:
+                                    treemap_kwargs["textfont"] = {
+                                        "family": font_family,
+                                        "size": data_label_font_size,
+                                        "color": data_label_color
+                                    }
+                                
                                 # Add treemap specific attributes
                                 if color:
-                                    treemap_kwargs["marker"] = dict(colors=color) if isinstance(color, list) else dict(colors=[color])
+                                    treemap_kwargs["marker"] = dict(colors=color, opacity=fill_opacity) if isinstance(color, list) else dict(colors=[color], opacity=fill_opacity)
                                 
                                 fig.add_trace(go.Treemap(**treemap_kwargs,
                                     hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}<extra></extra>"
@@ -3292,7 +3378,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         formatted_x_labels.append(str(label))
                             else:
                                 formatted_x_labels.append("")
-                        ax2.set_xticklabels(formatted_x_labels, rotation=0)
+                        ax2.set_xticklabels(formatted_x_labels, rotation=0, fontsize=axis_tick_font_size or 10)
                     # Add data labels with proper formatting
                     value_format = chart_meta.get("value_format", ".2f")
                     data_label_font_size = chart_meta.get("data_label_font_size", 10)
@@ -3322,6 +3408,10 @@ def _generate_report(project_id, template_path, data_file_path):
                     mpl_figsize = figsize if figsize else (10, 6)
                     # current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
                     fig_mpl, ax1 = plt.subplots(figsize=mpl_figsize, dpi=200)
+                    
+                    # Disable gridlines globally if show_gridlines is False
+                    if not show_gridlines:
+                        plt.rcParams['axes.grid'] = False
                     
                     # Only create secondary y-axis if not disabled
                     ax2 = None
@@ -3597,6 +3687,12 @@ def _generate_report(project_id, template_path, data_file_path):
                                 ))
                                 
                             elif series_type == "treemap":
+                                # Get data label settings from JSON configuration
+                                data_labels = chart_meta.get("data_labels", True)
+                                data_label_font_size = chart_meta.get("data_label_font_size", 12)
+                                data_label_color = chart_meta.get("data_label_color", "#000000")
+                                fill_opacity = chart_meta.get("fill_opacity", 0.8)
+                                
                                 # Treemap specific settings
                                 treemap_kwargs = {
                                     "labels": x_vals,
@@ -3607,9 +3703,17 @@ def _generate_report(project_id, template_path, data_file_path):
                                     "branchvalues": "total"
                                 }
                                 
+                                # Add text font configuration from JSON
+                                if data_labels:
+                                    treemap_kwargs["textfont"] = {
+                                        "family": font_family,
+                                        "size": data_label_font_size,
+                                        "color": data_label_color
+                                    }
+                                
                                 # Add treemap specific attributes
                                 if color:
-                                    treemap_kwargs["marker"] = dict(colors=color) if isinstance(color, list) else dict(colors=[color])
+                                    treemap_kwargs["marker"] = dict(colors=color, opacity=fill_opacity) if isinstance(color, list) else dict(colors=[color], opacity=fill_opacity)
                                 
                                 fig.add_trace(go.Treemap(**treemap_kwargs,
                                     hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}<extra></extra>"
@@ -4335,7 +4439,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         formatted_x_labels.append(str(label))
                             else:
                                 formatted_x_labels.append("")
-                        ax2.set_xticklabels(formatted_x_labels, rotation=0)
+                        ax2.set_xticklabels(formatted_x_labels, rotation=0, fontsize=axis_tick_font_size or 10)
                     # Add data labels with proper formatting
                     value_format = chart_meta.get("value_format", ".2f")
                     data_label_font_size = chart_meta.get("data_label_font_size", 10)
@@ -4365,6 +4469,10 @@ def _generate_report(project_id, template_path, data_file_path):
                     mpl_figsize = figsize if figsize else (10, 6)
                     # current_app.logger.debug(f"Applied Matplotlib figsize: {mpl_figsize}")
                     fig_mpl, ax1 = plt.subplots(figsize=mpl_figsize, dpi=200)
+                    
+                    # Disable gridlines globally if show_gridlines is False
+                    if not show_gridlines:
+                        plt.rcParams['axes.grid'] = False
                     
                     # Only create secondary y-axis if not disabled
                     ax2 = None
@@ -4923,13 +5031,15 @@ def _generate_report(project_id, template_path, data_file_path):
                         if i == len(series_data) - 1 and mpl_chart_type == "fill_between":  # Only for area charts
                             # Set axis labels
                             x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
-                            y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
+                            y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", 
+                                chart_meta.get("y_label", chart_config.get("y_label", 
+                                chart_meta.get("y_axis_title", chart_config.get("y_axis_title", ""))))))
                             if x_axis_title:
                                 # Handle "auto" values for axis label distances
                                 if x_axis_label_distance == "auto":
-                                    # Calculate optimal label distance for line chart
+                                    # Calculate optimal label distance for area chart
                                     auto_x_distance, _ = calculate_optimal_label_distance(
-                                        "line", series_data, x_values, y_vals, figsize, font_size
+                                        "area", series_data, x_values, y_vals, figsize, font_size
                                     )
                                     x_axis_label_distance = auto_x_distance
                                 
@@ -4943,9 +5053,9 @@ def _generate_report(project_id, template_path, data_file_path):
                             if y_axis_title:
                                 # Handle "auto" values for axis label distances
                                 if y_axis_label_distance == "auto":
-                                    # Calculate optimal label distance for line chart
+                                    # Calculate optimal label distance for area chart
                                     _, auto_y_distance = calculate_optimal_label_distance(
-                                        "line", series_data, x_values, y_vals, figsize, font_size
+                                        "area", series_data, x_values, y_vals, figsize, font_size
                                     )
                                     y_axis_label_distance = auto_y_distance
                                 
@@ -4988,13 +5098,15 @@ def _generate_report(project_id, template_path, data_file_path):
                             if i == len(series_data) - 1:  # Only set once after all series are processed
                                 # Set axis labels
                                 x_axis_title = chart_meta.get("x_label", chart_config.get("x_axis_title", ""))
-                                y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", ""))
+                                y_axis_title = chart_meta.get("primary_y_label", chart_config.get("primary_y_label", 
+                                    chart_meta.get("y_label", chart_config.get("y_label", 
+                                    chart_meta.get("y_axis_title", chart_config.get("y_axis_title", ""))))))
                                 if x_axis_title:
                                     # Handle "auto" values for axis label distances
                                     if x_axis_label_distance == "auto":
-                                        # Calculate optimal label distance for line chart
+                                        # Calculate optimal label distance for area chart
                                         auto_x_distance, _ = calculate_optimal_label_distance(
-                                            "line", series_data, x_values, y_vals, figsize, font_size
+                                            "area", series_data, x_values, y_vals, figsize, font_size
                                         )
                                         x_axis_label_distance = auto_x_distance
                                     
@@ -5008,9 +5120,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                 if y_axis_title:
                                     # Handle "auto" values for axis label distances
                                     if y_axis_label_distance == "auto":
-                                        # Calculate optimal label distance for line chart
+                                        # Calculate optimal label distance for area chart
                                         _, auto_y_distance = calculate_optimal_label_distance(
-                                            "line", series_data, x_values, y_vals, figsize, font_size
+                                            "area", series_data, x_values, y_vals, figsize, font_size
                                         )
                                         y_axis_label_distance = auto_y_distance
                                     
@@ -5147,8 +5259,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                 current_app.logger.debug(f"🔥 Setting heatmap axis labels...")
                                 ax1.set_xticks(range(len(x_labels)))
                                 ax1.set_yticks(range(len(y_labels)))
-                                ax1.set_xticklabels(x_labels, rotation=45, ha='right')
-                                ax1.set_yticklabels(y_labels)
+                                ax1.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=axis_tick_font_size or 10)
+                                ax1.set_yticklabels(y_labels, fontsize=axis_tick_font_size or 10)
                                 
                                 # Ensure the plot is properly displayed
                                 ax1.set_aspect('auto')
@@ -5212,7 +5324,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 # Set axis labels
                                 x_axis_title = chart_meta.get("x_label", "")
-                                y_axis_title = chart_meta.get("primary_y_label", "")
+                                y_axis_title = chart_meta.get("primary_y_label", 
+                                    chart_meta.get("y_label", 
+                                    chart_meta.get("y_axis_title", "")))
                                 if x_axis_title:
                                     ax1.set_xlabel(x_axis_title, fontsize=font_size or 12, color=font_color if font_color else 'black',
                                                 fontname=title_font_family)
@@ -5296,19 +5410,28 @@ def _generate_report(project_id, template_path, data_file_path):
                             
                             # Debug logging
                             current_app.logger.debug(f"🔍 Treemap Debug - Series: {series}")
-                            current_app.logger.debug(f"🔍 Treemap Debug - Values: {values}")
-                            current_app.logger.debug(f"🔍 Treemap Debug - Labels: {labels}")
+                            current_app.logger.debug(f"🔍 Treemap Debug - Values: {values} (type: {type(values)})")
+                            current_app.logger.debug(f"🔍 Treemap Debug - Labels: {labels} (type: {type(labels)})")
                             current_app.logger.debug(f"🔍 Treemap Debug - X_values: {x_values}")
                             
-                            # Fallback: if values are not in series, try y_vals
-                            if not values and y_vals:
-                                values = y_vals
-                                current_app.logger.debug(f"🔍 Treemap Debug - Using y_vals as values: {values}")
+                            # Additional debugging for raw data
+                            if isinstance(values, list):
+                                current_app.logger.debug(f"🔍 Treemap Debug - Values list items: {[f'{v} (type: {type(v)})' for v in values]}")
+                            if isinstance(labels, list):
+                                current_app.logger.debug(f"🔍 Treemap Debug - Labels list items: {[f'{l} (type: {type(l)})' for l in labels]}")
+                                # Additional debugging for label content
+                                for i, label in enumerate(labels):
+                                    current_app.logger.debug(f"🔍 Treemap Debug - Label {i}: '{label}' (repr: {repr(label)})")
                             
-                            # If labels are not in series, try to use x_values as labels
-                            if not labels and x_values:
-                                labels = x_values
-                                current_app.logger.debug(f"🔍 Treemap Debug - Using x_values as labels: {labels}")
+                            # NO FALLBACKS - Only use data from series to prevent mixing data sources
+                            if not values:
+                                current_app.logger.error(f"❌ Treemap: No values found in series data")
+                                values = []
+                            
+                            if not labels:
+                                current_app.logger.error(f"❌ Treemap: No labels found in series data")
+                                labels = []
+                            
                             
                             # Ensure we have valid data for treemap
                             if values and labels and len(values) == len(labels):
@@ -5328,8 +5451,41 @@ def _generate_report(project_id, template_path, data_file_path):
                                     try:
                                         numeric_value = float(value)
                                         if numeric_value > 0:  # Only include positive values
+                                            # Clean and format the label text
+                                            clean_label = str(label).strip()
+                                            
+                                            # Debug the original label
+                                            current_app.logger.debug(f"🔍 Treemap label cleaning - Original: '{label}' (repr: {repr(label)})")
+                                            
+                                            # Light cleaning for treemap labels - only remove control characters
+                                            # Remove control characters and non-printable characters
+                                            clean_label = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', clean_label)
+                                            # Remove extra whitespace
+                                            clean_label = re.sub(r'\s+', ' ', clean_label).strip()
+                                            
+                                            # If label is empty after cleaning, keep it empty (no fallback)
+                                            if not clean_label:
+                                                clean_label = ""
+                                            
+                                            # Debug the cleaned label
+                                            current_app.logger.debug(f"🔍 Treemap label cleaning - Cleaned: '{clean_label}' (repr: {repr(clean_label)})")
+                                            
+                                            # CRITICAL: Skip only truly problematic labels (not valid category names)
+                                            if (clean_label and 
+                                                (clean_label.lower() in ['e', 'c', '15.0']) or
+                                                (re.match(r'^[0-9\.]+$', clean_label)) or
+                                                (len(clean_label) < 2) or
+                                                ('budget' in clean_label.lower() and len(clean_label) < 8 and 'budget' != clean_label.lower())):
+                                                current_app.logger.warning(f"⚠️ SKIPPING problematic label: '{clean_label}' with value: {numeric_value}")
+                                                continue
+                                            
                                             valid_data.append(numeric_value)
-                                            valid_labels.append(str(label))
+                                            valid_labels.append(clean_label)
+                                            
+                                            # Debug logging for label cleaning
+                                            if str(label) != clean_label:
+                                                current_app.logger.debug(f"🔍 Treemap label cleaned: '{label}' -> '{clean_label}'")
+                                            
                                             # Use custom color if available, otherwise use enhanced palette
                                             if isinstance(color, list) and i < len(color):
                                                 valid_colors.append(color[i])
@@ -5343,10 +5499,68 @@ def _generate_report(project_id, template_path, data_file_path):
                                         continue
                                 
                                 if valid_data:
+                                    # Ensure we have the same number of labels as data points
+                                    if len(valid_labels) != len(valid_data):
+                                        current_app.logger.warning(f"⚠️ Treemap: Mismatch between data ({len(valid_data)}) and labels ({len(valid_labels)})")
+                                        # Trim or pad labels to match data length (no fallback generation)
+                                        if len(valid_labels) < len(valid_data):
+                                            # Pad with empty strings if we have fewer labels
+                                            valid_labels.extend([""] * (len(valid_data) - len(valid_labels)))
+                                        else:
+                                            # Trim excess labels
+                                            valid_labels = valid_labels[:len(valid_data)]
+                                    
+                                    # Final validation - remove any remaining problematic entries
+                                    final_data = []
+                                    final_labels = []
+                                    final_colors = []
+                                    
+                                    for i, (label, value, color) in enumerate(zip(valid_labels, valid_data, valid_colors)):
+                                        # Skip only truly problematic entries (not valid category names)
+                                        if (label and 
+                                            (label.lower() in ['e', 'c', '15.0']) or
+                                            (re.match(r'^[0-9\.]+$', label)) or
+                                            (len(label) < 2) or
+                                            ('budget' in label.lower() and len(label) < 8 and 'budget' != label.lower())):
+                                            current_app.logger.warning(f"⚠️ FINAL FILTER: Skipping problematic entry {i}: '{label}' with value: {value}")
+                                            continue
+                                        
+                                        final_data.append(value)
+                                        final_labels.append(label)
+                                        final_colors.append(color)
+                                    
+                                    # Remove duplicates to prevent multiple entries of the same category
+                                    seen_labels = set()
+                                    unique_data = []
+                                    unique_labels = []
+                                    unique_colors = []
+                                    
+                                    for i, (label, value, color) in enumerate(zip(final_labels, final_data, final_colors)):
+                                        if label and label.lower() not in seen_labels:
+                                            seen_labels.add(label.lower())
+                                            unique_data.append(value)
+                                            unique_labels.append(label)
+                                            unique_colors.append(color)
+                                        else:
+                                            current_app.logger.warning(f"⚠️ DUPLICATE REMOVED: '{label}' with value: {value}")
+                                    
+                                    # Use the unique data
+                                    valid_data = unique_data
+                                    valid_labels = unique_labels
+                                    valid_colors = unique_colors
+                                    
+                                    current_app.logger.debug(f"🔍 Treemap: Final unique data - {len(valid_data)} items")
+                                    current_app.logger.debug(f"🔍 Treemap: Final labels: {valid_labels}")
+                                    current_app.logger.debug(f"🔍 Treemap: Final data: {valid_data}")
+                                    
                                     # Get customization options
                                     treemap_alpha = fill_opacity if fill_opacity is not None else 0.8
                                     treemap_font_size = data_label_font_size if data_label_font_size else 10
                                     treemap_font_weight = 'bold'
+                                    
+                                    # Handle root_visible attribute
+                                    root_visible = chart_meta.get("root_visible", True)
+                                    current_app.logger.debug(f"🔍 Treemap: root_visible = {root_visible}")
                                     
                                     # Check legend visibility early to determine plot labels
                                     show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -5367,9 +5581,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     # CRITICAL: Disable automatic legend creation at the matplotlib level
                                     # This prevents squarify from creating legends automatically
                                     if not show_legend:
-                                        # Set matplotlib to not show legends automatically
-                                        plt.rcParams['legend.automode'] = False
-                                        # Also try to disable legend creation on the axis
+                                        # Disable legend creation on the axis
                                         try:
                                             ax1.set_legend_handles([])
                                         except:
@@ -5378,8 +5590,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         # CRITICAL: Override matplotlib's global legend settings
                                         # This prevents any automatic legend creation across the entire plot
                                         try:
-                                            # Disable automatic legend creation globally
-                                            plt.rcParams['legend.automode'] = False
+                                            # Disable legend frame and visibility
                                             plt.rcParams['legend.frameon'] = False
                                             # Also try to disable legend creation on the axis
                                             ax1.legend_ = None
@@ -5388,41 +5599,125 @@ def _generate_report(project_id, template_path, data_file_path):
                                         except:
                                             pass
                                     
-                                    # For treemaps, we need to be careful about labels
-                                    # When showlegend is False, we must ensure no labels are passed to prevent legend creation
-                                    if show_legend:
-                                        # Only pass labels when we want to show legend
-                                        squarify.plot(
-                                            sizes=valid_data,
-                                            label=valid_labels,
-                                            color=valid_colors,
-                                            alpha=treemap_alpha,
-                                            ax=ax1,
-                                            text_kwargs={'fontsize': treemap_font_size, 'fontweight': treemap_font_weight}
-                                        )
-                                    else:
-                                        # CRITICAL: When legend is disabled, use empty labels to prevent any legend creation
-                                        # This is the key fix - empty labels won't create legend entries
-                                        current_app.logger.debug(f"🔍 Treemap: Using empty labels to prevent legend creation")
-                                        squarify.plot(
-                                            sizes=valid_data,
-                                            label=[''] * len(valid_labels),  # Empty labels prevent legend
-                                            color=valid_colors,
-                                            alpha=treemap_alpha,
-                                            ax=ax1,
-                                            text_kwargs={'fontsize': treemap_font_size, 'fontweight': treemap_font_weight}
-                                        )
+                                    # For treemaps, we need to separate data labels from legend labels
+                                    # Data labels should show when data_labels=true, regardless of legend setting
+                                    if data_labels:
+                                        # Show data labels on the treemap rectangles
+                                        current_app.logger.debug(f"🔍 Treemap: Showing data labels with font size {treemap_font_size}")
+                                        current_app.logger.debug(f"🔍 Treemap: Valid labels: {valid_labels}")
+                                        current_app.logger.debug(f"🔍 Treemap: Valid data: {valid_data}")
+                                        current_app.logger.debug(f"🔍 Treemap: Valid colors: {valid_colors}")
                                         
-                                        # CRITICAL: Immediately after plotting, ensure no legend is created
-                                        # This is the key step to prevent automatic legend creation
+                                        # Final validation before plotting
+                                        if len(valid_labels) != len(valid_data):
+                                            current_app.logger.error(f"❌ CRITICAL: Label/data mismatch - Labels: {len(valid_labels)}, Data: {len(valid_data)}")
+                                            current_app.logger.error(f"❌ Labels: {valid_labels}")
+                                            current_app.logger.error(f"❌ Data: {valid_data}")
+                                        
+                                        # Configure squarify based on root_visible setting
+                                        if root_visible:
+                                            # Normal treemap with all rectangles visible
+                                            squarify.plot(
+                                                sizes=valid_data,
+                                                label=valid_labels,  # Show actual labels for data display
+                                                color=valid_colors,
+                                                alpha=treemap_alpha,
+                                                ax=ax1,
+                                                text_kwargs={
+                                                    'fontsize': treemap_font_size, 
+                                                    'fontweight': treemap_font_weight,
+                                                    'color': data_label_color if data_label_color else '#000000'
+                                                }
+                                            )
+                                        else:
+                                            # Treemap without root rectangle - use squarify.normalize_sizes and manual plotting
+                                            current_app.logger.debug(f"🔍 Treemap: Creating treemap without root rectangle")
+                                            
+                                            # Normalize sizes to fit the plot area
+                                            normalized_sizes = squarify.normalize_sizes(valid_data, 1, 1)
+                                            
+                                            # Get rectangles without root
+                                            rectangles = squarify.squarify(normalized_sizes, 0, 0, 1, 1)
+                                            
+                                            # Plot rectangles manually without root
+                                            for i, (rect, label, color) in enumerate(zip(rectangles, valid_labels, valid_colors)):
+                                                # Scale rectangle to plot area
+                                                x, y, dx, dy = rect['x'], rect['y'], rect['dx'], rect['dy']
+                                                
+                                                # Create rectangle patch
+                                                from matplotlib.patches import Rectangle
+                                                rect_patch = Rectangle((x, y), dx, dy, 
+                                                                      facecolor=color, 
+                                                                      alpha=treemap_alpha,
+                                                                      edgecolor='black',
+                                                                      linewidth=0.5)
+                                                ax1.add_patch(rect_patch)
+                                                
+                                                # Add label if data_labels is enabled
+                                                if data_labels and label:
+                                                    # Center the label in the rectangle
+                                                    label_x = x + dx/2
+                                                    label_y = y + dy/2
+                                                    ax1.text(label_x, label_y, label,
+                                                           ha='center', va='center',
+                                                           fontsize=treemap_font_size,
+                                                           fontweight=treemap_font_weight,
+                                                           color=data_label_color if data_label_color else '#000000')
+                                    else:
+                                        # No data labels requested
+                                        current_app.logger.debug(f"🔍 Treemap: Data labels disabled")
+                                        
+                                        if root_visible:
+                                            # Normal treemap with empty labels
+                                            squarify.plot(
+                                                sizes=valid_data,
+                                                label=[''] * len(valid_labels),  # Empty labels when data_labels=false
+                                                color=valid_colors,
+                                                alpha=treemap_alpha,
+                                                ax=ax1,
+                                                text_kwargs={'fontsize': treemap_font_size, 'fontweight': treemap_font_weight}
+                                            )
+                                        else:
+                                            # Treemap without root rectangle and no labels
+                                            current_app.logger.debug(f"🔍 Treemap: Creating treemap without root rectangle and no labels")
+                                            
+                                            # Normalize sizes to fit the plot area
+                                            normalized_sizes = squarify.normalize_sizes(valid_data, 1, 1)
+                                            
+                                            # Get rectangles without root
+                                            rectangles = squarify.squarify(normalized_sizes, 0, 0, 1, 1)
+                                            
+                                            # Plot rectangles manually without root and without labels
+                                            for i, (rect, color) in enumerate(zip(rectangles, valid_colors)):
+                                                # Scale rectangle to plot area
+                                                x, y, dx, dy = rect['x'], rect['y'], rect['dx'], rect['dy']
+                                                
+                                                # Create rectangle patch
+                                                from matplotlib.patches import Rectangle
+                                                rect_patch = Rectangle((x, y), dx, dy, 
+                                                                      facecolor=color, 
+                                                                      alpha=treemap_alpha,
+                                                                      edgecolor='black',
+                                                                      linewidth=0.5)
+                                                ax1.add_patch(rect_patch)
+                                    
+                                    # CRITICAL: After plotting, prevent legend creation if showlegend=false
+                                    # This applies regardless of whether data labels are shown
+                                    if not show_legend:
                                         current_app.logger.debug(f"🔍 Treemap: Post-plot legend prevention")
                                         
-                                        # Remove any plot elements that might have labels
-                                        for artist in ax1.get_children():
-                                            if hasattr(artist, 'get_label') and artist.get_label():
-                                                artist.set_label('')
-                                            if hasattr(artist, '_label') and artist._label:
-                                                artist._label = ''
+                                        # Prevent legend creation without removing data labels
+                                        # The key is to prevent matplotlib from creating a legend, not to remove the labels themselves
+                                        try:
+                                            # Clear any existing legend
+                                            if ax1.get_legend():
+                                                ax1.get_legend().remove()
+                                            ax1.legend_ = None
+                                            
+                                            # Prevent automatic legend creation by clearing legend handles
+                                            ax1.legend_handles = []
+                                        except Exception as e:
+                                            current_app.logger.debug(f"🔍 Legend prevention error: {e}")
                                         
                                         # Debug: log what plot elements were created
                                         current_app.logger.debug(f"🔍 Treemap Debug - Plot elements after squarify: {[type(artist).__name__ for artist in ax1.get_children()]}")
@@ -5435,10 +5730,17 @@ def _generate_report(project_id, template_path, data_file_path):
                                         # CRITICAL: Check if squarify created any plot elements that might automatically create legends
                                         # This is often the root cause of automatic legend creation
                                         for i, artist in enumerate(ax1.get_children()):
-                                            if hasattr(artist, 'get_label') and artist.get_label():
+                                            if (hasattr(artist, 'get_label') and 
+                                                hasattr(artist, 'set_label') and 
+                                                not isinstance(artist, (matplotlib.axis.Axis, matplotlib.axis.XAxis, matplotlib.axis.YAxis)) and
+                                                artist.get_label()):
                                                 current_app.logger.warning(f"⚠️ Treemap: Found plot element with label '{artist.get_label()}' that might create legend")
                                                 # Force remove the label to prevent legend creation
-                                                artist.set_label('')
+                                                try:
+                                                    artist.set_label('')
+                                                except Exception as e:
+                                                    # Skip if set_label fails (e.g., for Axis objects)
+                                                    current_app.logger.debug(f"🔍 Skipped setting label on {type(artist).__name__}: {e}")
                                         
                                         # Additional safety: try to prevent matplotlib from creating legends
                                         # by setting the axis to not show legends
@@ -5527,8 +5829,16 @@ def _generate_report(project_id, template_path, data_file_path):
                                         # Additional safety: remove any plot elements that might have labels
                                         # This prevents matplotlib from automatically creating legends
                                         for artist in ax1.get_children():
-                                            if hasattr(artist, 'get_label') and artist.get_label():
-                                                artist.set_label('')
+                                            # Only process objects that are not Axis objects and have label methods
+                                            if (hasattr(artist, 'get_label') and 
+                                                hasattr(artist, 'set_label') and 
+                                                not isinstance(artist, (matplotlib.axis.Axis, matplotlib.axis.XAxis, matplotlib.axis.YAxis)) and
+                                                artist.get_label()):
+                                                try:
+                                                    artist.set_label('')
+                                                except Exception as e:
+                                                    # Skip if set_label fails (e.g., for Axis objects)
+                                                    current_app.logger.debug(f"🔍 Skipped setting label on {type(artist).__name__}: {e}")
                                             if hasattr(artist, '_label') and artist._label:
                                                 artist._label = ''
                                     
@@ -5551,8 +5861,16 @@ def _generate_report(project_id, template_path, data_file_path):
                                         # For squarify plots, we need to be more aggressive
                                         # Remove labels from all plot elements that might create legends
                                         for artist in ax1.get_children():
-                                            if hasattr(artist, 'get_label') and artist.get_label():
-                                                artist.set_label('')
+                                            # Only process objects that are not Axis objects and have label methods
+                                            if (hasattr(artist, 'get_label') and 
+                                                hasattr(artist, 'set_label') and 
+                                                not isinstance(artist, (matplotlib.axis.Axis, matplotlib.axis.XAxis, matplotlib.axis.YAxis)) and
+                                                artist.get_label()):
+                                                try:
+                                                    artist.set_label('')
+                                                except Exception as e:
+                                                    # Skip if set_label fails (e.g., for Axis objects)
+                                                    current_app.logger.debug(f"🔍 Skipped setting label on {type(artist).__name__}: {e}")
                                             if hasattr(artist, '_label') and artist._label:
                                                 artist._label = ''
                                         
@@ -5627,8 +5945,11 @@ def _generate_report(project_id, template_path, data_file_path):
                                         else:
                                             ax1.grid(False)
                                     else:
-                                        # Default subtle grid for treemap
-                                        ax1.grid(True, alpha=0.1, linestyle='-', linewidth=0.5)
+                                        # Respect show_gridlines setting for treemap
+                                        if show_gridlines:
+                                            ax1.grid(True, alpha=0.1, linestyle='-', linewidth=0.5)
+                                        else:
+                                            ax1.grid(False)
                                     
                                     # Add data labels if enabled with enhanced formatting
                                     if show_data_labels:
@@ -5730,8 +6051,16 @@ def _generate_report(project_id, template_path, data_file_path):
                                         # For squarify plots, we need to be more aggressive
                                         # Remove labels from all plot elements that might create legends
                                         for artist in ax1.get_children():
-                                            if hasattr(artist, 'get_label') and artist.get_label():
-                                                artist.set_label('')
+                                            # Only process objects that are not Axis objects and have label methods
+                                            if (hasattr(artist, 'get_label') and 
+                                                hasattr(artist, 'set_label') and 
+                                                not isinstance(artist, (matplotlib.axis.Axis, matplotlib.axis.XAxis, matplotlib.axis.YAxis)) and
+                                                artist.get_label()):
+                                                try:
+                                                    artist.set_label('')
+                                                except Exception as e:
+                                                    # Skip if set_label fails (e.g., for Axis objects)
+                                                    current_app.logger.debug(f"🔍 Skipped setting label on {type(artist).__name__}: {e}")
                                             if hasattr(artist, '_label') and artist._label:
                                                 artist._label = ''
                                         
@@ -5974,8 +6303,10 @@ def _generate_report(project_id, template_path, data_file_path):
                                              fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
                                 if "secondary_y_label" in chart_meta or "secondary_y_label" in chart_config:
                                     if ax2:
+                                        # Use a much smaller labelpad for secondary y-axis to match primary axis distance
+                                        secondary_y_labelpad = y_labelpad * 0.1 if y_labelpad else 5.0
                                         ax2.set_ylabel(chart_meta.get("secondary_y_label", chart_config.get("secondary_y_label", "Secondary Y")), 
-                                                     fontsize=label_fontsize, color=font_color, labelpad=y_labelpad)
+                                                     fontsize=label_fontsize, color=font_color, labelpad=secondary_y_labelpad)
                             else:
                                 # For bubble charts, just set the font size without overriding the labelpad values
                                 current_app.logger.debug(f"🎈 Skipping general axis label settings for bubble chart - preserving bubble chart specific settings")
@@ -6016,7 +6347,7 @@ def _generate_report(project_id, template_path, data_file_path):
 
                         # Set axis tick font size and control tick visibility
                         tick_fontsize = axis_tick_font_size or int(title_fontsize * 0.8)  # Improved tick size calculation
-                        if axis_tick_font_size:
+                        if axis_tick_font_size is not None:
                             ax1.tick_params(axis='x', labelsize=axis_tick_font_size, colors=font_color)  # Removed rotation
                             ax1.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
                             if ax2 and not is_bubble_chart and not disable_secondary_y:
@@ -6035,6 +6366,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                     ax1.set_xticklabels([])  # Hide tick labels
                                 else:
                                     ax1.tick_params(axis='x', length=5)  # Show tick marks
+                                    # Reapply font size after showing ticks
+                                    if axis_tick_font_size is not None:
+                                        ax1.tick_params(axis='x', labelsize=axis_tick_font_size, colors=font_color)
                             if show_y_ticks is not None:
                                 if not show_y_ticks:
                                     ax1.tick_params(axis='y', length=0)  # Hide tick marks
@@ -6044,8 +6378,13 @@ def _generate_report(project_id, template_path, data_file_path):
                                         ax2.set_yticklabels([])  # Hide secondary y-axis tick labels
                                 else:
                                     ax1.tick_params(axis='y', length=5)  # Show tick marks
+                                    # Reapply font size after showing ticks
+                                    if axis_tick_font_size is not None:
+                                        ax1.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
                                     if ax2 and not is_bubble_chart and not disable_secondary_y:
-                                     ax2.tick_params(axis='y', length=5)  # Show secondary y-axis tick marks
+                                        ax2.tick_params(axis='y', length=5)  # Show secondary y-axis tick marks
+                                        if axis_tick_font_size is not None:
+                                            ax2.tick_params(axis='y', labelsize=axis_tick_font_size, colors=font_color)
                         
                         # Apply primary y-axis formatting for Matplotlib
                         if axis_tick_format:
