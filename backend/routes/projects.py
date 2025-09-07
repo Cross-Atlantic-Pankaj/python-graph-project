@@ -176,23 +176,96 @@ def validate_excel_structure(file_path):
         if df.empty:
             return False, "Excel file is empty"
         
-        # Check for required global metadata
+        # Extract dynamic columns from A1 to M1 range
+        dynamic_columns = extract_dynamic_columns_from_excel(file_path)
+        
+        # Ensure dynamic_columns is not empty and is a valid list
+        if not dynamic_columns or not isinstance(dynamic_columns, list):
+            return False, "Failed to extract dynamic columns from A1 to M1 range"
+        
+        # Check for required global metadata using dynamic columns
         has_global_metadata = False
         for col in df.columns:
             col_lower = col.lower().strip()
-            if col_lower in ['country', 'report_name', 'report_code', 'currency']:
+            if col_lower in dynamic_columns:
                 # Check if any row has non-empty values for these columns
                 if df[col].notna().any() and (df[col].astype(str).str.strip() != '').any():
                     has_global_metadata = True
                     break
         
         if not has_global_metadata:
-            return False, "No global metadata found (country, report_name, report_code, currency)"
+            return False, f"No global metadata found in dynamic columns: {dynamic_columns}"
         
         return True, "Valid structure"
         
     except Exception as e:
         return False, f"Error reading Excel file: {str(e)}"
+
+def extract_dynamic_columns_from_excel(excel_path):
+    """Extract column names from A1 to M1 range in Excel file"""
+    try:
+        import openpyxl
+        # Load the Excel file
+        wb = openpyxl.load_workbook(excel_path, data_only=True)
+        ws = wb.active
+        
+        dynamic_columns = []
+        
+        # Extract column names from A1 to M1 (columns 1 to 13)
+        for col_idx in range(1, 14):  # A1 to M1 (columns 1 to 13)
+            try:
+                cell_value = ws.cell(row=1, column=col_idx).value
+                
+                # Handle various types of empty values and edge cases
+                if cell_value is None:
+                    # Empty cell - skip silently
+                    continue
+                elif isinstance(cell_value, str):
+                    # String value - clean and normalize
+                    clean_name = cell_value.strip()
+                    if clean_name:  # Only add non-empty strings
+                        clean_name = clean_name.lower().replace(" ", "_").replace("__", "_")
+                        if clean_name:  # Double-check after normalization
+                            dynamic_columns.append(clean_name)
+                elif isinstance(cell_value, (int, float)):
+                    # Numeric value - convert to string and process
+                    clean_name = str(cell_value).strip()
+                    if clean_name:
+                        clean_name = clean_name.lower().replace(" ", "_").replace("__", "_")
+                        if clean_name:
+                            dynamic_columns.append(clean_name)
+                else:
+                    # Other types (dates, etc.) - convert to string and process
+                    try:
+                        clean_name = str(cell_value).strip()
+                        if clean_name:
+                            clean_name = clean_name.lower().replace(" ", "_").replace("__", "_")
+                            if clean_name:
+                                dynamic_columns.append(clean_name)
+                    except Exception:
+                        # If conversion fails, skip this cell
+                        continue
+                        
+            except Exception as cell_error:
+                # If there's an error reading a specific cell, skip it and continue
+                current_app.logger.debug(f"Error reading cell {col_idx}: {cell_error}")
+                continue
+        
+        wb.close()
+        
+        # Ensure we have at least some columns, even if all were empty
+        if not dynamic_columns:
+            current_app.logger.warning(f"No valid columns found in A1 to M1 range in {excel_path}, using fallback")
+            dynamic_columns = ['report_name', 'currency', 'country', 'report_code']
+        
+        current_app.logger.info(f"Extracted dynamic columns from {excel_path}: {dynamic_columns}")
+        current_app.logger.debug(f"🔍 DEBUG: Raw column names from Excel: {dynamic_columns}")
+        return dynamic_columns
+        
+    except Exception as e:
+        current_app.logger.error(f"Error extracting dynamic columns from {excel_path}: {str(e)}")
+        # Fallback to default columns
+        return ['report_name', 'currency', 'country', 'report_code']
 
 def extract_report_info_from_excel(excel_path):
     """Extract Report_Name and Report_Code from Excel file"""
@@ -932,13 +1005,23 @@ def _generate_report(project_id, template_path, data_file_path):
         # Add global metadata columns that can be used across all sections
         global_metadata = {}
         
+        # Extract dynamic columns from A1 to M1 range
+        dynamic_columns = extract_dynamic_columns_from_excel(data_file_path)
+        
+        # Ensure dynamic_columns is not empty and is a valid list
+        if not dynamic_columns or not isinstance(dynamic_columns, list):
+            current_app.logger.warning("Dynamic columns extraction failed or returned empty, using fallback")
+            dynamic_columns = ['report_name', 'currency', 'country', 'report_code']
+        
+        current_app.logger.debug(f"Using dynamic columns: {dynamic_columns}")
+        
         # First pass: Process global metadata columns from ALL rows
         for _, row in df.iterrows():
             for col in df.columns:
                 col_lower = col.lower().strip()
                 
                 # Handle global metadata columns (can be used across all sections)
-                if col_lower in ['country', 'report_name', 'report_code', 'currency']:
+                if col_lower in dynamic_columns:
                     value = row[col]
                     if pd.notna(value) and str(value).strip():
                         # Store in global metadata for use across all sections
@@ -951,8 +1034,7 @@ def _generate_report(project_id, template_path, data_file_path):
                         pass
         
         # Ensure we have all required global metadata
-        required_global_metadata = ['country', 'report_name', 'report_code', 'currency']
-        missing_metadata = [key for key in required_global_metadata if key not in flat_data_map]
+        missing_metadata = [key for key in dynamic_columns if key not in flat_data_map]
         if missing_metadata:
             current_app.logger.error(f"❌ MISSING GLOBAL METADATA: {missing_metadata}")
             current_app.logger.error(f"❌ FOUND METADATA: {flat_data_map}")
@@ -960,18 +1042,22 @@ def _generate_report(project_id, template_path, data_file_path):
             current_app.logger.debug(f"✅ ALL GLOBAL METADATA FOUND: {flat_data_map}")
         
         # Second pass: Process chart-specific data from rows with chart tags
-        for _, row in df.iterrows():
+        current_app.logger.debug(f"🔍 DEBUG: Starting second pass - processing chart-specific data")
+        for row_index, row in df.iterrows():
             chart_tag = row.get("Chart_Tag")
+            current_app.logger.debug(f"🔍 DEBUG: Row {row_index}: Chart_Tag = '{chart_tag}' (type: {type(chart_tag)})")
             if not isinstance(chart_tag, str) or not chart_tag:
+                current_app.logger.debug(f"🔍 DEBUG: Row {row_index}: Skipping - Chart_Tag is not a valid string")
                 continue
             section_prefix = chart_tag.replace('_chart', '').lower()
+            current_app.logger.debug(f"🔍 DEBUG: Row {row_index}: Processing section_prefix: {section_prefix} from Chart_Tag: {chart_tag}")
 
             # Process all columns systematically
             for col in df.columns:
                 col_lower = col.lower().strip()
                 
                 # Skip global metadata columns as they're already processed
-                if col_lower in ['country', 'report_name', 'report_code', 'currency']:
+                if col_lower in dynamic_columns:
                     continue
                 
                 # Handle Chart Data columns (for values)
@@ -1067,11 +1153,107 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Empty value - skip silently
                     pass
 
+            # Handle CAGR Historical
+            cagr_historical_value = row.get("Chart_Data_CAGR_Historical")
+            current_app.logger.debug(f"🔍 DEBUG: Row {row_index}: Chart_Data_CAGR_Historical = '{cagr_historical_value}' (pd.notna: {pd.notna(cagr_historical_value)})")
+            if pd.notna(cagr_historical_value):
+                key = f"{section_prefix}_cgrp_historical"
+                value = cagr_historical_value
+                current_app.logger.debug(f"🔍 DEBUG: Found CAGR Historical for {section_prefix}: {value}")
+                if str(value).strip():
+                    # Convert CAGR percentage values to proper percentage format for table display
+                    try:
+                        # Convert to float first to handle any numeric format
+                        float_val = float(value)
+                        
+                        # Check if the original value string contains '%' (Excel percentage format)
+                        original_str = str(value).strip()
+                        if '%' in original_str:
+                            # Remove % and format as percentage
+                            clean_val = original_str.replace('%', '').strip()
+                            float_val = float(clean_val)
+                            percentage_val = f"{float_val:.1f}%"
+                            flat_data_map[key] = percentage_val
+                            current_app.logger.debug(f"🔍 DEBUG: Added to flat_data_map: {key} = {percentage_val}")
+                            # Excel CAGR Historical percentage formatted as percentage
+                        elif float_val > 1:
+                            # Convert percentage to percentage format (e.g., 10.5 -> 10.5%)
+                            percentage_val = f"{float_val:.1f}%"
+                            flat_data_map[key] = percentage_val
+                            current_app.logger.debug(f"🔍 DEBUG: Added to flat_data_map: {key} = {percentage_val}")
+                            # CAGR Historical percentage formatted as percentage
+                        else:
+                            # If it's already a decimal, convert to percentage (e.g., 0.105 -> 10.5%)
+                            percentage_val = f"{float_val * 100:.1f}%"
+                            flat_data_map[key] = percentage_val
+                            current_app.logger.debug(f"🔍 DEBUG: Added to flat_data_map: {key} = {percentage_val}")
+                            # CAGR Historical decimal converted to percentage
+                    except (ValueError, TypeError):
+                        # If conversion fails, use the original value as string
+                        flat_data_map[key] = str(value).strip()
+                        current_app.logger.debug(f"🔍 DEBUG: Added to flat_data_map (string): {key} = {str(value).strip()}")
+                        # Conversion failed - skip silently
+                else:
+                    # Empty value - skip silently
+                    pass
+            else:
+                # No CAGR Historical data found for this section
+                current_app.logger.debug(f"🔍 DEBUG: No CAGR Historical data found for {section_prefix}")
+
+            # Handle CAGR Forecast
+            if pd.notna(row.get("Chart_Data_CAGR_Forecast")):
+                key = f"{section_prefix}_cgrp_forecast"
+                value = row["Chart_Data_CAGR_Forecast"]
+                if str(value).strip():
+                    # Convert CAGR percentage values to proper percentage format for table display
+                    try:
+                        # Convert to float first to handle any numeric format
+                        float_val = float(value)
+                        
+                        # Check if the original value string contains '%' (Excel percentage format)
+                        original_str = str(value).strip()
+                        if '%' in original_str:
+                            # Remove % and format as percentage
+                            clean_val = original_str.replace('%', '').strip()
+                            float_val = float(clean_val)
+                            percentage_val = f"{float_val:.1f}%"
+                            flat_data_map[key] = percentage_val
+                            # Excel CAGR Forecast percentage formatted as percentage
+                        elif float_val > 1:
+                            # Convert percentage to percentage format (e.g., 10.5 -> 10.5%)
+                            percentage_val = f"{float_val:.1f}%"
+                            flat_data_map[key] = percentage_val
+                            # CAGR Forecast percentage formatted as percentage
+                        else:
+                            # If it's already a decimal, convert to percentage (e.g., 0.105 -> 10.5%)
+                            percentage_val = f"{float_val * 100:.1f}%"
+                            flat_data_map[key] = percentage_val
+                            # CAGR Forecast decimal converted to percentage
+                    except (ValueError, TypeError):
+                        # If conversion fails, use the original value as string
+                        flat_data_map[key] = str(value).strip()
+                        # Conversion failed - skip silently
+                else:
+                    # Empty value - skip silently
+                    pass
+
         # Ensure all keys are lowercase
         flat_data_map = {k.lower(): v for k, v in flat_data_map.items()}
         
         # Log the final data map for debugging
-        # Data map prepared for replacement
+        current_app.logger.debug(f"🔍 DEBUG: Available columns in flat_data_map: {list(flat_data_map.keys())}")
+        
+        # Check specifically for section-specific historical and forecast columns
+        section_keys = [key for key in flat_data_map.keys() if 'cgrp_historical' in key or 'cgrp_forecast' in key]
+        if section_keys:
+            current_app.logger.debug(f"🔍 DEBUG: Found section-specific CAGR keys: {section_keys}")
+            for key in section_keys:
+                current_app.logger.debug(f"🔍 DEBUG: {key} = {flat_data_map[key]}")
+        else:
+            current_app.logger.debug("🔍 DEBUG: No section-specific CAGR Historical/Forecast keys found in flat_data_map")
+        
+        # Show ALL keys in flat_data_map for debugging
+        current_app.logger.debug(f"🔍 DEBUG: ALL keys in flat_data_map: {sorted(flat_data_map.keys())}")
         
         # Data mapping completed silently
 
@@ -1089,32 +1271,80 @@ def _generate_report(project_id, template_path, data_file_path):
                 matches = re.findall(r"\$\{(.*?)\}", run.text)
                 for match in matches:
                     key_lower = match.lower().strip()
-                    val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                    
+                    # Special handling for section_cgrp variants (including numbered sections)
+                    if key_lower == 'section_cgrp' or re.match(r'section\d+_cgrp$', key_lower):
+                        # Use section-specific CAGR data
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                    elif key_lower == 'section_cgrp_historical' or re.match(r'section\d+_cgrp_historical$', key_lower):
+                        # Use section-specific CAGR Historical data
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                        if not val:
+                            current_app.logger.debug(f"🔍 DEBUG: No data found for {key_lower}. Available keys: {list(flat_data_map.keys())}")
+                    elif key_lower == 'section_cgrp_forecast' or re.match(r'section\d+_cgrp_forecast$', key_lower):
+                        # Use section-specific CAGR Forecast data
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                        if not val:
+                            current_app.logger.debug(f"🔍 DEBUG: No data found for {key_lower}. Available keys: {list(flat_data_map.keys())}")
+                    else:
+                        # Default logic for other tags
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                    
                     if val:
                         pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
                         modified_text = pattern.sub(val, modified_text)
                         # Log replacements for global metadata
-                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                        if (key_lower in dynamic_columns or 
+                            key_lower in ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast'] or
+                            re.match(r'section\d+_cgrp$', key_lower) or
+                            re.match(r'section\d+_cgrp_historical$', key_lower) or
+                            re.match(r'section\d+_cgrp_forecast$', key_lower)):
                             # Replaced placeholder successfully
                             pass
                     else:
-                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                        if (key_lower in dynamic_columns or 
+                            key_lower in ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast'] or
+                            re.match(r'section\d+_cgrp$', key_lower) or
+                            re.match(r'section\d+_cgrp_historical$', key_lower) or
+                            re.match(r'section\d+_cgrp_forecast$', key_lower)):
                             current_app.logger.error(f"❌ NO DATA: ${{{match}}} (key: {key_lower})")
                 
                 # Handle <> format placeholders
                 angle_matches = re.findall(r"<(.*?)>", run.text)
                 for match in angle_matches:
                     key_lower = match.lower().strip()
-                    val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                    
+                    # Special handling for section_cgrp variants (including numbered sections)
+                    if key_lower == 'section_cgrp' or re.match(r'section\d+_cgrp$', key_lower):
+                        # Use section-specific CAGR data
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                    elif key_lower == 'section_cgrp_historical' or re.match(r'section\d+_cgrp_historical$', key_lower):
+                        # Use section-specific CAGR Historical data
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                    elif key_lower == 'section_cgrp_forecast' or re.match(r'section\d+_cgrp_forecast$', key_lower):
+                        # Use section-specific CAGR Forecast data
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                    else:
+                        # Default logic for other tags
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                    
                     if val:
                         pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
                         modified_text = pattern.sub(val, modified_text)
                         # Log replacements for global metadata
-                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                        if (key_lower in dynamic_columns or 
+                            key_lower in ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast'] or
+                            re.match(r'section\d+_cgrp$', key_lower) or
+                            re.match(r'section\d+_cgrp_historical$', key_lower) or
+                            re.match(r'section\d+_cgrp_forecast$', key_lower)):
                             # Replaced tag successfully
                             pass
                     else:
-                        if key_lower in ['country', 'report_name', 'report_code', 'currency']:
+                        if (key_lower in dynamic_columns or 
+                            key_lower in ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast'] or
+                            re.match(r'section\d+_cgrp$', key_lower) or
+                            re.match(r'section\d+_cgrp_historical$', key_lower) or
+                            re.match(r'section\d+_cgrp_forecast$', key_lower)):
                             current_app.logger.error(f"❌ NO DATA: <{match}> (key: {key_lower})")
                 
                 # Update the run text only if it was modified
@@ -1144,6 +1374,7 @@ def _generate_report(project_id, template_path, data_file_path):
             # Search through ALL paragraphs, tables, headers, footers, etc.
             def search_for_placeholders(container):
                 """Search for placeholders in any container (document, table, header, footer)"""
+                import re  # Import re module for regex operations
                 if hasattr(container, 'paragraphs'):
                     for para in container.paragraphs:
                         if para.text:
@@ -1198,7 +1429,7 @@ def _generate_report(project_id, template_path, data_file_path):
             # current_app.logger.info(f"🔍 Found {len(all_placeholders_found)} unique placeholders: {list(all_placeholders_found)}")
             
             # Log specific global metadata placeholders found
-            global_placeholders_found = [p for p in all_placeholders_found if any(key in p.lower() for key in ['country', 'report_name', 'report_code', 'currency'])]
+            global_placeholders_found = [p for p in all_placeholders_found if any(key in p.lower() for key in dynamic_columns)]
             # current_app.logger.info(f"🔍 Global metadata placeholders found: {global_placeholders_found}")
             
             # Verify that we have data for all found global metadata placeholders
@@ -1210,7 +1441,7 @@ def _generate_report(project_id, template_path, data_file_path):
                 else:
                     continue
                 
-                if key in ['country', 'report_name', 'report_code', 'currency']:
+                if key in dynamic_columns:
                       if key in flat_data_map:
                           current_app.logger.debug(f"✅ Data available for {placeholder}: {flat_data_map[key]}")
                       else:
@@ -1238,13 +1469,15 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 # COMPREHENSIVE HYPERLINK-AWARE XML PROCESSING
                 current_app.logger.debug("🔄 COMPREHENSIVE HYPERLINK-AWARE XML PROCESSING...")
+                current_app.logger.debug(f"🔄 Using dynamic columns: {dynamic_columns}")
                 
                 # Track all modifications
                 total_files_modified = 0
                 total_replacements = 0
                 
                 # 1. Process ALL XML files in the document (including hyperlink files)
-                # Scanning all XML files for <country> tags
+                # Scanning all XML files for dynamic column tags
+                current_app.logger.debug("🔄 Processing all XML files for dynamic column tags...")
                 for root, dirs, files in os.walk(extract_dir):
                     for file in files:
                         if file.endswith('.xml'):
@@ -1253,22 +1486,86 @@ def _generate_report(project_id, template_path, data_file_path):
                                 with open(file_path, 'r', encoding='utf-8') as f:
                                     content = f.read()
                                 
-                                if '<country>' in content:
-                                    country_count = content.count('<country>')
-                                    current_app.logger.debug(f"🔄 FOUND {country_count} <country> TAGS IN {file}")
-                                    
-                                    # Replace <country> with Austria
-                                    modified_content = content.replace('<country>', 'Austria')
-                                    
-                                    if modified_content != content:
-                                        with open(file_path, 'w', encoding='utf-8') as f:
-                                            f.write(modified_content)
+                                # Process each dynamic column
+                                file_modified = False
+                                for column in dynamic_columns:
+                                    tag = f'<{column}>'
+                                    if tag in content:
+                                        tag_count = content.count(tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN {file}")
                                         
-                                        total_files_modified += 1
-                                        total_replacements += country_count
-                                        current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({country_count} replacements)")
-                                    else:
-                                        pass  # Suppress warning logs
+                                        # Replace tag with actual value from flat_data_map
+                                        replacement_value = flat_data_map.get(column, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(tag, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                
+                                # Process section_cgrp variants (including numbered sections)
+                                section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
+                                for variant in section_cgrp_variants:
+                                    tag = f'<{variant}>'
+                                    if tag in content:
+                                        tag_count = content.count(tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN {file}")
+                                        
+                                        # Get appropriate replacement value based on variant
+                                        if variant == 'section_cgrp':
+                                            replacement_value = flat_data_map.get('section_cgrp', '')
+                                        elif variant == 'section_cgrp_historical':
+                                            replacement_value = flat_data_map.get('section_cgrp_historical', '')
+                                        elif variant == 'section_cgrp_forecast':
+                                            replacement_value = flat_data_map.get('section_cgrp_forecast', '')
+                                        
+                                        if replacement_value:
+                                            modified_content = content.replace(tag, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                
+                                # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
+                                import re
+                                section_patterns = [
+                                    (r'<section\d+_cgrp>', 'chart_data_cgar'),
+                                    (r'<section\d+_cgrp_historical>', 'section_cgrp_historical'),
+                                    (r'<section\d+_cgrp_forecast>', 'section_cgrp_forecast')
+                                ]
+                                
+                                for pattern, base_key in section_patterns:
+                                    matches = re.findall(pattern, content)
+                                    for match in matches:
+                                        tag_count = content.count(match)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN {file}")
+                                        
+                                        # Extract the section-specific key from the match
+                                        # match is like '<section1_cgrp_historical>', extract 'section1_cgrp_historical'
+                                        section_key = match[1:-1].lower()  # Remove < and > and convert to lowercase
+                                        
+                                        # For all CAGR variants, use the section-specific key
+                                        replacement_value = flat_data_map.get(section_key, '')
+                                        
+                                        if replacement_value:
+                                            modified_content = content.replace(match, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({tag_count} {match} replacements)")
+                                
+                                # Write the final modified content if any changes were made
+                                if file_modified:
+                                    with open(file_path, 'w', encoding='utf-8') as f:
+                                        f.write(content)
+                                    total_files_modified += 1
+                                        
                             except Exception as e:
                                 pass  # Suppress warning logs
                 
@@ -1277,28 +1574,93 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 # Look for files that might contain hyperlink data
                 hyperlink_keywords = ['hyperlink', 'link', 'toc', 'table', 'contents', 'rels', 'relationship']
+                current_app.logger.debug(f"🔄 Looking for TOC/hyperlink files with keywords: {hyperlink_keywords}")
                 for root, dirs, files in os.walk(extract_dir):
                     for file in files:
                         if file.endswith('.xml') and any(keyword in file.lower() for keyword in hyperlink_keywords):
+                            current_app.logger.debug(f"🔄 Processing TOC/hyperlink file: {file}")
                             file_path = os.path.join(root, file)
                             try:
                                 with open(file_path, 'r', encoding='utf-8') as f:
                                     content = f.read()
                                 
-                                if '<country>' in content:
-                                    country_count = content.count('<country>')
-                                    current_app.logger.debug(f"🔄 FOUND {country_count} <country> TAGS IN HYPERLINK FILE: {file}")
-                                    
-                                    # Replace <country> with Austria
-                                    modified_content = content.replace('<country>', 'Austria')
-                                    
-                                    if modified_content != content:
-                                        with open(file_path, 'w', encoding='utf-8') as f:
-                                            f.write(modified_content)
+                                # Process each dynamic column
+                                file_modified = False
+                                for column in dynamic_columns:
+                                    tag = f'<{column}>'
+                                    if tag in content:
+                                        tag_count = content.count(tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN HYPERLINK FILE: {file}")
                                         
-                                        total_files_modified += 1
-                                        total_replacements += country_count
-                                        current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({country_count} replacements)")
+                                        # Replace tag with actual value from flat_data_map
+                                        replacement_value = flat_data_map.get(column, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(tag, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                
+                                # Process section_cgrp variants
+                                section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
+                                for variant in section_cgrp_variants:
+                                    tag = f'<{variant}>'
+                                    if tag in content:
+                                        tag_count = content.count(tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN HYPERLINK FILE: {file}")
+                                        
+                                        # Get appropriate replacement value based on variant
+                                        if variant == 'section_cgrp':
+                                            replacement_value = flat_data_map.get('section_cgrp', '')
+                                        elif variant == 'section_cgrp_historical':
+                                            replacement_value = flat_data_map.get('section_cgrp_historical', '')
+                                        elif variant == 'section_cgrp_forecast':
+                                            replacement_value = flat_data_map.get('section_cgrp_forecast', '')
+                                        
+                                        if replacement_value:
+                                            modified_content = content.replace(tag, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                
+                                # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
+                                section_patterns = [
+                                    (r'<section\d+_cgrp>', 'chart_data_cgar'),
+                                    (r'<section\d+_cgrp_historical>', 'section_cgrp_historical'),
+                                    (r'<section\d+_cgrp_forecast>', 'section_cgrp_forecast')
+                                ]
+                                
+                                for pattern, base_key in section_patterns:
+                                    matches = re.findall(pattern, content)
+                                    for match in matches:
+                                        tag_count = content.count(match)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN HYPERLINK FILE: {file}")
+                                        
+                                        # Extract the section-specific key from the match
+                                        section_key = match[1:-1].lower()  # Remove < and > and convert to lowercase
+                                        
+                                        # For all CAGR variants, use the section-specific key
+                                        replacement_value = flat_data_map.get(section_key, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(match, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({tag_count} {match} replacements)")
+                                
+                                # Write the final modified content if any changes were made
+                                if file_modified:
+                                    with open(file_path, 'w', encoding='utf-8') as f:
+                                        f.write(content)
+                                    total_files_modified += 1
+                                        
                             except Exception as e:
                                 pass  # Suppress warning logs
                 
@@ -1313,20 +1675,83 @@ def _generate_report(project_id, template_path, data_file_path):
                                 with open(file_path, 'r', encoding='utf-8') as f:
                                     content = f.read()
                                 
-                                if '<country>' in content:
-                                    country_count = content.count('<country>')
-                                    current_app.logger.debug(f"🔄 FOUND {country_count} <country> TAGS IN RELS FILE: {file}")
-                                    
-                                    # Replace <country> with Austria
-                                    modified_content = content.replace('<country>', 'Austria')
-                                    
-                                    if modified_content != content:
-                                        with open(file_path, 'w', encoding='utf-8') as f:
-                                            f.write(modified_content)
+                                # Process each dynamic column
+                                file_modified = False
+                                for column in dynamic_columns:
+                                    tag = f'<{column}>'
+                                    if tag in content:
+                                        tag_count = content.count(tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN RELS FILE: {file}")
                                         
-                                        total_files_modified += 1
-                                        total_replacements += country_count
-                                        current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({country_count} replacements)")
+                                        # Replace tag with actual value from flat_data_map
+                                        replacement_value = flat_data_map.get(column, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(tag, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                
+                                # Process section_cgrp variants
+                                section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
+                                for variant in section_cgrp_variants:
+                                    tag = f'<{variant}>'
+                                    if tag in content:
+                                        tag_count = content.count(tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN RELS FILE: {file}")
+                                        
+                                        # Get appropriate replacement value based on variant
+                                        if variant == 'section_cgrp':
+                                            replacement_value = flat_data_map.get('section_cgrp', '')
+                                        elif variant == 'section_cgrp_historical':
+                                            replacement_value = flat_data_map.get('section_cgrp_historical', '')
+                                        elif variant == 'section_cgrp_forecast':
+                                            replacement_value = flat_data_map.get('section_cgrp_forecast', '')
+                                        
+                                        if replacement_value:
+                                            modified_content = content.replace(tag, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                
+                                # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
+                                section_patterns = [
+                                    (r'<section\d+_cgrp>', 'chart_data_cgar'),
+                                    (r'<section\d+_cgrp_historical>', 'section_cgrp_historical'),
+                                    (r'<section\d+_cgrp_forecast>', 'section_cgrp_forecast')
+                                ]
+                                
+                                for pattern, base_key in section_patterns:
+                                    matches = re.findall(pattern, content)
+                                    for match in matches:
+                                        tag_count = content.count(match)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN RELS FILE: {file}")
+                                        
+                                        # Extract the section-specific key from the match
+                                        section_key = match[1:-1].lower()  # Remove < and > and convert to lowercase
+                                        
+                                        # For all CAGR variants, use the section-specific key
+                                        replacement_value = flat_data_map.get(section_key, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(match, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({tag_count} {match} replacements)")
+                                
+                                # Write the final modified content if any changes were made
+                                if file_modified:
+                                    with open(file_path, 'w', encoding='utf-8') as f:
+                                        f.write(content)
+                                    total_files_modified += 1
+                                        
                             except Exception as e:
                                 pass  # Suppress warning logs
                 
@@ -1340,20 +1765,83 @@ def _generate_report(project_id, template_path, data_file_path):
                                 with open(file_path, 'r', encoding='utf-8') as f:
                                     content = f.read()
                                 
-                                if '<country>' in content:
-                                    country_count = content.count('<country>')
-                                    current_app.logger.debug(f"🔄 FOUND {country_count} <country> TAGS IN WORD_RELS FILE: {file}")
-                                    
-                                    # Replace <country> with Austria
-                                    modified_content = content.replace('<country>', 'Austria')
-                                    
-                                    if modified_content != content:
-                                        with open(file_path, 'w', encoding='utf-8') as f:
-                                            f.write(modified_content)
+                                # Process each dynamic column
+                                file_modified = False
+                                for column in dynamic_columns:
+                                    tag = f'<{column}>'
+                                    if tag in content:
+                                        tag_count = content.count(tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN WORD_RELS FILE: {file}")
                                         
-                                        total_files_modified += 1
-                                        total_replacements += country_count
-                                        current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({country_count} replacements)")
+                                        # Replace tag with actual value from flat_data_map
+                                        replacement_value = flat_data_map.get(column, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(tag, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                
+                                # Process section_cgrp variants
+                                section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
+                                for variant in section_cgrp_variants:
+                                    tag = f'<{variant}>'
+                                    if tag in content:
+                                        tag_count = content.count(tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN WORD_RELS FILE: {file}")
+                                        
+                                        # Get appropriate replacement value based on variant
+                                        if variant == 'section_cgrp':
+                                            replacement_value = flat_data_map.get('section_cgrp', '')
+                                        elif variant == 'section_cgrp_historical':
+                                            replacement_value = flat_data_map.get('section_cgrp_historical', '')
+                                        elif variant == 'section_cgrp_forecast':
+                                            replacement_value = flat_data_map.get('section_cgrp_forecast', '')
+                                        
+                                        if replacement_value:
+                                            modified_content = content.replace(tag, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                
+                                # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
+                                section_patterns = [
+                                    (r'<section\d+_cgrp>', 'chart_data_cgar'),
+                                    (r'<section\d+_cgrp_historical>', 'section_cgrp_historical'),
+                                    (r'<section\d+_cgrp_forecast>', 'section_cgrp_forecast')
+                                ]
+                                
+                                for pattern, base_key in section_patterns:
+                                    matches = re.findall(pattern, content)
+                                    for match in matches:
+                                        tag_count = content.count(match)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN WORD_RELS FILE: {file}")
+                                        
+                                        # Extract the section-specific key from the match
+                                        section_key = match[1:-1].lower()  # Remove < and > and convert to lowercase
+                                        
+                                        # For all CAGR variants, use the section-specific key
+                                        replacement_value = flat_data_map.get(section_key, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(match, replacement_value)
+                                            
+                                            if modified_content != content:
+                                                content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({tag_count} {match} replacements)")
+                                
+                                # Write the final modified content if any changes were made
+                                if file_modified:
+                                    with open(file_path, 'w', encoding='utf-8') as f:
+                                        f.write(content)
+                                    total_files_modified += 1
+                                        
                             except Exception as e:
                                 pass  # Suppress warning logs
                 
@@ -1478,17 +1966,72 @@ def _generate_report(project_id, template_path, data_file_path):
                 xml_replacements = 0
                 
                 for element in doc.element.iter():
-                    if hasattr(element, 'text') and element.text and '<country>' in element.text:
-                        original_text = element.text
-                        
-                        # Only replace if it's a simple text element to avoid duplication
-                        if hasattr(element, 'tag') and element.tag in ['w:t', 'w:tab', 'w:br']:
-                            try:
-                                element.text = original_text.replace('<country>', 'Austria')
-                                xml_replacements += 1
-                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: <country> -> Austria")
-                            except Exception as xml_error:
-                                pass  # Suppress warning logs
+                    if hasattr(element, 'text') and element.text:
+                        # Check if any dynamic column tag is present
+                        has_dynamic_tag = any(f'<{column}>' in element.text for column in dynamic_columns)
+                        if has_dynamic_tag:
+                            original_text = element.text
+                            
+                            # Only replace if it's a simple text element to avoid duplication
+                            if hasattr(element, 'tag') and element.tag in ['w:t', 'w:tab', 'w:br']:
+                                try:
+                                    # Process each dynamic column
+                                    modified_text = original_text
+                                    for column in dynamic_columns:
+                                        tag = f'<{column}>'
+                                        if tag in modified_text:
+                                            replacement_value = flat_data_map.get(column, '')
+                                            if replacement_value:
+                                                modified_text = modified_text.replace(tag, replacement_value)
+                                                xml_replacements += 1
+                                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: {tag} -> {replacement_value}")
+                                    
+                                    # Process section_cgrp variants
+                                    section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
+                                    for variant in section_cgrp_variants:
+                                        tag = f'<{variant}>'
+                                        if tag in modified_text:
+                                            # Get appropriate replacement value based on variant
+                                            if variant == 'section_cgrp':
+                                                replacement_value = flat_data_map.get('chart_data_cgar', '')
+                                            elif variant == 'section_cgrp_historical':
+                                                replacement_value = flat_data_map.get('chart_data_historical', '')
+                                            elif variant == 'section_cgrp_forecast':
+                                                replacement_value = flat_data_map.get('chart_data_forecast', '')
+                                            
+                                            if replacement_value:
+                                                modified_text = modified_text.replace(tag, replacement_value)
+                                                xml_replacements += 1
+                                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: {tag} -> {replacement_value}")
+                                    
+                                    # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
+                                    section_patterns = [
+                                        (r'<section\d+_cgrp>', 'chart_data_cgar'),
+                                        (r'<section\d+_cgrp_historical>', 'section_cgrp_historical'),
+                                        (r'<section\d+_cgrp_forecast>', 'section_cgrp_forecast')
+                                    ]
+                                    
+                                    for pattern, base_key in section_patterns:
+                                        matches = re.findall(pattern, modified_text)
+                                        for match in matches:
+                                            # Extract the section-specific key from the match
+                                            section_key = match[1:-1].lower()  # Remove < and > and convert to lowercase
+                                            
+                                            if base_key == 'chart_data_cgar':
+                                                # For regular CAGR, use the global key
+                                                replacement_value = flat_data_map.get(base_key, '')
+                                            else:
+                                                # For historical/forecast, use the section-specific key
+                                                replacement_value = flat_data_map.get(section_key, '')
+                                            
+                                            if replacement_value:
+                                                modified_text = modified_text.replace(match, replacement_value)
+                                                xml_replacements += 1
+                                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: {match} -> {replacement_value}")
+                                    
+                                    element.text = modified_text
+                                except Exception as xml_error:
+                                    pass  # Suppress warning logs
                 
                 # XML processing complete
                 
