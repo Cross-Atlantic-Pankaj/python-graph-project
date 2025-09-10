@@ -1018,17 +1018,18 @@ def _generate_report(project_id, template_path, data_file_path):
         # First pass: Process global metadata columns from ALL rows
         for _, row in df.iterrows():
             for col in df.columns:
-                col_lower = col.lower().strip()
+                # Normalize column names to match dynamic_columns normalization (spaces -> underscores)
+                col_norm = col.lower().strip().replace(" ", "_").replace("__", "_")
                 
                 # Handle global metadata columns (can be used across all sections)
-                if col_lower in dynamic_columns:
+                if col_norm in dynamic_columns:
                     value = row[col]
                     if pd.notna(value) and str(value).strip():
                         # Store in global metadata for use across all sections
-                        global_metadata[col_lower] = str(value).strip()
-                        # Also add to flat_data_map with the column name as key
-                        flat_data_map[col_lower] = str(value).strip()
-                        current_app.logger.debug(f"📋 LOADED: {col_lower} = '{str(value).strip()}'")
+                        global_metadata[col_norm] = str(value).strip()
+                        # Also add to flat_data_map with the normalized column name as key
+                        flat_data_map[col_norm] = str(value).strip()
+                        current_app.logger.debug(f"📋 LOADED: {col_norm} = '{str(value).strip()}'")
                     else:
                         # Empty value - skip silently
                         pass
@@ -1054,7 +1055,8 @@ def _generate_report(project_id, template_path, data_file_path):
 
             # Process all columns systematically
             for col in df.columns:
-                col_lower = col.lower().strip()
+                # Normalize column names consistently with dynamic_columns
+                col_lower = col.lower().strip().replace(" ", "_").replace("__", "_")
                 
                 # Skip global metadata columns as they're already processed
                 if col_lower in dynamic_columns:
@@ -1351,6 +1353,55 @@ def _generate_report(project_id, template_path, data_file_path):
                 if modified_text != original_text:
                     run.text = modified_text
 
+            # Second pass: handle placeholders that may be split across multiple runs (common in DOCX)
+            try:
+                w_element = paragraph._element
+                # Prepare namespaces for XPath
+                ns = {}
+                if hasattr(w_element, 'nsmap') and isinstance(w_element.nsmap, dict):
+                    ns = {k: v for k, v in w_element.nsmap.items() if k}
+                if 'w' not in ns:
+                    ns['w'] = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+
+                # Collect all text nodes within the paragraph (across runs)
+                t_nodes = w_element.xpath('.//w:t', namespaces=ns)
+                if t_nodes:
+                    original_segments = [(t.text or '') for t in t_nodes]
+                    full_text = ''.join(original_segments)
+                    new_text = full_text
+
+                    # Replace ${...} placeholders (case-insensitive)
+                    dollar_matches = re.findall(r"\$\{(.*?)\}", full_text)
+                    for match in set(dollar_matches):
+                        key_lower = match.lower().strip()
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                        if val is not None and val != '':
+                            pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
+                            new_text = pattern.sub(str(val), new_text)
+
+                    # Replace <...> placeholders (case-insensitive)
+                    angle_matches = re.findall(r"<(.*?)>", full_text)
+                    for match in set(angle_matches):
+                        key_lower = match.lower().strip()
+                        val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                        if val is not None and val != '':
+                            pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
+                            new_text = pattern.sub(str(val), new_text)
+
+                    # If replacements changed content, redistribute back across original w:t nodes
+                    if new_text != full_text:
+                        idx = 0
+                        for i, t in enumerate(t_nodes):
+                            seg_len = len(original_segments[i])
+                            t.text = new_text[idx:idx + seg_len]
+                            idx += seg_len
+                        # Append any remaining text to the last node
+                        if idx < len(new_text) and t_nodes:
+                            t_nodes[-1].text = (t_nodes[-1].text or '') + new_text[idx:]
+            except Exception:
+                # Fail-safe: do not break document processing if run-merging logic encounters an edge case
+                pass
+
         def replace_text_in_tables():
             nonlocal doc, flat_data_map, text_map  # Access variables from outer scope
             for table in doc.tables:
@@ -1490,45 +1541,60 @@ def _generate_report(project_id, template_path, data_file_path):
                                 file_modified = False
                                 for column in dynamic_columns:
                                     tag = f'<{column}>'
+                                    escaped_tag = f'&lt;{column}&gt;'
+                                    # Unescaped angle-bracket tag
                                     if tag in content:
                                         tag_count = content.count(tag)
                                         current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN {file}")
-                                        
-                                        # Replace tag with actual value from flat_data_map
                                         replacement_value = flat_data_map.get(column, '')
                                         if replacement_value:
                                             modified_content = content.replace(tag, replacement_value)
-                                            
                                             if modified_content != content:
-                                                content = modified_content  # Update content for next iteration
+                                                content = modified_content
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                    # Escaped tag (&lt;column&gt;)
+                                    if escaped_tag in content:
+                                        tag_count = content.count(escaped_tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {escaped_tag} TAGS IN {file}")
+                                        replacement_value = flat_data_map.get(column, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(escaped_tag, replacement_value)
+                                            if modified_content != content:
+                                                content = modified_content
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({tag_count} {escaped_tag} replacements)")
                                 
                                 # Process section_cgrp variants (including numbered sections)
                                 section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
                                 for variant in section_cgrp_variants:
                                     tag = f'<{variant}>'
-                                    if tag in content:
-                                        tag_count = content.count(tag)
-                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN {file}")
-                                        
-                                        # Get appropriate replacement value based on variant
+                                    escaped_tag = f'&lt;{variant}&gt;'
+                                    if tag in content or escaped_tag in content:
+                                        # Determine replacement
                                         if variant == 'section_cgrp':
                                             replacement_value = flat_data_map.get('section_cgrp', '')
                                         elif variant == 'section_cgrp_historical':
                                             replacement_value = flat_data_map.get('section_cgrp_historical', '')
-                                        elif variant == 'section_cgrp_forecast':
+                                        else:
                                             replacement_value = flat_data_map.get('section_cgrp_forecast', '')
-                                        
                                         if replacement_value:
-                                            modified_content = content.replace(tag, replacement_value)
-                                            
-                                            if modified_content != content:
-                                                content = modified_content  # Update content for next iteration
+                                            if tag in content:
+                                                tag_count = content.count(tag)
+                                                current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN {file}")
+                                                content = content.replace(tag, replacement_value)
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                            if escaped_tag in content:
+                                                tag_count = content.count(escaped_tag)
+                                                current_app.logger.debug(f"🔄 FOUND {tag_count} {escaped_tag} TAGS IN {file}")
+                                                content = content.replace(escaped_tag, replacement_value)
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({tag_count} {escaped_tag} replacements)")
                                 
                                 # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
                                 import re
@@ -1540,6 +1606,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 for pattern, base_key in section_patterns:
                                     matches = re.findall(pattern, content)
+                                    escaped_pattern = pattern.replace('<', '&lt;').replace('>', '&gt;')
+                                    escaped_matches = re.findall(escaped_pattern, content)
                                     for match in matches:
                                         tag_count = content.count(match)
                                         current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN {file}")
@@ -1559,8 +1627,42 @@ def _generate_report(project_id, template_path, data_file_path):
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({tag_count} {match} replacements)")
+                                    for match in escaped_matches:
+                                        tag_count = content.count(match)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN {file}")
+                                        section_key = match.replace('&lt;', '<').replace('&gt;', '>')[1:-1].lower()
+                                        replacement_value = flat_data_map.get(section_key, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(match, replacement_value)
+                                            if modified_content != content:
+                                                content = modified_content
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 XML FILE MODIFIED: {file} ({tag_count} {match} replacements)")
                                 
                                 # Write the final modified content if any changes were made
+                                # Additional case-insensitive pass for dynamic columns and escaped tags
+                                try:
+                                    import re as _re_ci
+                                    for column in dynamic_columns:
+                                        # Build case-insensitive patterns for both raw and escaped tags
+                                        patterns = [
+                                            rf"(?i)<\s*{_re_ci.escape(column)}\s*>",
+                                            rf"(?i)&lt;\s*{_re_ci.escape(column)}\s*&gt;",
+                                        ]
+                                        for pat in patterns:
+                                            matches = _re_ci.findall(pat, content)
+                                            if matches:
+                                                replacement_value = flat_data_map.get(column, '')
+                                                if replacement_value:
+                                                    content, n = _re_ci.subn(pat, replacement_value, content)
+                                                    if n > 0:
+                                                        file_modified = True
+                                                        total_replacements += n
+                                                        current_app.logger.debug(f"🔄 XML FILE MODIFIED (CI): {file} ({n} {column} replacements)")
+                                except Exception:
+                                    pass
+
                                 if file_modified:
                                     with open(file_path, 'w', encoding='utf-8') as f:
                                         f.write(content)
@@ -1588,45 +1690,57 @@ def _generate_report(project_id, template_path, data_file_path):
                                 file_modified = False
                                 for column in dynamic_columns:
                                     tag = f'<{column}>'
+                                    escaped_tag = f'&lt;{column}&gt;'
                                     if tag in content:
                                         tag_count = content.count(tag)
                                         current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN HYPERLINK FILE: {file}")
-                                        
-                                        # Replace tag with actual value from flat_data_map
                                         replacement_value = flat_data_map.get(column, '')
                                         if replacement_value:
                                             modified_content = content.replace(tag, replacement_value)
-                                            
                                             if modified_content != content:
-                                                content = modified_content  # Update content for next iteration
+                                                content = modified_content
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                    if escaped_tag in content:
+                                        tag_count = content.count(escaped_tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {escaped_tag} TAGS IN HYPERLINK FILE: {file}")
+                                        replacement_value = flat_data_map.get(column, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(escaped_tag, replacement_value)
+                                            if modified_content != content:
+                                                content = modified_content
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({tag_count} {escaped_tag} replacements)")
                                 
                                 # Process section_cgrp variants
                                 section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
                                 for variant in section_cgrp_variants:
                                     tag = f'<{variant}>'
-                                    if tag in content:
-                                        tag_count = content.count(tag)
-                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN HYPERLINK FILE: {file}")
-                                        
-                                        # Get appropriate replacement value based on variant
+                                    escaped_tag = f'&lt;{variant}&gt;'
+                                    if tag in content or escaped_tag in content:
                                         if variant == 'section_cgrp':
                                             replacement_value = flat_data_map.get('section_cgrp', '')
                                         elif variant == 'section_cgrp_historical':
                                             replacement_value = flat_data_map.get('section_cgrp_historical', '')
-                                        elif variant == 'section_cgrp_forecast':
+                                        else:
                                             replacement_value = flat_data_map.get('section_cgrp_forecast', '')
-                                        
                                         if replacement_value:
-                                            modified_content = content.replace(tag, replacement_value)
-                                            
-                                            if modified_content != content:
-                                                content = modified_content  # Update content for next iteration
+                                            if tag in content:
+                                                tag_count = content.count(tag)
+                                                current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN HYPERLINK FILE: {file}")
+                                                content = content.replace(tag, replacement_value)
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                            if escaped_tag in content:
+                                                tag_count = content.count(escaped_tag)
+                                                current_app.logger.debug(f"🔄 FOUND {tag_count} {escaped_tag} TAGS IN HYPERLINK FILE: {file}")
+                                                content = content.replace(escaped_tag, replacement_value)
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({tag_count} {escaped_tag} replacements)")
                                 
                                 # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
                                 section_patterns = [
@@ -1637,6 +1751,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 for pattern, base_key in section_patterns:
                                     matches = re.findall(pattern, content)
+                                    escaped_pattern = pattern.replace('<', '&lt;').replace('>', '&gt;')
+                                    escaped_matches = re.findall(escaped_pattern, content)
                                     for match in matches:
                                         tag_count = content.count(match)
                                         current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN HYPERLINK FILE: {file}")
@@ -1651,6 +1767,18 @@ def _generate_report(project_id, template_path, data_file_path):
                                             
                                             if modified_content != content:
                                                 content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({tag_count} {match} replacements)")
+                                    for match in escaped_matches:
+                                        tag_count = content.count(match)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN HYPERLINK FILE: {file}")
+                                        section_key = match.replace('&lt;', '<').replace('&gt;', '>')[1:-1].lower()
+                                        replacement_value = flat_data_map.get(section_key, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(match, replacement_value)
+                                            if modified_content != content:
+                                                content = modified_content
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 HYPERLINK FILE MODIFIED: {file} ({tag_count} {match} replacements)")
@@ -1679,45 +1807,57 @@ def _generate_report(project_id, template_path, data_file_path):
                                 file_modified = False
                                 for column in dynamic_columns:
                                     tag = f'<{column}>'
+                                    escaped_tag = f'&lt;{column}&gt;'
                                     if tag in content:
                                         tag_count = content.count(tag)
                                         current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN RELS FILE: {file}")
-                                        
-                                        # Replace tag with actual value from flat_data_map
                                         replacement_value = flat_data_map.get(column, '')
                                         if replacement_value:
                                             modified_content = content.replace(tag, replacement_value)
-                                            
                                             if modified_content != content:
-                                                content = modified_content  # Update content for next iteration
+                                                content = modified_content
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                    if escaped_tag in content:
+                                        tag_count = content.count(escaped_tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {escaped_tag} TAGS IN RELS FILE: {file}")
+                                        replacement_value = flat_data_map.get(column, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(escaped_tag, replacement_value)
+                                            if modified_content != content:
+                                                content = modified_content
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({tag_count} {escaped_tag} replacements)")
                                 
                                 # Process section_cgrp variants
                                 section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
                                 for variant in section_cgrp_variants:
                                     tag = f'<{variant}>'
-                                    if tag in content:
-                                        tag_count = content.count(tag)
-                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN RELS FILE: {file}")
-                                        
-                                        # Get appropriate replacement value based on variant
+                                    escaped_tag = f'&lt;{variant}&gt;'
+                                    if tag in content or escaped_tag in content:
                                         if variant == 'section_cgrp':
                                             replacement_value = flat_data_map.get('section_cgrp', '')
                                         elif variant == 'section_cgrp_historical':
                                             replacement_value = flat_data_map.get('section_cgrp_historical', '')
-                                        elif variant == 'section_cgrp_forecast':
+                                        else:
                                             replacement_value = flat_data_map.get('section_cgrp_forecast', '')
-                                        
                                         if replacement_value:
-                                            modified_content = content.replace(tag, replacement_value)
-                                            
-                                            if modified_content != content:
-                                                content = modified_content  # Update content for next iteration
+                                            if tag in content:
+                                                tag_count = content.count(tag)
+                                                current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN RELS FILE: {file}")
+                                                content = content.replace(tag, replacement_value)
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                            if escaped_tag in content:
+                                                tag_count = content.count(escaped_tag)
+                                                current_app.logger.debug(f"🔄 FOUND {tag_count} {escaped_tag} TAGS IN RELS FILE: {file}")
+                                                content = content.replace(escaped_tag, replacement_value)
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({tag_count} {escaped_tag} replacements)")
                                 
                                 # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
                                 section_patterns = [
@@ -1728,6 +1868,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 for pattern, base_key in section_patterns:
                                     matches = re.findall(pattern, content)
+                                    escaped_pattern = pattern.replace('<', '&lt;').replace('>', '&gt;')
+                                    escaped_matches = re.findall(escaped_pattern, content)
                                     for match in matches:
                                         tag_count = content.count(match)
                                         current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN RELS FILE: {file}")
@@ -1742,6 +1884,18 @@ def _generate_report(project_id, template_path, data_file_path):
                                             
                                             if modified_content != content:
                                                 content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({tag_count} {match} replacements)")
+                                    for match in escaped_matches:
+                                        tag_count = content.count(match)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN RELS FILE: {file}")
+                                        section_key = match.replace('&lt;', '<').replace('&gt;', '>')[1:-1].lower()
+                                        replacement_value = flat_data_map.get(section_key, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(match, replacement_value)
+                                            if modified_content != content:
+                                                content = modified_content
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 RELS FILE MODIFIED: {file} ({tag_count} {match} replacements)")
@@ -1769,45 +1923,57 @@ def _generate_report(project_id, template_path, data_file_path):
                                 file_modified = False
                                 for column in dynamic_columns:
                                     tag = f'<{column}>'
+                                    escaped_tag = f'&lt;{column}&gt;'
                                     if tag in content:
                                         tag_count = content.count(tag)
                                         current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN WORD_RELS FILE: {file}")
-                                        
-                                        # Replace tag with actual value from flat_data_map
                                         replacement_value = flat_data_map.get(column, '')
                                         if replacement_value:
                                             modified_content = content.replace(tag, replacement_value)
-                                            
                                             if modified_content != content:
-                                                content = modified_content  # Update content for next iteration
+                                                content = modified_content
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                    if escaped_tag in content:
+                                        tag_count = content.count(escaped_tag)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {escaped_tag} TAGS IN WORD_RELS FILE: {file}")
+                                        replacement_value = flat_data_map.get(column, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(escaped_tag, replacement_value)
+                                            if modified_content != content:
+                                                content = modified_content
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({tag_count} {escaped_tag} replacements)")
                                 
                                 # Process section_cgrp variants
                                 section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
                                 for variant in section_cgrp_variants:
                                     tag = f'<{variant}>'
-                                    if tag in content:
-                                        tag_count = content.count(tag)
-                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN WORD_RELS FILE: {file}")
-                                        
-                                        # Get appropriate replacement value based on variant
+                                    escaped_tag = f'&lt;{variant}&gt;'
+                                    if tag in content or escaped_tag in content:
                                         if variant == 'section_cgrp':
                                             replacement_value = flat_data_map.get('section_cgrp', '')
                                         elif variant == 'section_cgrp_historical':
                                             replacement_value = flat_data_map.get('section_cgrp_historical', '')
-                                        elif variant == 'section_cgrp_forecast':
+                                        else:
                                             replacement_value = flat_data_map.get('section_cgrp_forecast', '')
-                                        
                                         if replacement_value:
-                                            modified_content = content.replace(tag, replacement_value)
-                                            
-                                            if modified_content != content:
-                                                content = modified_content  # Update content for next iteration
+                                            if tag in content:
+                                                tag_count = content.count(tag)
+                                                current_app.logger.debug(f"🔄 FOUND {tag_count} {tag} TAGS IN WORD_RELS FILE: {file}")
+                                                content = content.replace(tag, replacement_value)
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({tag_count} {tag} replacements)")
+                                            if escaped_tag in content:
+                                                tag_count = content.count(escaped_tag)
+                                                current_app.logger.debug(f"🔄 FOUND {tag_count} {escaped_tag} TAGS IN WORD_RELS FILE: {file}")
+                                                content = content.replace(escaped_tag, replacement_value)
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({tag_count} {escaped_tag} replacements)")
                                 
                                 # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
                                 section_patterns = [
@@ -1818,6 +1984,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                 
                                 for pattern, base_key in section_patterns:
                                     matches = re.findall(pattern, content)
+                                    escaped_pattern = pattern.replace('<', '&lt;').replace('>', '&gt;')
+                                    escaped_matches = re.findall(escaped_pattern, content)
                                     for match in matches:
                                         tag_count = content.count(match)
                                         current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN WORD_RELS FILE: {file}")
@@ -1832,6 +2000,18 @@ def _generate_report(project_id, template_path, data_file_path):
                                             
                                             if modified_content != content:
                                                 content = modified_content  # Update content for next iteration
+                                                file_modified = True
+                                                total_replacements += tag_count
+                                                current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({tag_count} {match} replacements)")
+                                    for match in escaped_matches:
+                                        tag_count = content.count(match)
+                                        current_app.logger.debug(f"🔄 FOUND {tag_count} {match} TAGS IN WORD_RELS FILE: {file}")
+                                        section_key = match.replace('&lt;', '<').replace('&gt;', '>')[1:-1].lower()
+                                        replacement_value = flat_data_map.get(section_key, '')
+                                        if replacement_value:
+                                            modified_content = content.replace(match, replacement_value)
+                                            if modified_content != content:
+                                                content = modified_content
                                                 file_modified = True
                                                 total_replacements += tag_count
                                                 current_app.logger.debug(f"🔄 WORD_RELS FILE MODIFIED: {file} ({tag_count} {match} replacements)")
@@ -1862,10 +2042,10 @@ def _generate_report(project_id, template_path, data_file_path):
                     doc = NewDocument(tmp_path)
                     current_app.logger.debug("🔄 DOCUMENT RELOADED AFTER COMPREHENSIVE XML MODIFICATION")
                     
-                    # Cleanup and return - no need for further processing
+                    # Cleanup and continue - proceed with downstream replacements (CAGR, section text, charts)
                     shutil.rmtree(extract_dir)
                     os.unlink(tmp_path)
-                    return
+                    # Do not return here; continue to paragraph/table/header/footer processing
                 else:
                     # No XML files were modified
                     
@@ -1892,25 +2072,68 @@ def _generate_report(project_id, template_path, data_file_path):
                             for para in cell.paragraphs:
                                 replace_text_in_paragraph(para)
                 
-                # Process headers and footers
+                # Process headers and footers (default/first/even) and their text boxes
+            def _process_header_footer(hf_part):
+                    if not hf_part:
+                        return
+                    # Paragraphs
+                    for para in hf_part.paragraphs:
+                        replace_text_in_paragraph(para)
+                    # Tables
+                    for table in hf_part.tables:
+                        for row in table.rows:
+                            for cell in row.cells:
+                                for para in cell.paragraphs:
+                                    replace_text_in_paragraph(para)
+                    # Text boxes inside header/footer
+                    try:
+                        ns = {k: v for k, v in (hf_part._element.nsmap or {}).items() if k}
+                        if 'w' not in ns:
+                            ns['w'] = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+                        for p_elem in hf_part._element.xpath('.//w:txbxContent//w:p', namespaces=ns):
+                            try:
+                                para_obj = Paragraph(p_elem, hf_part)
+                                replace_text_in_paragraph(para_obj)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
+                    # DrawingML text inside header/footer (WordArt/shapes) - a:t
+                    try:
+                        ns = {k: v for k, v in (hf_part._element.nsmap or {}).items() if k}
+                        if 'a' not in ns:
+                            ns['a'] = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+                        for a_t in hf_part._element.xpath('.//a:t', namespaces=ns):
+                            try:
+                                original_text = a_t.text or ''
+                                modified_text = original_text
+                                for match in set(re.findall(r"\$\{(.*?)\}", original_text)):
+                                    key_lower = match.lower().strip()
+                                    val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                                    if val is not None and val != '':
+                                        pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
+                                        modified_text = pattern.sub(str(val), modified_text)
+                                for match in set(re.findall(r"<(.*?)>", original_text)):
+                                    key_lower = match.lower().strip()
+                                    val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                                    if val is not None and val != '':
+                                        pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
+                                        modified_text = pattern.sub(str(val), modified_text)
+                                if modified_text != original_text:
+                                    a_t.text = modified_text
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+
             for section in doc.sections:
-                    if section.header:
-                        for para in section.header.paragraphs:
-                            replace_text_in_paragraph(para)
-                        for table in section.header.tables:
-                            for row in table.rows:
-                                for cell in row.cells:
-                                    for para in cell.paragraphs:
-                                        replace_text_in_paragraph(para)
-                    
-                    if section.footer:
-                        for para in section.footer.paragraphs:
-                            replace_text_in_paragraph(para)
-                        for table in section.footer.tables:
-                            for row in table.rows:
-                                for cell in row.cells:
-                                    for para in cell.paragraphs:
-                                        replace_text_in_paragraph(para)
+                    _process_header_footer(getattr(section, 'header', None))
+                    _process_header_footer(getattr(section, 'first_page_header', None))
+                    _process_header_footer(getattr(section, 'even_page_header', None))
+                    _process_header_footer(getattr(section, 'footer', None))
+                    _process_header_footer(getattr(section, 'first_page_footer', None))
+                    _process_header_footer(getattr(section, 'even_page_footer', None))
                 
             # XML processing removed to prevent duplication - paragraph processing is sufficient
             
@@ -1927,7 +2150,49 @@ def _generate_report(project_id, template_path, data_file_path):
                             replace_text_in_paragraph(para)
             except Exception as e:
                 pass  # Suppress warning logs
+
+            # Extra pass: process paragraphs inside text boxes (w:txbxContent) which are not exposed in doc.paragraphs
+            try:
+                ns = {k: v for k, v in (doc.element.nsmap or {}).items() if k}
+                if 'w' not in ns:
+                    ns['w'] = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+                for p_elem in doc.element.xpath('.//w:txbxContent//w:p', namespaces=ns):
+                    try:
+                        para_obj = Paragraph(p_elem, doc)
+                        replace_text_in_paragraph(para_obj)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
             
+            # Extra pass: DrawingML text (WordArt/shapes) in main body (a:t)
+            try:
+                ns = {k: v for k, v in (doc.element.nsmap or {}).items() if k}
+                if 'a' not in ns:
+                    ns['a'] = 'http://schemas.openxmlformats.org/drawingml/2006/main'
+                for a_t in doc.element.xpath('.//a:t', namespaces=ns):
+                    try:
+                        original_text = a_t.text or ''
+                        modified_text = original_text
+                        for match in set(re.findall(r"\$\{(.*?)\}", original_text)):
+                            key_lower = match.lower().strip()
+                            val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                            if val is not None and val != '':
+                                pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
+                                modified_text = pattern.sub(str(val), modified_text)
+                        for match in set(re.findall(r"<(.*?)>", original_text)):
+                            key_lower = match.lower().strip()
+                            val = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                            if val is not None and val != '':
+                                pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
+                                modified_text = pattern.sub(str(val), modified_text)
+                        if modified_text != original_text:
+                            a_t.text = modified_text
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             # Process Word fields (like table of contents) that might contain placeholders
             try:
                 for field in doc.fields:
@@ -2161,7 +2426,16 @@ def _generate_report(project_id, template_path, data_file_path):
                     # Allow chart_type to be overridden from JSON configuration
                     chart_type = chart_config.get("chart_type", chart_type_map.get(chart_tag_lower, "")).lower().strip()
                     # Check for chart_title in both chart_meta and root level
-                    title = chart_meta.get("chart_title") or chart_config.get("chart_title", chart_tag)
+                    # Handle empty strings properly - if chart_title is empty string, don't show title
+                    chart_title_meta = chart_meta.get("chart_title")
+                    chart_title_config = chart_config.get("chart_title")
+                    
+                    if chart_title_meta is not None and chart_title_meta.strip():
+                        title = chart_title_meta
+                    elif chart_title_config is not None and chart_title_config.strip():
+                        title = chart_title_config
+                    else:
+                        title = ""  # Don't show title if chart_title is empty or not provided
                     
                     # Debug logging for chart type detection
                     current_app.logger.debug(f"🔥 Chart type detection - chart_config.get('chart_type'): {chart_config.get('chart_type')}")
@@ -2882,17 +3156,31 @@ def _generate_report(project_id, template_path, data_file_path):
                     data_label_font_size = chart_meta.get("data_label_font_size", 12)
                     data_label_color = chart_meta.get("data_label_color", "#000000")
                     fill_opacity = chart_meta.get("fill_opacity", 0.8)
+                    hide_center_box = chart_meta.get("hide_center_box", False)
+                    current_app.logger.debug(f"🔍 Treemap: hide_center_box parameter: {hide_center_box}")
+                    current_app.logger.debug(f"🔍 Treemap: chart_meta keys: {list(chart_meta.keys())}")
+                    current_app.logger.debug(f"🔍 Treemap: chart_meta: {chart_meta}")
                     
-                    # Treemap specific settings
+                    # Determine textinfo based on data_labels setting (independent of center box)
+                    if data_labels:
+                        textinfo_setting = "label"  # Show labels
+                        current_app.logger.debug(f"🔍 Treemap: data_labels=True, setting textinfo to 'label'")
+                    else:
+                        textinfo_setting = "none"  # Hide labels
+                        current_app.logger.debug(f"🔍 Treemap: data_labels=False, setting textinfo to 'none'")
+                    
+                    # Treemap specific settings - separate center box control from data labels
                     treemap_kwargs = {
                         "labels": labels,
                         "values": values,
                         "name": label,
-                        "textinfo": "label+value+percent parent" if data_labels else "none",
+                        "textinfo": textinfo_setting,
                         "textposition": "middle center",
                         "branchvalues": "total",
-                        "pathbar": dict(visible=True),  # Show path bar for navigation
-                        "tiling": dict(packing="squarify", squarifyratio=1)  # Better layout algorithm
+                        "pathbar": dict(visible=not hide_center_box),  # Hide center box if hide_center_box is True
+                        "tiling": dict(packing="squarify", squarifyratio=1),
+                        "texttemplate": None,
+                        "hoverinfo": "label+value"
                     }
                     
                     # Add text font configuration from JSON
@@ -2933,6 +3221,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     hover_template += "Percentage: %{percentParent:.1f}%<extra></extra>"
                     
                     # Add showlegend parameter to the treemap trace
+                    current_app.logger.debug(f"🔍 Treemap: Final treemap_kwargs: {treemap_kwargs}")
+                    
                     treemap_trace = go.Treemap(**treemap_kwargs,
                         hovertemplate=hover_template
                     )
@@ -3118,7 +3408,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     "labels": x_vals,
                                     "values": y_vals,
                                     "name": label,
-                                    "textinfo": "label+value+percent parent" if data_labels else "none",
+                                    "textinfo": "label" if data_labels and not chart_meta.get("hide_center_box", False) else "none",
                                     "textposition": "outside",
                                     "hole": hole if hole is not None else (0.4 if series_type == "donut" else 0.0)
                                 }
@@ -3214,13 +3504,22 @@ def _generate_report(project_id, template_path, data_file_path):
                                 fill_opacity = chart_meta.get("fill_opacity", 0.8)
                                 
                                 # Treemap specific settings
+                                hide_center_box = chart_meta.get("hide_center_box", False)
+                                current_app.logger.debug(f"🔍 Treemap (multi-series): hide_center_box parameter: {hide_center_box}")
+                                current_app.logger.debug(f"🔍 Treemap (multi-series): chart_meta: {chart_meta}")
+                                # Determine textinfo based on data_labels setting (independent of center box)
+                                textinfo_setting = "label" if data_labels else "none"
+                                
                                 treemap_kwargs = {
                                     "labels": x_vals,
                                     "values": y_vals,
                                     "name": label,
-                                    "textinfo": "label+value+percent parent" if data_labels else "none",
+                                    "textinfo": textinfo_setting,
                                     "textposition": "middle center",
-                                    "branchvalues": "total"
+                                    "branchvalues": "total",
+                                    "pathbar": dict(visible=not hide_center_box),  # Hide center box if hide_center_box is True
+                                    "texttemplate": None,
+                                    "hoverinfo": "label+value"
                                 }
                                 
                                 # Add text font configuration from JSON
@@ -3234,6 +3533,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # Add treemap specific attributes
                                 if color:
                                     treemap_kwargs["marker"] = dict(colors=color, opacity=fill_opacity) if isinstance(color, list) else dict(colors=[color], opacity=fill_opacity)
+                                
+                                # Debug logging for final treemap configuration
+                                current_app.logger.debug(f"🔍 Treemap (multi-series): Final treemap_kwargs: {treemap_kwargs}")
                                 
                                 fig.add_trace(go.Treemap(**treemap_kwargs,
                                     hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}<extra></extra>"
@@ -3634,7 +3936,8 @@ def _generate_report(project_id, template_path, data_file_path):
                             if chart_meta.get("font_family"):
                                 autotext.set_fontfamily(chart_meta.get("font_family"))
                         
-                        ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
+                        if title and title.strip():
+                            ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                         
                         # Add legend for pie chart
                         show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -3790,7 +4093,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                 if chart_meta.get("font_family"):
                                     autotext.set_fontfamily(chart_meta.get("font_family"))
                             
-                            ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
+                            if title and title.strip():
+                                ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                             
                             # Add legend for regular pie chart
                             show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -3848,7 +4152,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     for autotext in autotexts:
                         autotext.set_color('white')
                         autotext.set_fontweight('bold')
-                    ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                    if title and title.strip():
+                        ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
                     # Move legend outside
                     show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
                     # Convert string "false"/"true" to boolean if needed
@@ -4141,7 +4446,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                     "labels": x_vals,
                                     "values": y_vals,
                                     "name": label,
-                                    "textinfo": "label+value+percent parent" if data_labels else "none",
+                                    "textinfo": "label" if data_labels and not chart_meta.get("hide_center_box", False) else "none",
                                     "textposition": "outside",
                                     "hole": hole if hole is not None else (0.4 if series_type == "donut" else 0.0)
                                 }
@@ -4237,13 +4542,22 @@ def _generate_report(project_id, template_path, data_file_path):
                                 fill_opacity = chart_meta.get("fill_opacity", 0.8)
                                 
                                 # Treemap specific settings
+                                hide_center_box = chart_meta.get("hide_center_box", False)
+                                current_app.logger.debug(f"🔍 Treemap (multi-series): hide_center_box parameter: {hide_center_box}")
+                                current_app.logger.debug(f"🔍 Treemap (multi-series): chart_meta: {chart_meta}")
+                                # Determine textinfo based on data_labels setting (independent of center box)
+                                textinfo_setting = "label" if data_labels else "none"
+                                
                                 treemap_kwargs = {
                                     "labels": x_vals,
                                     "values": y_vals,
                                     "name": label,
-                                    "textinfo": "label+value+percent parent" if data_labels else "none",
+                                    "textinfo": textinfo_setting,
                                     "textposition": "middle center",
-                                    "branchvalues": "total"
+                                    "branchvalues": "total",
+                                    "pathbar": dict(visible=not hide_center_box),  # Hide center box if hide_center_box is True
+                                    "texttemplate": None,
+                                    "hoverinfo": "label+value"
                                 }
                                 
                                 # Add text font configuration from JSON
@@ -4257,6 +4571,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                 # Add treemap specific attributes
                                 if color:
                                     treemap_kwargs["marker"] = dict(colors=color, opacity=fill_opacity) if isinstance(color, list) else dict(colors=[color], opacity=fill_opacity)
+                                
+                                # Debug logging for final treemap configuration
+                                current_app.logger.debug(f"🔍 Treemap (multi-series): Final treemap_kwargs: {treemap_kwargs}")
                                 
                                 fig.add_trace(go.Treemap(**treemap_kwargs,
                                     hovertemplate=f"<b>{label}</b><br>%{{label}}: %{{value}}<extra></extra>"
@@ -4695,7 +5012,8 @@ def _generate_report(project_id, template_path, data_file_path):
                             if chart_meta.get("font_family"):
                                 autotext.set_fontfamily(chart_meta.get("font_family"))
                         
-                        ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
+                        if title and title.strip():
+                            ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                         
                         # Add legend for pie chart
                         show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -4851,7 +5169,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                 if chart_meta.get("font_family"):
                                     autotext.set_fontfamily(chart_meta.get("font_family"))
                             
-                            ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
+                            if title and title.strip():
+                                ax.set_title(title, fontsize=font_size or 14, weight='bold', pad=20, color=font_color if font_color else None, fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
                             
                             # Add legend for regular pie chart
                             show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -4909,7 +5228,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     for autotext in autotexts:
                         autotext.set_color('white')
                         autotext.set_fontweight('bold')
-                    ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
+                    if title and title.strip():
+                        ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20)
                     # Move legend outside
                     show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
                     # Convert string "false"/"true" to boolean if needed
@@ -5611,7 +5931,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                              labelpad=y_labelpad)
                              
                              # Set chart title
-                            if title:
+                            if title and title.strip():
                                  ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20,
                                              color=font_color if font_color else 'black',
                                              fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
@@ -5678,7 +5998,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                                 labelpad=y_labelpad)
 
                             # Set chart title
-                            if title:
+                            if title and title.strip():
                                 ax1.set_title(title, fontsize=font_size or 14, weight='bold', pad=20,
                                             color=font_color if font_color else 'black',
                                             fontname=chart_meta.get("font_family") if chart_meta.get("font_family") else None)
@@ -5862,8 +6182,10 @@ def _generate_report(project_id, template_path, data_file_path):
                                 title_color = font_color if font_color else '#2C3E50'
                                 title_font_family = chart_meta.get("font_family") if chart_meta.get("font_family") else None
                                 
-                                ax1.set_title(title, fontsize=title_font_size, weight='bold', pad=20, 
-                                            color=title_color, fontname=title_font_family)
+                                if title and title.strip():
+                                    if title and title.strip():
+                                        ax1.set_title(title, fontsize=title_font_size, weight='bold', pad=20, 
+                                                    color=title_color, fontname=title_font_family)
                                 
                                 # Set axis labels
                                 x_axis_title = chart_meta.get("x_label", "")
@@ -6101,9 +6423,10 @@ def _generate_report(project_id, template_path, data_file_path):
                                     treemap_font_size = data_label_font_size if data_label_font_size else 10
                                     treemap_font_weight = 'bold'
                                     
-                                    # Handle root_visible attribute
-                                    root_visible = chart_meta.get("root_visible", True)
-                                    current_app.logger.debug(f"🔍 Treemap: root_visible = {root_visible}")
+                                    # Handle root_visible attribute - map from hide_center_box
+                                    hide_center_box = chart_meta.get("hide_center_box", False)
+                                    root_visible = not hide_center_box  # root_visible is opposite of hide_center_box
+                                    current_app.logger.debug(f"🔍 Treemap: hide_center_box = {hide_center_box}, root_visible = {root_visible}")
                                     
                                     # Check legend visibility early to determine plot labels
                                     show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -6160,9 +6483,29 @@ def _generate_report(project_id, template_path, data_file_path):
                                         # Configure squarify based on root_visible setting
                                         if root_visible:
                                             # Normal treemap with all rectangles visible
+                                            # Use squarify.plot() but then remove any center annotations
+                                            # Prepare labels: show label + value when data_labels is True
+                                            if data_labels:
+                                                display_labels = []
+                                                for size, lbl in zip(valid_data, valid_labels):
+                                                    try:
+                                                        if value_format == ".1f":
+                                                            formatted_val = f"{size:.1f}"
+                                                        elif value_format == ".0f":
+                                                            formatted_val = f"{size:.0f}"
+                                                        elif value_format == ".0%":
+                                                            formatted_val = f"{size:.0%}"
+                                                        else:
+                                                            formatted_val = f"{size:.1f}"
+                                                    except:
+                                                        formatted_val = str(size)
+                                                    display_labels.append(f"{lbl}\n{formatted_val}")
+                                            else:
+                                                display_labels = [''] * len(valid_labels)
+
                                             squarify.plot(
                                                 sizes=valid_data,
-                                                label=valid_labels,  # Show actual labels for data display
+                                                label=display_labels,
                                                 color=valid_colors,
                                                 alpha=treemap_alpha,
                                                 ax=ax1,
@@ -6172,6 +6515,35 @@ def _generate_report(project_id, template_path, data_file_path):
                                                     'color': data_label_color if data_label_color else '#000000'
                                                 }
                                             )
+                                            
+                                            # Remove any center annotations that squarify might have created
+                                            # Look for text objects that might be center annotations
+                                            texts_to_remove = []
+                                            for text_obj in ax1.texts:
+                                                # Check if this text object is a center annotation
+                                                if hasattr(text_obj, 'get_position'):
+                                                    pos = text_obj.get_position()
+                                                    text_content = text_obj.get_text()
+                                                    
+                                                    # More robust center annotation detection:
+                                                    # 1. Positioned in center area (0.3 to 0.7 range)
+                                                    # 2. Contains numbers or is longer than normal labels
+                                                    # 3. Or contains specific patterns like "Economic 25.0"
+                                                    is_center_annotation = (
+                                                        (0.3 <= pos[0] <= 0.7 and 0.3 <= pos[1] <= 0.7) and (
+                                                            len(text_content) > 8 or  # Longer than normal labels
+                                                            any(char.isdigit() for char in text_content) or  # Contains numbers
+                                                            ' ' in text_content and any(char.isdigit() for char in text_content)  # Pattern like "Economic 25.0"
+                                                        )
+                                                    )
+                                                    
+                                                    if is_center_annotation:
+                                                        current_app.logger.debug(f"🔍 Removing center annotation: '{text_content}' at position {pos}")
+                                                        texts_to_remove.append(text_obj)
+                                            
+                                            # Remove identified center annotations
+                                            for text_obj in texts_to_remove:
+                                                text_obj.remove()
                                         else:
                                             # Treemap without root rectangle - use squarify.normalize_sizes and manual plotting
                                             current_app.logger.debug(f"🔍 Treemap: Creating treemap without root rectangle")
@@ -6211,7 +6583,8 @@ def _generate_report(project_id, template_path, data_file_path):
                                         current_app.logger.debug(f"🔍 Treemap: Data labels disabled")
                                         
                                         if root_visible:
-                                            # Normal treemap with empty labels
+                                            # Normal treemap with no labels
+                                            # Use squarify.plot() but then remove any center annotations
                                             squarify.plot(
                                                 sizes=valid_data,
                                                 label=[''] * len(valid_labels),  # Empty labels when data_labels=false
@@ -6220,6 +6593,33 @@ def _generate_report(project_id, template_path, data_file_path):
                                                 ax=ax1,
                                                 text_kwargs={'fontsize': treemap_font_size, 'fontweight': treemap_font_weight}
                                             )
+                                            
+                                            # Remove any center annotations that squarify might have created
+                                            texts_to_remove = []
+                                            for text_obj in ax1.texts:
+                                                if hasattr(text_obj, 'get_position'):
+                                                    pos = text_obj.get_position()
+                                                    text_content = text_obj.get_text()
+                                                    
+                                                    # More robust center annotation detection:
+                                                    # 1. Positioned in center area (0.3 to 0.7 range)
+                                                    # 2. Contains numbers or is longer than normal labels
+                                                    # 3. Or contains specific patterns like "Economic 25.0"
+                                                    is_center_annotation = (
+                                                        (0.3 <= pos[0] <= 0.7 and 0.3 <= pos[1] <= 0.7) and (
+                                                            len(text_content) > 8 or  # Longer than normal labels
+                                                            any(char.isdigit() for char in text_content) or  # Contains numbers
+                                                            ' ' in text_content and any(char.isdigit() for char in text_content)  # Pattern like "Economic 25.0"
+                                                        )
+                                                    )
+                                                    
+                                                    if is_center_annotation:
+                                                        current_app.logger.debug(f"🔍 Removing center annotation: '{text_content}' at position {pos}")
+                                                        texts_to_remove.append(text_obj)
+                                            
+                                            # Remove identified center annotations
+                                            for text_obj in texts_to_remove:
+                                                text_obj.remove()
                                         else:
                                             # Treemap without root rectangle and no labels
                                             current_app.logger.debug(f"🔍 Treemap: Creating treemap without root rectangle and no labels")
@@ -6459,8 +6859,9 @@ def _generate_report(project_id, template_path, data_file_path):
                                     title_color = font_color if font_color else '#2C3E50'
                                     title_font_family = chart_meta.get("font_family") if chart_meta.get("font_family") else None
                                     
-                                    ax1.set_title(title, fontsize=title_font_size, weight='bold', pad=20, 
-                                                color=title_color, fontname=title_font_family)
+                                    if title and title.strip():
+                                        ax1.set_title(title, fontsize=title_font_size, weight='bold', pad=20, 
+                                                    color=title_color, fontname=title_font_family)
                                     ax1.set_xlabel('')
                                     ax1.set_ylabel('')
                                     
@@ -6494,10 +6895,14 @@ def _generate_report(project_id, template_path, data_file_path):
                                         else:
                                             ax1.grid(False)
                                     
-                                    # Add data labels if enabled with enhanced formatting
-                                    if show_data_labels:
-                                        # Calculate positions for labels (simplified)
-                                        for i, (size, label) in enumerate(zip(valid_data, valid_labels)):
+                                    # Add data labels manually only when root is hidden (we draw rectangles ourselves)
+                                    if show_data_labels and not root_visible:
+                                        # Place labels inside each rectangle rather than at the figure center
+                                        # Compute treemap rectangles to determine per-rectangle centers
+                                        normalized_sizes = squarify.normalize_sizes(valid_data, 1, 1)
+                                        rectangles = squarify.squarify(normalized_sizes, 0, 0, 1, 1)
+                                        
+                                        for (rect, size, label) in zip(rectangles, valid_data, valid_labels):
                                             # Format the value
                                             try:
                                                 if value_format == ".1f":
@@ -6510,26 +6915,28 @@ def _generate_report(project_id, template_path, data_file_path):
                                                     formatted_val = f"{size:.1f}"
                                             except:
                                                 formatted_val = str(size)
-                                            
-                                            # Add enhanced text label with better styling
+
+                                            # Compute center of this rectangle
+                                            center_x = rect['x'] + rect['dx'] / 2
+                                            center_y = rect['y'] + rect['dy'] / 2
+
+                                            # Styling
                                             label_color = data_label_color or '#2C3E50'
                                             label_font_size = data_label_font_size or 9
-                                            
-                                            # Create text box with customizable styling
                                             bbox_props = dict(
-                                                boxstyle="round,pad=0.2", 
-                                                facecolor='white', 
+                                                boxstyle="round,pad=0.2",
+                                                facecolor='white',
                                                 alpha=0.9,
                                                 edgecolor='gray',
                                                 linewidth=0.5
                                             )
-                                            
-                                            ax1.text(0.5, 0.5, f"{label}\n{formatted_val}", 
-                                                    ha='center', va='center', 
+
+                                            # Draw label inside the rectangle
+                                            ax1.text(center_x, center_y, f"{label}\n{formatted_val}",
+                                                    ha='center', va='center',
                                                     fontsize=label_font_size,
                                                     color=label_color,
                                                     fontweight='bold',
-                                                    transform=ax1.transAxes,
                                                     bbox=bbox_props)
                                     
                                     # Handle legend visibility and positioning (already checked above)
@@ -6807,14 +7214,17 @@ def _generate_report(project_id, template_path, data_file_path):
                                             # current_app.logger.debug(f"Added line data label with color: {label_color}")
 
                                             # Set labels and styling
-                        if chart_type != "pie" and chart_type != "area":
-                            # Improved font size scaling for Matplotlib (moved outside condition)
-                            title_fontsize = font_size or 52  # Increased default title size
-                            label_fontsize = int((font_size or 52) * 0.9)  # Increased relative size for labels
-                            
-                            # Check if this is a bubble chart to avoid overriding bubble chart axis label settings
-                            is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
-                            current_app.logger.debug(f"🔍 General Section - is_bubble_chart: {is_bubble_chart}")
+                        # Check if this is a bubble chart to avoid overriding bubble chart axis label settings
+                        # This needs to be defined for all chart types since it's used later
+                        is_bubble_chart = any(series.get("type", "").lower() == "bubble" for series in series_data)
+                        current_app.logger.debug(f"🔍 General Section - is_bubble_chart: {is_bubble_chart}")
+                        
+                        # Improved font size scaling for Matplotlib (moved outside condition)
+                        # These need to be defined for all chart types since they're used later
+                        title_fontsize = font_size or 52  # Increased default title size
+                        label_fontsize = int((font_size or 52) * 0.9)  # Increased relative size for labels
+                        
+                        if chart_type != "pie" and chart_type != "area" and chart_type != "treemap":
                             
                             # Only apply general axis label settings if NOT a bubble chart
                             if not is_bubble_chart:
@@ -6972,8 +7382,34 @@ def _generate_report(project_id, template_path, data_file_path):
                             else:
                                 pass  # Suppress warning logs: f"Invalid Y-axis range format: {y_axis_min_max}")
                         
+                        # Apply secondary y-axis formatting for Matplotlib
+                        if ax2 and not disable_secondary_y:
+                            from matplotlib.ticker import FuncFormatter
+                            if secondary_y_axis_format:
+                                # Use explicit format if provided
+                                if "%" in secondary_y_axis_format:
+                                    def percentage_formatter(x, pos):
+                                        return f'{x:.0%}'
+                                    ax2.yaxis.set_major_formatter(FuncFormatter(percentage_formatter))
+                                elif "$" in secondary_y_axis_format:
+                                    def currency_formatter(x, pos):
+                                        return f'${x:,.0f}'
+                                    ax2.yaxis.set_major_formatter(FuncFormatter(currency_formatter))
+                                else:
+                                    # For other formats, use the format string directly
+                                    def custom_formatter(x, pos):
+                                        return f'{x:{secondary_y_axis_format}}'
+                                    ax2.yaxis.set_major_formatter(FuncFormatter(custom_formatter))
+                            else:
+                                # Default to percentage formatting if no explicit format is specified
+                                # This handles cases where secondary y-axis exists but no format is specified
+                                def default_percentage_formatter(x, pos):
+                                    return f'{x:.0%}'
+                                ax2.yaxis.set_major_formatter(FuncFormatter(default_percentage_formatter))
+                        
                         # Set title with improved font size
-                        ax1.set_title(title, fontsize=title_fontsize, weight='bold', pad=20)
+                        if title and title.strip():
+                            ax1.set_title(title, fontsize=title_fontsize, weight='bold', pad=20)
                         
                         # Legend
                         show_legend_raw = chart_meta.get("showlegend", chart_meta.get("legend", True))
@@ -7932,22 +8368,22 @@ def upload_zip_and_generate_reports(project_id):
             shutil.rmtree(temp_template_dir)
             
             if output_path:
-                # Save in both folders with unique naming (add original filename to prevent overwrites)
+                # Save in both folders with clean naming (using only report name/code)
                 base_filename = os.path.splitext(os.path.basename(excel_path))[0]  # Get original Excel filename without extension
-                name_file_path = os.path.join(output_folder_name, f"{report_name}_{base_filename}.docx")
-                code_file_path = os.path.join(output_folder_code, f"{report_code}_{base_filename}.docx")
+                name_file_path = os.path.join(output_folder_name, f"{report_name}.docx")
+                code_file_path = os.path.join(output_folder_code, f"{report_code}.docx")
                 
                 shutil.copy(output_path, name_file_path)
                 shutil.copy(output_path, code_file_path)
                 
                 generated_files.append({
-                    'name': f"{report_name}_{base_filename}", 
-                    'code': f"{report_code}_{base_filename}",
+                    'name': report_name, 
+                    'code': report_code,
                     'original_file': base_filename,
                     'report_name': report_name,
                     'report_code': report_code
                 })
-                current_app.logger.info(f"✅ Successfully generated report {idx}/{total_files}: {report_name}_{base_filename} -> {report_code}_{base_filename}")
+                current_app.logger.info(f"✅ Successfully generated report {idx}/{total_files}: {report_name} -> {report_code}")
             else:
                 current_app.logger.error(f"❌ Failed to generate report {idx}/{total_files}: {report_name}")
         except Exception as e:
