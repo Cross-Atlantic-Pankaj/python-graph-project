@@ -67,16 +67,8 @@ def create_app():
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     CORS(
         app,
-        origins=[
-            "http://52.66.214.215:3000",
-            "http://13.234.17.200:3000",
-            "https://python-graph-project-fall-ss1cuw632.vercel.app",
-            "https://python-graph-project-fall.vercel.app",
-            "https://python-graph-project.onrender.com",
-            "http://localhost:3000",
-            "http://localhost:3001"
-        ],
-        supports_credentials=True,
+        origins="*",
+        supports_credentials=False,
         allow_headers=["Content-Type", "Authorization"],
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
