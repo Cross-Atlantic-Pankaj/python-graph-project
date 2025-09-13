@@ -387,22 +387,22 @@ function Dashboard() {
       return;
     }
 
-    setIsBatchGenerating(true);
+      setIsBatchGenerating(true);
     setBatchProgress({ current: 0, total: 0, message: 'Uploading ZIP file...', percentage: 10 });
 
-    try {
-      const formData = new FormData();
-      formData.append('zip_file', zipFile);
+      try {
+        const formData = new FormData();
+        formData.append('zip_file', zipFile);
 
       setBatchProgress({ current: 0, total: 0, message: 'Processing ZIP file...', percentage: 20 });
       
-      const response = await axios.post(
-        `${process.env.REACT_APP_API_URL}/api/projects/${selectedProjectForReport.id}/upload_zip`,
-        formData,
-        {
-          headers: { 'Content-Type': 'multipart/form-data' },
-        }
-      );
+        const response = await axios.post(
+          `${process.env.REACT_APP_API_URL}/api/projects/${selectedProjectForReport.id}/upload_zip`,
+          formData,
+          {
+            headers: { 'Content-Type': 'multipart/form-data' },
+          }
+        );
 
       const { total_files, processed_files } = response.data;
       const percentage = Math.round((processed_files / total_files) * 100);
@@ -477,17 +477,17 @@ function Dashboard() {
         }, 1000);
       }
       
-    } catch (error) {
-      console.error('Batch report error:', error.response?.data || error.message);
+      } catch (error) {
+        console.error('Batch report error:', error.response?.data || error.message);
       showAlert(
         'Batch Processing Failed! ❌',
         'Failed to process ZIP file. Please check your file and try again.',
         'error'
       );
-    } finally {
-      setIsBatchGenerating(false);
+      } finally {
+        setIsBatchGenerating(false);
       setBatchProgress({ current: 0, total: 0, message: '', percentage: 0 });
-    }
+      }
   };
 
   const handleSingleReportGeneration = async (reportFile) => {
@@ -649,9 +649,9 @@ function Dashboard() {
           <Box>
               <Typography variant="h5" component="h1" sx={{ fontWeight: 700, mb: 1, letterSpacing: '-0.02em' }}>
               Project Dashboard
-            </Typography>
+        </Typography>
           </Box>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
               <Box 
                 sx={{ 
                   display: 'flex', 
@@ -691,7 +691,7 @@ function Dashboard() {
                   }}
                 >
                   {user?.full_name}
-                </Typography>
+          </Typography>
               </Box>
               <Tooltip title="Logout">
                 <Box 
@@ -998,11 +998,11 @@ function Dashboard() {
             </Button>
             
             {/* Create Project Button */}
-            <Button
-              variant="contained"
+      <Button
+        variant="contained"
               size="small"
               startIcon={<AddIcon sx={{ fontSize: 18 }} />}
-              onClick={() => setOpenCreateProjectDialog(true)}
+        onClick={() => setOpenCreateProjectDialog(true)}
               sx={{ 
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                 borderRadius: 2,
@@ -1019,7 +1019,7 @@ function Dashboard() {
               }}
             >
               New Project
-            </Button>
+      </Button>
           </Box>
         </Box>
       </Paper>
@@ -1063,7 +1063,7 @@ function Dashboard() {
           border: '1px solid #e0e0e0'
         }}>
           <Table>
-            <TableHead>
+          <TableHead>
               <TableRow sx={{ 
                 background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                 '& .MuiTableCell-head': {
@@ -1100,7 +1100,7 @@ function Dashboard() {
                     )}
                   </Box>
                 </TableCell>
-                <TableCell>Description</TableCell>
+              <TableCell>Description</TableCell>
                 <TableCell 
                   sx={{ 
                     cursor: 'pointer',
@@ -1122,10 +1122,10 @@ function Dashboard() {
                   </Box>
                 </TableCell>
                 <TableCell align="center">Status</TableCell>
-                <TableCell align="right">Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
+              <TableCell align="right">Actions</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
               {filteredAndSortedProjects.map((project, index) => (
                 <TableRow 
                   key={project.id} 
@@ -1159,7 +1159,7 @@ function Dashboard() {
                       }}>
                         <FolderIcon sx={{ color: '#667eea', fontSize: 16 }} />
                       </Box>
-                      {project.name}
+                    {project.name}
                     </Box>
                   </TableCell>
                   <TableCell sx={{ maxWidth: 300 }}>
@@ -1435,10 +1435,10 @@ function Dashboard() {
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Word Template (Optional)
             </Typography>
-            <input
-              type="file"
-              accept=".doc,.docx"
-              onChange={(e) => setNewProject({ ...newProject, file: e.target.files[0] })}
+          <input
+            type="file"
+            accept=".doc,.docx"
+            onChange={(e) => setNewProject({ ...newProject, file: e.target.files[0] })}
               style={{ 
                 width: '100%',
                 padding: '8px',
@@ -1509,9 +1509,9 @@ function Dashboard() {
           <Box sx={{ mt: 2 }}>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
               Upload new Word template (optional - leave empty to keep current template)
-            </Typography>
-            <input
-              type="file"
+          </Typography>
+          <input
+            type="file"
               accept=".doc,.docx"
               onChange={(e) => setEditingProject({ ...editingProject, file: e.target.files[0] })}
               style={{ 
@@ -1626,7 +1626,7 @@ function Dashboard() {
                   <Typography variant="h6" sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
                     <WarningIcon color="warning" />
                     Report Issues ({chartErrors.report_generation_errors.length})
-                  </Typography>
+              </Typography>
                   <List>
                     {chartErrors.report_generation_errors.map((error, index) => (
                       <ListItem key={index} sx={{ flexDirection: 'column', alignItems: 'flex-start', p: 0, mb: 2 }}>
@@ -1650,7 +1650,7 @@ function Dashboard() {
                         </Alert>
                         <Typography variant="caption" color="text.secondary">
                           This chart could not be inserted into the report document.
-                        </Typography>
+              </Typography>
                       </ListItem>
                     ))}
                   </List>
@@ -1680,7 +1680,7 @@ function Dashboard() {
           )}
         </DialogContent>
         <DialogActions>
-          <Button 
+          <Button
             onClick={() => {
               clearProjectErrors(selectedProjectForErrors?.id);
               handleCloseErrorDialog();

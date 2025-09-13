@@ -67,8 +67,8 @@ def create_app():
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
     CORS(
         app,
-        origins="*",
-        supports_credentials=False,
+        origins=True,
+        supports_credentials=True,
         allow_headers=["Content-Type", "Authorization"],
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
