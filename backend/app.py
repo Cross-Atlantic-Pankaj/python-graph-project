@@ -71,6 +71,7 @@ def create_app():
             "http://52.66.214.215:3000",
             "http://13.234.17.200:3000",
             "http://localhost:3002",
+            "http://13.201.16.204:3002"
             "http://3.111.213.47:3002",
             "https://python-graph-project-fall-ss1cuw632.vercel.app",
             "https://python-graph-project-fall.vercel.app",
