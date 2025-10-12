@@ -344,6 +344,7 @@ function Dashboard() {
     setSelectedProjectForErrors(project);
     try {
       const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/projects/${project.id}/chart_errors`);
+      console.log('Chart errors response:', response.data);
       setChartErrors(response.data);
       setShowErrorDialog(true);
     } catch (error) {
@@ -1592,30 +1593,33 @@ function Dashboard() {
                     Chart Problems ({Object.keys(chartErrors.chart_generation_errors).length})
                   </Typography>
                   <List>
-                    {Object.entries(chartErrors.chart_generation_errors).map(([tag, error], index) => (
-                      <ListItem key={index} sx={{ flexDirection: 'column', alignItems: 'flex-start', p: 0, mb: 2 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                          <ErrorIcon color="error" fontSize="small" />
-                          <Typography variant="subtitle1" fontWeight="bold">
-                            {tag}
-                          </Typography>
-                          <Chip 
-                            label={error.chart_type} 
-                            color="primary" 
-                            size="small" 
-                            variant="outlined"
-                          />
-                        </Box>
-                        <Alert severity="error" sx={{ width: '100%', mb: 1 }}>
-                          {error.user_message}
-                        </Alert>
-                        <Box sx={{ display: 'flex', gap: 1, fontSize: '0.8rem', color: 'text.secondary' }}>
-                          <span>Type: {error.error_type}</span>
-                          <span>•</span>
-                          <span>Data points: {error.data_points}</span>
-                        </Box>
-                      </ListItem>
-                    ))}
+                    {Object.entries(chartErrors.chart_generation_errors).map(([tag, error], index) => {
+                      console.log(`Chart error for ${tag}:`, error);
+                      return (
+                        <ListItem key={index} sx={{ flexDirection: 'column', alignItems: 'flex-start', p: 0, mb: 2 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                            <ErrorIcon color="error" fontSize="small" />
+                            <Typography variant="subtitle1" fontWeight="bold">
+                              {tag}
+                            </Typography>
+                            <Chip 
+                              label={error.chart_type} 
+                              color="primary" 
+                              size="small" 
+                              variant="outlined"
+                            />
+                          </Box>
+                          <Alert severity="error" sx={{ width: '100%', mb: 1 }}>
+                            {error.user_message || error.error || 'No error message available'}
+                          </Alert>
+                          <Box sx={{ display: 'flex', gap: 1, fontSize: '0.8rem', color: 'text.secondary' }}>
+                            <span>Type: {error.error_type}</span>
+                            <span>•</span>
+                            <span>Data points: {error.data_points}</span>
+                          </Box>
+                        </ListItem>
+                      );
+                    })}
                   </List>
                 </Box>
               )}
@@ -1628,31 +1632,34 @@ function Dashboard() {
                     Report Issues ({chartErrors.report_generation_errors.length})
               </Typography>
                   <List>
-                    {chartErrors.report_generation_errors.map((error, index) => (
-                      <ListItem key={index} sx={{ flexDirection: 'column', alignItems: 'flex-start', p: 0, mb: 2 }}>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
-                          <WarningIcon color="warning" fontSize="small" />
-                          <Typography variant="subtitle1" fontWeight="bold">
-                            {error.tag}
-                          </Typography>
-                          {chartErrors.report_generation_errors_detailed && 
-                           chartErrors.report_generation_errors_detailed[error.tag] && (
-                            <Chip 
-                              label={chartErrors.report_generation_errors_detailed[error.tag].chart_type} 
-                              color="primary" 
-                              size="small" 
-                              variant="outlined"
-                            />
-                          )}
-                        </Box>
-                        <Alert severity="warning" sx={{ width: '100%', mb: 1 }}>
-                          {error.error}
-                        </Alert>
-                        <Typography variant="caption" color="text.secondary">
-                          This chart could not be inserted into the report document.
-              </Typography>
-                      </ListItem>
-                    ))}
+                    {chartErrors.report_generation_errors.map((error, index) => {
+                      console.log(`Report generation error for ${error.tag}:`, error);
+                      console.log(`Error message: "${error.error}"`);
+                      return (
+                        <ListItem key={index} sx={{ flexDirection: 'column', alignItems: 'flex-start', p: 0, mb: 2 }}>
+                          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                            <WarningIcon color="warning" fontSize="small" />
+                            <Typography variant="subtitle1" fontWeight="bold">
+                              {error.tag}
+                            </Typography>
+                            {chartErrors.report_generation_errors_detailed && 
+                             chartErrors.report_generation_errors_detailed[error.tag] && (
+                              <Chip 
+                                label={chartErrors.report_generation_errors_detailed[error.tag].chart_type} 
+                                color="primary" 
+                                size="small" 
+                                variant="outlined"
+                              />
+                            )}
+                          </Box>
+                          <Box sx={{ width: '100%', mb: 1, p: 2, backgroundColor: '#fff3cd', border: '1px solid #ffeaa7', borderRadius: 1 }}>
+                            <Typography variant="body2" color="error">
+                              {error.error || error.message || 'No error message available'}
+                            </Typography>
+                          </Box>
+                        </ListItem>
+                      );
+                    })}
                   </List>
                 </Box>
               )}

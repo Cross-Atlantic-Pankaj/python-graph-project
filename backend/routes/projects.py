@@ -543,6 +543,90 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
     
     return converted_json
 
+def create_matplotlib_chart_from_plotly(fig, output_path):
+    """
+    Create a matplotlib chart from a Plotly figure as a fallback when Chrome/Kaleido is not available
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+    
+    # Create matplotlib figure
+    fig_mpl, ax = plt.subplots(figsize=(12, 6))
+    
+    try:
+        # Extract data from Plotly figure
+        if hasattr(fig, 'data') and len(fig.data) > 0:
+            trace = fig.data[0]
+            
+            # Determine chart type and create matplotlib equivalent
+            if hasattr(trace, 'type'):
+                chart_type = trace.type
+            else:
+                # Infer type from data structure
+                if hasattr(trace, 'labels') and hasattr(trace, 'values'):
+                    chart_type = 'pie'
+                elif hasattr(trace, 'x') and hasattr(trace, 'y'):
+                    chart_type = 'bar'
+                else:
+                    chart_type = 'bar'
+            
+            if chart_type in ['bar', 'column']:
+                # Bar chart
+                x_data = trace.x if hasattr(trace, 'x') else range(len(trace.y))
+                y_data = trace.y if hasattr(trace, 'y') else [1, 2, 3]
+                colors = trace.marker.color if hasattr(trace.marker, 'color') else 'blue'
+                
+                if isinstance(colors, list) and len(colors) > 1:
+                    ax.bar(x_data, y_data, color=colors)
+                else:
+                    ax.bar(x_data, y_data, color=colors[0] if isinstance(colors, list) else colors)
+                
+                ax.set_xlabel('Categories')
+                ax.set_ylabel('Values')
+                
+            elif chart_type in ['pie', 'donut']:
+                # Pie chart
+                labels = trace.labels if hasattr(trace, 'labels') else ['A', 'B', 'C']
+                values = trace.values if hasattr(trace, 'values') else [1, 2, 3]
+                colors = trace.marker.colors if hasattr(trace.marker, 'colors') else None
+                
+                ax.pie(values, labels=labels, autopct='%1.1f%%', startangle=90, colors=colors)
+                
+            elif chart_type in ['line', 'scatter']:
+                # Line chart
+                x_data = trace.x if hasattr(trace, 'x') else range(len(trace.y))
+                y_data = trace.y if hasattr(trace, 'y') else [1, 2, 3]
+                color = trace.marker.color if hasattr(trace.marker, 'color') else 'blue'
+                
+                ax.plot(x_data, y_data, marker='o', linewidth=2, markersize=6, color=color)
+                ax.set_xlabel('X Values')
+                ax.set_ylabel('Y Values')
+                
+            else:
+                # Default bar chart
+                x_data = trace.x if hasattr(trace, 'x') else range(len(trace.y) if hasattr(trace, 'y') else [1, 2, 3])
+                y_data = trace.y if hasattr(trace, 'y') else [1, 2, 3]
+                ax.bar(x_data, y_data, color='blue')
+        
+        # Set title
+        if hasattr(fig, 'layout') and hasattr(fig.layout, 'title'):
+            ax.set_title(str(fig.layout.title), fontsize=14, fontweight='bold')
+        
+        # Improve appearance
+        ax.grid(True, alpha=0.3)
+        plt.tight_layout()
+        
+        # Save the figure
+        fig_mpl.savefig(output_path, dpi=300, bbox_inches='tight', facecolor='white')
+        plt.close(fig_mpl)
+        
+        return True
+        
+    except Exception as e:
+        current_app.logger.error(f"Error creating matplotlib chart: {e}")
+        plt.close(fig_mpl)
+        return False
+
 def create_bar_of_pie_chart(labels, values, other_labels, other_values, colors, other_colors, title, value_format="", chart_meta=None):
     """
     Create a 'bar of pie' chart using Plotly: pie chart with one segment broken down as a bar chart.
@@ -3014,9 +3098,35 @@ def _generate_report(project_id, template_path, data_file_path):
                         chart_meta=chart_meta
                     )
                     
-                    # Save Plotly figure as PNG file for Word document insertion
+                    # Save chart as PNG file for Word document insertion using matplotlib
                     tmpfile = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
-                    fig.write_image(tmpfile.name, width=900, height=500, scale=2)
+                    
+                    # Convert Plotly figure to matplotlib and save
+                    try:
+                        # Try Plotly first (if Chrome is available)
+                        fig.write_image(tmpfile.name, width=900, height=500, scale=2)
+                        current_app.logger.info("✅ Chart saved using Plotly (Chrome available)")
+                    except Exception as e:
+                        current_app.logger.warning(f"Plotly write_image failed: {e}. Using matplotlib fallback.")
+                        
+                        # Use the dedicated matplotlib fallback function
+                        success = create_matplotlib_chart_from_plotly(fig, tmpfile.name)
+                        if success:
+                            current_app.logger.info("✅ Chart saved using matplotlib fallback")
+                        else:
+                            current_app.logger.error("❌ Both Plotly and matplotlib chart generation failed")
+                            # Create a simple placeholder chart
+                            import matplotlib.pyplot as plt
+                            fig_mpl, ax = plt.subplots(figsize=(12, 6))
+                            ax.text(0.5, 0.5, 'Chart Generation Failed\nChrome/Kaleido not available', 
+                                   ha='center', va='center', fontsize=16, 
+                                   bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray"))
+                            ax.set_xlim(0, 1)
+                            ax.set_ylim(0, 1)
+                            ax.axis('off')
+                            fig_mpl.savefig(tmpfile.name, dpi=300, bbox_inches='tight')
+                            plt.close(fig_mpl)
+                    
                     plt.close('all')  # Close any matplotlib figures
                     gc.collect()  # Force garbage collection
                     
@@ -7740,28 +7850,67 @@ def _generate_report(project_id, template_path, data_file_path):
                 error_type = type(e).__name__
                 error_msg = str(e)
                 
-                # Simplify common error messages
+                # Simplify common error messages with more specific, user-friendly descriptions
                 if "JSONDecodeError" in error_type:
-                    user_message = "Invalid JSON format in chart configuration"
+                    user_message = "Invalid chart configuration format - please check your chart settings"
                 elif "KeyError" in error_type:
-                    user_message = f"Missing required field: {error_msg}"
+                    if "sheet" in error_msg.lower():
+                        user_message = f"Excel sheet not found: {error_msg.split(':')[-1].strip()}"
+                    elif "column" in error_msg.lower():
+                        user_message = f"Column not found in data: {error_msg.split(':')[-1].strip()}"
+                    else:
+                        user_message = f"Missing required data field: {error_msg.split(':')[-1].strip()}"
                 elif "ValueError" in error_type:
-                    user_message = f"Invalid value: {error_msg}"
+                    if "cell range" in error_msg.lower() or "range" in error_msg.lower():
+                        user_message = "Invalid cell range - please check that the data range exists in your Excel file"
+                    elif "empty" in error_msg.lower() or "no data" in error_msg.lower():
+                        user_message = "No data found in the specified range - please check your data source"
+                    elif "numeric" in error_msg.lower():
+                        user_message = "Data contains non-numeric values - please ensure all chart data is numeric"
+                    elif "x and y must have same first dimension" in error_msg.lower():
+                        user_message = "Data mismatch: X and Y data have different lengths - please check that your data ranges have the same number of rows"
+                    elif "x and y must be the same size" in error_msg.lower():
+                        user_message = "Data mismatch: X and Y data have different sizes - please check that your data ranges have the same number of values"
+                    elif "must be of length" in error_msg.lower() and "explode" in error_msg.lower():
+                        user_message = "Pie chart data mismatch: The explode values don't match the number of data points - please check your data configuration"
+                    elif "shapes" in error_msg.lower() and "dimension" in error_msg.lower():
+                        user_message = f"Data dimension mismatch: {error_msg.split('but have shapes')[0].strip()} - please ensure all data series have the same length"
+                    else:
+                        user_message = f"Data validation error: {error_msg}"
                 elif "IndexError" in error_type:
-                    user_message = "Data array is empty or has wrong dimensions"
+                    user_message = "Data range is empty or invalid - please check your Excel file has data in the specified range"
+                elif "Cannot fix dimensions" in error_msg and "both arrays are empty" in error_msg:
+                    user_message = "No data available: Both X and Y data arrays are empty - please check your data source and ensure it contains values"
                 elif "TypeError" in error_type:
-                    user_message = f"Wrong data type: {error_msg}"
+                    if "string" in error_msg.lower() and "float" in error_msg.lower():
+                        user_message = "Data contains text instead of numbers - please ensure all chart data is numeric"
+                    else:
+                        user_message = f"Data type error: {error_msg}"
                 elif "FileNotFoundError" in error_type:
-                    user_message = "Excel file or sheet not found"
+                    user_message = "Excel file or worksheet not found - please check the file path and sheet name"
                 elif "openpyxl" in error_msg.lower():
-                    user_message = "Excel file format error - check if file is corrupted"
+                    user_message = "Excel file is corrupted or in an unsupported format - please try a different file"
                 elif "pandas" in error_msg.lower():
-                    user_message = "Data reading error - check Excel file format"
+                    user_message = "Unable to read Excel data - please check that the file is not corrupted and contains valid data"
+                elif "xlrd" in error_msg.lower():
+                    user_message = "Excel file format not supported - please save as .xlsx format"
                 elif "NoneType" in error_type and "text" in error_msg.lower():
                     user_message = "Secondary y-axis disabled - chart generated without secondary axis"
                     current_app.logger.info(f"🔄 Chart '{chart_tag}' generated without secondary y-axis (disable_secondary_y=True)")
+                elif "permission" in error_msg.lower() or "access" in error_msg.lower():
+                    user_message = "File access denied - please ensure the Excel file is not open in another program"
+                elif "memory" in error_msg.lower():
+                    user_message = "Not enough memory to process the data - try with a smaller dataset"
+                elif "timeout" in error_msg.lower():
+                    user_message = "Chart generation timed out - try with a smaller dataset or simpler chart type"
+                elif "y_vals is None" in error_msg.lower():
+                    user_message = "Missing Y-axis data: One or more data series is empty - please check that all your data ranges contain values"
                 else:
-                    user_message = error_msg
+                    # For any other error, try to extract a meaningful message
+                    if ":" in error_msg:
+                        user_message = error_msg.split(":")[-1].strip()
+                    else:
+                        user_message = f"Chart generation failed: {error_msg}"
                 
                 error_details = {
                     "chart_tag": chart_tag,
@@ -7783,16 +7932,23 @@ def _generate_report(project_id, template_path, data_file_path):
                     current_app.chart_errors[project_id] = {}
                 current_app.chart_errors[project_id][chart_tag] = error_details
                 
+                # Debug logging for error storage
+                current_app.logger.info(f"🔍 Stored chart error for {chart_tag}: {error_details}")
+                
                 # Also store a simplified version for report generation errors
                 if not hasattr(current_app, 'report_generation_errors'):
                     current_app.report_generation_errors = {}
                 if project_id not in current_app.report_generation_errors:
                     current_app.report_generation_errors[project_id] = {}
-                current_app.report_generation_errors[project_id][chart_tag] = {
+                report_error_details = {
                     "error": user_message,
                     "chart_type": chart_type if 'chart_type' in locals() else "unknown",
                     "timestamp": datetime.utcnow().isoformat()
                 }
+                current_app.report_generation_errors[project_id][chart_tag] = report_error_details
+                
+                # Debug logging for report generation error storage
+                current_app.logger.info(f"🔍 Stored report generation error for {chart_tag}: {report_error_details}")
                 
                 # Clean up any remaining matplotlib figures
                 plt.close('all')
@@ -7824,7 +7980,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             para.text = re.sub(rf"\$\{{{tag}\}}", error_msg, para.text, flags=re.IGNORECASE)
                             
                             # Get the specific error from chart_errors if available
-                            specific_error = "Chart could not be generated"
+                            specific_error = "Chart generation failed - please check your data and chart configuration"
                             if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
                                 if tag in current_app.chart_errors[project_id]:
                                     specific_error = current_app.chart_errors[project_id][tag].get('user_message', specific_error)
@@ -7871,7 +8027,7 @@ def _generate_report(project_id, template_path, data_file_path):
                                         para.text = re.sub(rf"\$\{{{tag}\}}", error_msg, para.text, flags=re.IGNORECASE)
                                         
                                         # Get the specific error from chart_errors if available
-                                        specific_error = "Chart could not be generated"
+                                        specific_error = "Chart generation failed - please check your data and chart configuration"
                                         if hasattr(current_app, 'chart_errors') and project_id in current_app.chart_errors:
                                             if tag in current_app.chart_errors[project_id]:
                                                 specific_error = current_app.chart_errors[project_id][tag].get('user_message', specific_error)
@@ -8205,6 +8361,12 @@ def get_chart_errors(project_id):
     report_errors = getattr(current_app, 'report_errors', {}).get(project_id, {})
     report_generation_errors = getattr(current_app, 'report_generation_errors', {}).get(project_id, {})
     
+    # Debug logging
+    current_app.logger.info(f"🔍 Chart errors for project {project_id}:")
+    current_app.logger.info(f"  - chart_errors: {chart_errors}")
+    current_app.logger.info(f"  - report_errors: {report_errors}")
+    current_app.logger.info(f"  - report_generation_errors: {report_generation_errors}")
+    
     # Combine both types of errors
     all_errors = {
         "chart_generation_errors": chart_errors,
@@ -8213,6 +8375,7 @@ def get_chart_errors(project_id):
         "report_generated_at": report_errors.get("generated_at")
     }
     
+    current_app.logger.info(f"🔍 Returning chart errors: {all_errors}")
     return jsonify(all_errors)
 
 @projects_bp.route('/api/projects/<project_id>/clear_errors', methods=['POST'])
