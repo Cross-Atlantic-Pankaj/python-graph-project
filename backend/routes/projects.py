@@ -1346,47 +1346,60 @@ def _generate_report(project_id, template_path, data_file_path):
         doc = Document(template_path)
 
         def replace_text_in_paragraph(paragraph):
+            """
+            Enhanced text replacement function that handles split placeholders across runs.
+            
+            PROBLEM SOLVED:
+            - Word documents often split placeholders like ${Text} or <Country> across multiple 
+              runs when special characters, formatting changes, or certain characters are present.
+            - This causes simple text replacement to fail because it only sees partial placeholders.
+            
+            SOLUTION:
+            1. Combines text from all runs in a paragraph to see the complete placeholder
+            2. Uses case-insensitive regex matching with re.escape() to handle special characters
+            3. Uses improved regex patterns: [^\}]+ and [^>]+ instead of .*? for better matching
+            4. Puts replaced text in the first run, clearing others (preserves formatting)
+            5. Has both high-level (paragraph.text) and low-level (XML) approaches for robustness
+            
+            This ensures placeholders are replaced correctly regardless of special characters,
+            formatting, CAGR/CAGRT data, growth values, or how Word internally splits the text.
+            """
             nonlocal flat_data_map, text_map  # Access variables from outer scope
             
-            # Simple approach: replace placeholders directly in each run without clearing runs
-            for run in paragraph.runs:
-                original_text = run.text
-                modified_text = original_text
+            # IMPROVED APPROACH: Handle split placeholders across runs
+            # Word often splits placeholders like ${Text} into multiple runs due to formatting/special chars
+            
+            try:
+                # First, try to handle placeholders that span across multiple runs
+                # by working with the full paragraph text
+                full_para_text = paragraph.text
+                new_para_text = full_para_text
+                replacements_made = False
                 
-                # Handle ${} format placeholders
-                matches = re.findall(r"\$\{(.*?)\}", run.text)
-                for match in matches:
+                # Replace ${...} placeholders (case-insensitive)
+                dollar_matches = re.findall(r"\$\{([^\}]+)\}", full_para_text)
+                for match in dollar_matches:
                     key_lower = match.lower().strip()
                     
                     # Special handling for section_cgrp variants (including numbered sections)
                     if key_lower == 'section_cgrp' or re.match(r'section\d+_cgrp$', key_lower):
-                        # Use section-specific CAGR data
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     elif key_lower == 'section_cgrp_historical' or re.match(r'section\d+_cgrp_historical$', key_lower):
-                        # Use section-specific CAGR Historical data
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                         if not val:
                             current_app.logger.debug(f"🔍 DEBUG: No data found for {key_lower}. Available keys: {list(flat_data_map.keys())}")
                     elif key_lower == 'section_cgrp_forecast' or re.match(r'section\d+_cgrp_forecast$', key_lower):
-                        # Use section-specific CAGR Forecast data
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                         if not val:
                             current_app.logger.debug(f"🔍 DEBUG: No data found for {key_lower}. Available keys: {list(flat_data_map.keys())}")
                     else:
-                        # Default logic for other tags
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     
-                    if val:
+                    if val is not None and val != '':
+                        # Create a regex pattern that matches the placeholder regardless of case
                         pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
-                        modified_text = pattern.sub(val, modified_text)
-                        # Log replacements for global metadata
-                        if (key_lower in dynamic_columns or 
-                            key_lower in ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast'] or
-                            re.match(r'section\d+_cgrp$', key_lower) or
-                            re.match(r'section\d+_cgrp_historical$', key_lower) or
-                            re.match(r'section\d+_cgrp_forecast$', key_lower)):
-                            # Replaced placeholder successfully
-                            pass
+                        new_para_text = pattern.sub(str(val), new_para_text)
+                        replacements_made = True
                     else:
                         if (key_lower in dynamic_columns or 
                             key_lower in ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast'] or
@@ -1395,36 +1408,26 @@ def _generate_report(project_id, template_path, data_file_path):
                             re.match(r'section\d+_cgrp_forecast$', key_lower)):
                             current_app.logger.error(f"❌ NO DATA: ${{{match}}} (key: {key_lower})")
                 
-                # Handle <> format placeholders
-                angle_matches = re.findall(r"<(.*?)>", run.text)
+                # Replace <...> placeholders (case-insensitive)
+                angle_matches = re.findall(r"<([^>]+)>", full_para_text)
                 for match in angle_matches:
                     key_lower = match.lower().strip()
                     
                     # Special handling for section_cgrp variants (including numbered sections)
                     if key_lower == 'section_cgrp' or re.match(r'section\d+_cgrp$', key_lower):
-                        # Use section-specific CAGR data
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     elif key_lower == 'section_cgrp_historical' or re.match(r'section\d+_cgrp_historical$', key_lower):
-                        # Use section-specific CAGR Historical data
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     elif key_lower == 'section_cgrp_forecast' or re.match(r'section\d+_cgrp_forecast$', key_lower):
-                        # Use section-specific CAGR Forecast data
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     else:
-                        # Default logic for other tags
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                     
-                    if val:
+                    if val is not None and val != '':
+                        # Create a regex pattern that matches the placeholder regardless of case
                         pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
-                        modified_text = pattern.sub(val, modified_text)
-                        # Log replacements for global metadata
-                        if (key_lower in dynamic_columns or 
-                            key_lower in ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast'] or
-                            re.match(r'section\d+_cgrp$', key_lower) or
-                            re.match(r'section\d+_cgrp_historical$', key_lower) or
-                            re.match(r'section\d+_cgrp_forecast$', key_lower)):
-                            # Replaced tag successfully
-                            pass
+                        new_para_text = pattern.sub(str(val), new_para_text)
+                        replacements_made = True
                     else:
                         if (key_lower in dynamic_columns or 
                             key_lower in ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast'] or
@@ -1433,29 +1436,43 @@ def _generate_report(project_id, template_path, data_file_path):
                             re.match(r'section\d+_cgrp_forecast$', key_lower)):
                             current_app.logger.error(f"❌ NO DATA: <{match}> (key: {key_lower})")
                 
-                # Update the run text only if it was modified
-                if modified_text != original_text:
-                    run.text = modified_text
-
-            # Second pass: handle placeholders that may be split across multiple runs (common in DOCX)
+                # If replacements were made, update the paragraph runs
+                if replacements_made and new_para_text != full_para_text:
+                    # Clear all runs except the first one and put all text in the first run
+                    # This preserves formatting while ensuring replacement works
+                    if paragraph.runs:
+                        # Store the first run's formatting
+                        first_run = paragraph.runs[0]
+                        
+                        # Clear all runs
+                        for run in paragraph.runs[1:]:
+                            run.text = ''
+                        
+                        # Put the replaced text in the first run
+                        first_run.text = new_para_text
+                    
+            except Exception as e:
+                current_app.logger.debug(f"⚠️ Paragraph replacement approach failed: {str(e)}, falling back to XML approach")
+            
+            # XML-level approach: Handle split placeholders at the XML level
+            # This is more robust for handling special characters and split runs
             try:
                 w_element = paragraph._element
-                # Prepare namespaces for XPath
                 ns = {}
                 if hasattr(w_element, 'nsmap') and isinstance(w_element.nsmap, dict):
                     ns = {k: v for k, v in w_element.nsmap.items() if k}
                 if 'w' not in ns:
                     ns['w'] = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
 
-                # Collect all text nodes within the paragraph (across runs)
+                # Get all text nodes (w:t elements)
                 t_nodes = w_element.xpath('.//w:t', namespaces=ns)
                 if t_nodes:
-                    original_segments = [(t.text or '') for t in t_nodes]
-                    full_text = ''.join(original_segments)
+                    # Combine all text from all runs
+                    full_text = ''.join([(t.text or '') for t in t_nodes])
                     new_text = full_text
-
+                    
                     # Replace ${...} placeholders (case-insensitive)
-                    dollar_matches = re.findall(r"\$\{(.*?)\}", full_text)
+                    dollar_matches = re.findall(r"\$\{([^\}]+)\}", full_text)
                     for match in set(dollar_matches):
                         key_lower = match.lower().strip()
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
@@ -1464,7 +1481,7 @@ def _generate_report(project_id, template_path, data_file_path):
                             new_text = pattern.sub(str(val), new_text)
 
                     # Replace <...> placeholders (case-insensitive)
-                    angle_matches = re.findall(r"<(.*?)>", full_text)
+                    angle_matches = re.findall(r"<([^>]+)>", full_text)
                     for match in set(angle_matches):
                         key_lower = match.lower().strip()
                         val = flat_data_map.get(key_lower) or text_map.get(key_lower)
@@ -1472,18 +1489,15 @@ def _generate_report(project_id, template_path, data_file_path):
                             pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
                             new_text = pattern.sub(str(val), new_text)
 
-                    # If replacements changed content, redistribute back across original w:t nodes
-                    if new_text != full_text:
-                        idx = 0
-                        for i, t in enumerate(t_nodes):
-                            seg_len = len(original_segments[i])
-                            t.text = new_text[idx:idx + seg_len]
-                            idx += seg_len
-                        # Append any remaining text to the last node
-                        if idx < len(new_text) and t_nodes:
-                            t_nodes[-1].text = (t_nodes[-1].text or '') + new_text[idx:]
-            except Exception:
-                # Fail-safe: do not break document processing if run-merging logic encounters an edge case
+                    # If replacements were made, update the XML nodes
+                    if new_text != full_text and t_nodes:
+                        # Put all text in the first node, clear the rest
+                        t_nodes[0].text = new_text
+                        for t in t_nodes[1:]:
+                            t.text = ''
+                            
+            except Exception as e:
+                current_app.logger.debug(f"⚠️ XML-level replacement failed: {str(e)}")
                 pass
 
         def replace_text_in_tables():
@@ -2192,13 +2206,14 @@ def _generate_report(project_id, template_path, data_file_path):
                             try:
                                 original_text = a_t.text or ''
                                 modified_text = original_text
-                                for match in set(re.findall(r"\$\{(.*?)\}", original_text)):
+                                # Use improved regex pattern that handles special characters better
+                                for match in set(re.findall(r"\$\{([^\}]+)\}", original_text)):
                                     key_lower = match.lower().strip()
                                     val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                                     if val is not None and val != '':
                                         pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
                                         modified_text = pattern.sub(str(val), modified_text)
-                                for match in set(re.findall(r"<(.*?)>", original_text)):
+                                for match in set(re.findall(r"<([^>]+)>", original_text)):
                                     key_lower = match.lower().strip()
                                     val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                                     if val is not None and val != '':
@@ -2258,13 +2273,14 @@ def _generate_report(project_id, template_path, data_file_path):
                     try:
                         original_text = a_t.text or ''
                         modified_text = original_text
-                        for match in set(re.findall(r"\$\{(.*?)\}", original_text)):
+                        # Use improved regex pattern that handles special characters better
+                        for match in set(re.findall(r"\$\{([^\}]+)\}", original_text)):
                             key_lower = match.lower().strip()
                             val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                             if val is not None and val != '':
                                 pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
                                 modified_text = pattern.sub(str(val), modified_text)
-                        for match in set(re.findall(r"<(.*?)>", original_text)):
+                        for match in set(re.findall(r"<([^>]+)>", original_text)):
                             key_lower = match.lower().strip()
                             val = flat_data_map.get(key_lower) or text_map.get(key_lower)
                             if val is not None and val != '':
@@ -2284,27 +2300,31 @@ def _generate_report(project_id, template_path, data_file_path):
                         original_text = field.text
                         modified_text = original_text
                         
-                        # Replace ${} placeholders
-                        for key, value in flat_data_map.items():
-                            if key in ['country', 'report_name', 'report_code', 'currency']:
-                                dollar_placeholder = f"${{{key}}}"
-                                if dollar_placeholder in modified_text:
-                                    modified_text = modified_text.replace(dollar_placeholder, str(value))
-                                    current_app.logger.debug(f"🔄 FIELD REPLACED: {dollar_placeholder} -> {value}")
-                                
-                        # Replace <> placeholders
-                        for key, value in flat_data_map.items():
-                            if key in ['country', 'report_name', 'report_code', 'currency']:
-                                angle_placeholder = f"<{key}>"
-                                if angle_placeholder in modified_text:
-                                    modified_text = modified_text.replace(angle_placeholder, str(value))
-                                    current_app.logger.debug(f"🔄 FIELD REPLACED: {angle_placeholder} -> {value}")
+                        # Replace ${} placeholders with case-insensitive matching
+                        dollar_matches = re.findall(r'\$\{([^\}]+)\}', original_text)
+                        for match in dollar_matches:
+                            key_lower = match.lower().strip()
+                            value = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                            if value:
+                                pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
+                                modified_text = pattern.sub(str(value), modified_text)
+                                current_app.logger.debug(f"🔄 FIELD REPLACED: ${{{match}}} -> {value}")
+                        
+                        # Replace <> placeholders with case-insensitive matching
+                        angle_matches = re.findall(r'<([^>]+)>', original_text)
+                        for match in angle_matches:
+                            key_lower = match.lower().strip()
+                            value = flat_data_map.get(key_lower) or text_map.get(key_lower)
+                            if value:
+                                pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
+                                modified_text = pattern.sub(str(value), modified_text)
+                                current_app.logger.debug(f"🔄 FIELD REPLACED: <{match}> -> {value}")
                         
                         # Update field text if modified
                         if modified_text != original_text:
                             field.text = modified_text
             except Exception as e:
-                # Word fields processing skipped
+                current_app.logger.debug(f"⚠️ Word fields processing error: {str(e)}")
                 pass
             
 
@@ -2316,75 +2336,76 @@ def _generate_report(project_id, template_path, data_file_path):
                 
                 for element in doc.element.iter():
                     if hasattr(element, 'text') and element.text:
-                        # Check if any dynamic column tag is present
-                        has_dynamic_tag = any(f'<{column}>' in element.text for column in dynamic_columns)
-                        if has_dynamic_tag:
-                            original_text = element.text
-                            
+                        original_text = element.text
+                        modified_text = original_text
+                        text_changed = False
+                        
+                        # Check if any placeholders are present (both ${} and <> formats)
+                        has_placeholder = (
+                            re.search(r'\$\{[^\}]+\}', original_text) or 
+                            re.search(r'<[^>]+>', original_text)
+                        )
+                        
+                        if has_placeholder:
                             # Only replace if it's a simple text element to avoid duplication
-                            if hasattr(element, 'tag') and element.tag in ['w:t', 'w:tab', 'w:br']:
-                                try:
-                                    # Process each dynamic column
-                                    modified_text = original_text
-                                    for column in dynamic_columns:
-                                        tag = f'<{column}>'
-                                        if tag in modified_text:
-                                            replacement_value = flat_data_map.get(column, '')
+                            if hasattr(element, 'tag'):
+                                tag_name = element.tag
+                                # Handle namespaced tags
+                                if '}' in tag_name:
+                                    tag_name = tag_name.split('}')[1]
+                                
+                                if tag_name in ['t', 'tab', 'br']:
+                                    try:
+                                        # Process ${} placeholders with case-insensitive matching
+                                        dollar_matches = re.findall(r'\$\{([^\}]+)\}', original_text)
+                                        for match in dollar_matches:
+                                            key_lower = match.lower().strip()
+                                            replacement_value = flat_data_map.get(key_lower, '')
                                             if replacement_value:
-                                                modified_text = modified_text.replace(tag, replacement_value)
+                                                # Use regex for case-insensitive replacement
+                                                pattern = re.compile(re.escape(f"${{{match}}}"), re.IGNORECASE)
+                                                modified_text = pattern.sub(str(replacement_value), modified_text)
+                                                text_changed = True
                                                 xml_replacements += 1
-                                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: {tag} -> {replacement_value}")
-                                    
-                                    # Process section_cgrp variants
-                                    section_cgrp_variants = ['section_cgrp', 'section_cgrp_historical', 'section_cgrp_forecast']
-                                    for variant in section_cgrp_variants:
-                                        tag = f'<{variant}>'
-                                        if tag in modified_text:
-                                            # Get appropriate replacement value based on variant
-                                            if variant == 'section_cgrp':
-                                                replacement_value = flat_data_map.get('chart_data_cgar', '')
-                                            elif variant == 'section_cgrp_historical':
-                                                replacement_value = flat_data_map.get('chart_data_historical', '')
-                                            elif variant == 'section_cgrp_forecast':
-                                                replacement_value = flat_data_map.get('chart_data_forecast', '')
+                                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: ${{{match}}} -> {replacement_value}")
+                                        
+                                        # Process <> placeholders with case-insensitive matching
+                                        angle_matches = re.findall(r'<([^>]+)>', original_text)
+                                        for match in angle_matches:
+                                            key_lower = match.lower().strip()
+                                            
+                                            # Try direct lookup first
+                                            replacement_value = flat_data_map.get(key_lower, '')
+                                            
+                                            # Special handling for section_cgrp variants if direct lookup fails
+                                            if not replacement_value:
+                                                if key_lower == 'section_cgrp' or re.match(r'section\d+_cgrp$', key_lower):
+                                                    replacement_value = flat_data_map.get('chart_data_cgar', '')
+                                                elif key_lower == 'section_cgrp_historical' or re.match(r'section\d+_cgrp_historical$', key_lower):
+                                                    replacement_value = flat_data_map.get('chart_data_historical', '')
+                                                elif key_lower == 'section_cgrp_forecast' or re.match(r'section\d+_cgrp_forecast$', key_lower):
+                                                    replacement_value = flat_data_map.get('chart_data_forecast', '')
                                             
                                             if replacement_value:
-                                                modified_text = modified_text.replace(tag, replacement_value)
+                                                # Use regex for case-insensitive replacement
+                                                pattern = re.compile(re.escape(f"<{match}>"), re.IGNORECASE)
+                                                modified_text = pattern.sub(str(replacement_value), modified_text)
+                                                text_changed = True
                                                 xml_replacements += 1
-                                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: {tag} -> {replacement_value}")
-                                    
-                                    # Process numbered section_cgrp variants (section1_cgrp_historical, section2_cgrp_forecast, etc.)
-                                    section_patterns = [
-                                        (r'<section\d+_cgrp>', 'chart_data_cgar'),
-                                        (r'<section\d+_cgrp_historical>', 'section_cgrp_historical'),
-                                        (r'<section\d+_cgrp_forecast>', 'section_cgrp_forecast')
-                                    ]
-                                    
-                                    for pattern, base_key in section_patterns:
-                                        matches = re.findall(pattern, modified_text)
-                                        for match in matches:
-                                            # Extract the section-specific key from the match
-                                            section_key = match[1:-1].lower()  # Remove < and > and convert to lowercase
+                                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: <{match}> -> {replacement_value}")
+                                        
+                                        if text_changed:
+                                            element.text = modified_text
                                             
-                                            if base_key == 'chart_data_cgar':
-                                                # For regular CAGR, use the global key
-                                                replacement_value = flat_data_map.get(base_key, '')
-                                            else:
-                                                # For historical/forecast, use the section-specific key
-                                                replacement_value = flat_data_map.get(section_key, '')
-                                            
-                                            if replacement_value:
-                                                modified_text = modified_text.replace(match, replacement_value)
-                                                xml_replacements += 1
-                                                current_app.logger.debug(f"🔄 XML TEXT ELEMENT REPLACED: {match} -> {replacement_value}")
-                                    
-                                    element.text = modified_text
-                                except Exception as xml_error:
-                                    pass  # Suppress warning logs
+                                    except Exception as xml_error:
+                                        current_app.logger.debug(f"⚠️ XML element replacement error: {str(xml_error)}")
+                                        pass  # Suppress warning logs
                 
-                # XML processing complete
+                if xml_replacements > 0:
+                    current_app.logger.debug(f"✅ XML processing complete: {xml_replacements} replacements made")
                 
             except Exception as e:
+                current_app.logger.debug(f"⚠️ XML processing error: {str(e)}")
                 pass  # Suppress warning logs
             
             # Force update Table of Contents by refreshing the document
