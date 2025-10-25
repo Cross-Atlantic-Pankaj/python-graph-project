@@ -2501,7 +2501,54 @@ def _generate_report(project_id, template_path, data_file_path):
             try:
                 chart_tag_lower = chart_tag.lower()
                 raw_chart_attr = chart_attr_map.get(chart_tag_lower, "{}")
-                chart_config = json.loads(re.sub(r'//.*?\n|/\*.*?\*/', '', raw_chart_attr, flags=re.DOTALL))
+                
+                # Enhanced JSON validation with detailed error reporting
+                cleaned_json = re.sub(r'//.*?\n|/\*.*?\*/', '', raw_chart_attr, flags=re.DOTALL)
+                
+                # Validate JSON syntax and provide detailed error information
+                try:
+                    chart_config = json.loads(cleaned_json)
+                except json.JSONDecodeError as json_err:
+                    # Create detailed JSON error message
+                    error_line = json_err.lineno if hasattr(json_err, 'lineno') else 'unknown'
+                    error_col = json_err.colno if hasattr(json_err, 'colno') else 'unknown'
+                    error_pos = json_err.pos if hasattr(json_err, 'pos') else 'unknown'
+                    
+                    # Extract the problematic part of the JSON
+                    json_lines = cleaned_json.split('\n')
+                    problematic_line = json_lines[error_line - 1] if error_line <= len(json_lines) else ''
+                    
+                    # Create specific error message based on common JSON issues
+                    detailed_error = f"JSON syntax error in chart attributes for '{chart_tag}':\n"
+                    detailed_error += f"• Error: {json_err.msg}\n"
+                    detailed_error += f"• Line: {error_line}, Column: {error_col}\n"
+                    if problematic_line:
+                        detailed_error += f"• Problematic line: {problematic_line.strip()}\n"
+                        # Highlight the error position if possible
+                        if error_col and error_col <= len(problematic_line):
+                            detailed_error += f"• Error position: {' ' * (error_col - 1)}^\n"
+                    
+                    # Add specific suggestions based on common JSON errors
+                    if "Expecting ',' delimiter" in json_err.msg:
+                        detailed_error += "• Suggestion: Add a comma (,) after the previous property\n"
+                    elif "Expecting ':' delimiter" in json_err.msg:
+                        detailed_error += "• Suggestion: Add a colon (:) between property name and value\n"
+                    elif "Expecting property name" in json_err.msg:
+                        detailed_error += "• Suggestion: Check for missing quotes around property names\n"
+                    elif "Expecting value" in json_err.msg:
+                        detailed_error += "• Suggestion: Add a value after the colon (:)\n"
+                    elif "Extra data" in json_err.msg:
+                        detailed_error += "• Suggestion: Remove extra characters or add missing comma\n"
+                    elif "Unterminated string" in json_err.msg:
+                        detailed_error += "• Suggestion: Add missing closing quote (\") for string values\n"
+                    
+                    # Log the detailed error
+                    current_app.logger.error(f"❌ JSON Error in chart '{chart_tag}': {detailed_error}")
+                    
+                    # Raise a more informative error
+                    raise ValueError(f"Invalid JSON in chart attributes for '{chart_tag}': {json_err.msg} at line {error_line}, column {error_col}")
+                
+                chart_config = json.loads(cleaned_json)
 
                 # Check if this is a ChatGPT JSON format and convert it
                 if "data" in chart_config and "validation" in chart_config:
@@ -7874,6 +7921,18 @@ def _generate_report(project_id, template_path, data_file_path):
                 # Simplify common error messages with more specific, user-friendly descriptions
                 if "JSONDecodeError" in error_type:
                     user_message = "Invalid chart configuration format - please check your chart settings"
+                elif "Invalid JSON in chart attributes" in error_msg:
+                    # Extract the detailed JSON error information
+                    if "at line" in error_msg and "column" in error_msg:
+                        # Parse the error message to extract line and column info
+                        try:
+                            line_part = error_msg.split("at line ")[1].split(",")[0]
+                            col_part = error_msg.split("column ")[1]
+                            user_message = f"JSON syntax error in chart attributes: {error_msg.split(': ')[1].split(' at')[0]} at line {line_part}, column {col_part}"
+                        except:
+                            user_message = f"JSON syntax error in chart attributes: {error_msg}"
+                    else:
+                        user_message = f"JSON syntax error in chart attributes: {error_msg}"
                 elif "KeyError" in error_type:
                     if "sheet" in error_msg.lower():
                         user_message = f"Excel sheet not found: {error_msg.split(':')[-1].strip()}"
@@ -7940,7 +7999,8 @@ def _generate_report(project_id, template_path, data_file_path):
                     "technical_message": error_msg,
                     "chart_type": chart_type if 'chart_type' in locals() else "unknown",
                     "data_points": len(series_data) if 'series_data' in locals() else 0,
-                    "timestamp": datetime.utcnow().isoformat()
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "chart_attributes": chart_attr_map.get(chart_tag.lower(), "{}") if 'chart_attr_map' in locals() else "Not available"
                 }
                 
                 # Simple console logging
