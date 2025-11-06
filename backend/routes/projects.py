@@ -373,7 +373,7 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
     from openpyxl.utils import get_column_letter, column_index_from_string
     
     def extract_excel_range(sheet, cell_range):
-        """Extract values from Excel cell range"""
+        """Extract values from Excel cell range, preserving percentage values"""
         try:
             # Parse the range (e.g., "A1:B3")
             if ':' in cell_range:
@@ -386,15 +386,32 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
                 values = []
                 for row in range(start_row, end_row + 1):
                     for col in range(start_col, end_col + 1):
-                        cell_value = sheet.cell(row=row + 1, column=col + 1).value
+                        cell = sheet.cell(row=row + 1, column=col + 1)
+                        cell_value = cell.value
                         if cell_value is not None:
+                            # Check if cell has percentage format and preserve percentage value
+                            # Excel stores percentages as decimals (0.666 = 66.6%), so we need to multiply by 100
+                            if isinstance(cell_value, (int, float)):
+                                cell_format = cell.number_format
+                                if cell_format and '%' in str(cell_format):
+                                    # If value is between 0 and 1, it's likely a percentage stored as decimal
+                                    # Multiply by 100 to get the actual percentage value
+                                    if 0 <= cell_value <= 1:
+                                        cell_value = cell_value * 100
                             values.append(cell_value)
                 return values
             else:
                 # Single cell
                 col = column_index_from_string(re.sub(r'\d+', '', cell_range)) - 1
                 row = int(re.sub(r'[A-Z]+', '', cell_range)) - 1
-                return [sheet.cell(row=row + 1, column=col + 1).value]
+                cell = sheet.cell(row=row + 1, column=col + 1)
+                cell_value = cell.value
+                if cell_value is not None and isinstance(cell_value, (int, float)):
+                    cell_format = cell.number_format
+                    if cell_format and '%' in str(cell_format):
+                        if 0 <= cell_value <= 1:
+                            cell_value = cell_value * 100
+                return [cell_value] if cell_value is not None else []
         except Exception as e:
             print(f"Error extracting Excel range {cell_range}: {e}")
             return []
@@ -2805,9 +2822,21 @@ def _generate_report(project_id, template_path, data_file_path):
                         for row in sheet[cell_range]:
                             for cell in row:
                                 if cell.value is not None:
+                                    cell_value = cell.value
+                                    # Check if cell has percentage format and preserve percentage value
+                                    # Excel stores percentages as decimals (0.666 = 66.6%), so we need to multiply by 100
+                                    if isinstance(cell_value, (int, float)):
+                                        # Check if cell number format contains '%' (percentage format)
+                                        cell_format = cell.number_format
+                                        if cell_format and '%' in str(cell_format):
+                                            # If value is between 0 and 1, it's likely a percentage stored as decimal
+                                            # Multiply by 100 to get the actual percentage value
+                                            if 0 <= cell_value <= 1:
+                                                cell_value = cell_value * 100
+                                                current_app.logger.debug(f"🔍 Cell {cell.coordinate}: Converted percentage {cell.value} -> {cell_value}% (format: {cell_format})")
                                     # Debug each cell value
-                                    current_app.logger.debug(f"🔍 Cell {cell.coordinate}: '{cell.value}' (type: {type(cell.value)}, repr: {repr(cell.value)})")
-                                    values.append(cell.value)
+                                    current_app.logger.debug(f"🔍 Cell {cell.coordinate}: '{cell_value}' (type: {type(cell_value)}, repr: {repr(cell_value)})")
+                                    values.append(cell_value)
                         current_app.logger.debug(f"🔍 Extracted values: {values}")
                         return values
                     except Exception as e:
@@ -5599,8 +5628,22 @@ def _generate_report(project_id, template_path, data_file_path):
                                 if i == 0:
                                     ax1.bar(x_values, y_vals, label=label, color=bar_color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
                                     bottom_vals = y_vals
+                                    # Initialize storage for stacked bar segments
+                                    if not hasattr(ax1, '_stacked_segments'):
+                                        ax1._stacked_segments = []
+                                    ax1._stacked_segments.append({
+                                        'y_vals': y_vals,
+                                        'bottom_vals': [0] * len(y_vals),
+                                        'x_values': x_values
+                                    })
                                 else:
                                     ax1.bar(x_values, y_vals, bottom=bottom_vals, label=label, color=bar_color, alpha=0.7, edgecolor=edgecolor, linewidth=linewidth)
+                                    # Store segment info for data labels
+                                    ax1._stacked_segments.append({
+                                        'y_vals': y_vals,
+                                        'bottom_vals': bottom_vals.copy(),
+                                        'x_values': x_values
+                                    })
                                     bottom_vals = [sum(x) for x in zip(bottom_vals, y_vals)]
                             else:
                                 if isinstance(color, list):
@@ -7309,53 +7352,83 @@ def _generate_report(project_id, template_path, data_file_path):
 
                     # Add data labels to Matplotlib chart if enabled (skip for area charts as they have custom label handling)
                     if show_data_labels and (data_label_format or value_format or data_label_font_size or data_label_color) and chart_type != "area":
-                        # current_app.logger.debug(f"Adding data labels to Matplotlib chart")
-                        for i, series in enumerate(series_data):
-                            series_type = series.get("type", "bar").lower()
-                            y_vals = series.get("values")
-                            value_range = series.get("value_range")
-                            if value_range:
-                                if isinstance(value_range, list):
-                                    y_vals = value_range
-                                else:
-                                    y_vals = extract_values_from_range(value_range)
-                            
-                            # Ensure y_vals is not None for data labels
-                            if y_vals is None:
-                                y_vals = []
-                            
-                            if y_vals and x_values:
-                                # Determine format to use
-                                format_to_use = value_format if value_format else data_label_format
-                                if not format_to_use:
-                                    format_to_use = ".1f"  # Default format
+                        # Special handling for stacked bars - process once before regular series loop
+                        if chart_type == "stacked_column" and hasattr(ax1, '_stacked_segments'):
+                            # Add data labels for each segment in stacked bars
+                            for segment in ax1._stacked_segments:
+                                seg_y_vals = segment['y_vals']
+                                seg_bottom_vals = segment['bottom_vals']
+                                seg_x_values = segment['x_values']
                                 
-                                # Add data labels based on chart type
-                                if series_type == "bar":
-                                    for j, val in enumerate(y_vals):
-                                        if j < len(x_values) if x_values else 0:
-                                            # Format the value
-                                            try:
-                                                if format_to_use == ".1f":
-                                                    formatted_val = f"{float(val):.1f}"
-                                                elif format_to_use == ".0f":
-                                                    formatted_val = f"{float(val):.0f}"
-                                                elif format_to_use == ".0%":
-                                                    formatted_val = f"{float(val):.0%}"
-                                                else:
-                                                    formatted_val = f"{float(val):{format_to_use}}"
-                                            except:
-                                                formatted_val = str(val)
-                                            
-                                            # Add text label on top of bar (ENHANCED VERSION)
-                                            label_color = data_label_color or '#000000'
-                                            ax1.text(j, val, formatted_val, 
-                                                    ha='center', va='bottom', 
-                                                    fontsize=data_label_font_size or int(title_fontsize * 0.9),  # Improved scaling
-                                                    color=label_color,
-                                                    fontweight='bold',
-                                                    bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
-                                            # current_app.logger.debug(f"Added bar data label with color: {label_color}")
+                                for j, (val, bottom) in enumerate(zip(seg_y_vals, seg_bottom_vals)):
+                                    if j < len(seg_x_values):
+                                        # Calculate center position of segment
+                                        segment_center = bottom + (val / 2)
+                                        
+                                        # Format value to 1 decimal place with % sign
+                                        try:
+                                            formatted_val = f"{float(val):.1f}%"
+                                        except:
+                                            formatted_val = f"{val}%"
+                                        
+                                        # Add text label at center of segment
+                                        label_color = data_label_color or '#000000'
+                                        ax1.text(j, segment_center, formatted_val, 
+                                                ha='center', va='center', 
+                                                fontsize=data_label_font_size or int(title_fontsize * 0.9),
+                                                color=label_color,
+                                                fontweight='bold',
+                                                bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
+                        else:
+                            # Regular bar/line chart data labels - process each series
+                            # current_app.logger.debug(f"Adding data labels to Matplotlib chart")
+                            for i, series in enumerate(series_data):
+                                series_type = series.get("type", "bar").lower()
+                                y_vals = series.get("values")
+                                value_range = series.get("value_range")
+                                if value_range:
+                                    if isinstance(value_range, list):
+                                        y_vals = value_range
+                                    else:
+                                        y_vals = extract_values_from_range(value_range)
+                                
+                                # Ensure y_vals is not None for data labels
+                                if y_vals is None:
+                                    y_vals = []
+                                
+                                if y_vals and x_values:
+                                    # Determine format to use
+                                    format_to_use = value_format if value_format else data_label_format
+                                    if not format_to_use:
+                                        format_to_use = ".1f"  # Default format
+                                    
+                                    # Add data labels based on chart type
+                                    if series_type == "bar":
+                                        # Regular bar chart data labels
+                                        for j, val in enumerate(y_vals):
+                                            if j < len(x_values) if x_values else 0:
+                                                # Format the value
+                                                try:
+                                                    if format_to_use == ".1f":
+                                                        formatted_val = f"{float(val):.1f}"
+                                                    elif format_to_use == ".0f":
+                                                        formatted_val = f"{float(val):.0f}"
+                                                    elif format_to_use == ".0%":
+                                                        formatted_val = f"{float(val):.0%}"
+                                                    else:
+                                                        formatted_val = f"{float(val):{format_to_use}}"
+                                                except:
+                                                    formatted_val = str(val)
+                                                
+                                                # Add text label on top of bar (ENHANCED VERSION)
+                                                label_color = data_label_color or '#000000'
+                                                ax1.text(j, val, formatted_val, 
+                                                        ha='center', va='bottom', 
+                                                        fontsize=data_label_font_size or int(title_fontsize * 0.9),  # Improved scaling
+                                                        color=label_color,
+                                                        fontweight='bold',
+                                                        bbox=dict(boxstyle="round,pad=0.2", facecolor='white', alpha=0.9))
+                                                # current_app.logger.debug(f"Added bar data label with color: {label_color}")
                                 
                                 elif series_type == "line":
                                     for j, val in enumerate(y_vals):
