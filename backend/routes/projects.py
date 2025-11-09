@@ -372,8 +372,71 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
     import openpyxl
     from openpyxl.utils import get_column_letter, column_index_from_string
     
+    def parse_range_value(value_str):
+        """
+        Parse range strings like '35% - 40%', '25%-30%', '5%-10%', '<4%' etc.
+        Returns the midpoint as a float, or None if not a valid range.
+        """
+        if not isinstance(value_str, str):
+            return None
+        
+        value_str = value_str.strip()
+        
+        # Pattern 1: "X% - Y%" or "X%-Y%" (range with dash)
+        range_pattern = r'(\d+(?:\.\d+)?)\s*%?\s*-\s*(\d+(?:\.\d+)?)\s*%?'
+        match = re.match(range_pattern, value_str)
+        if match:
+            lower = float(match.group(1))
+            upper = float(match.group(2))
+            midpoint = (lower + upper) / 2
+            return midpoint
+        
+        # Pattern 2: "<X%" (less than - use half of the value as approximation)
+        less_than_pattern = r'<\s*(\d+(?:\.\d+)?)\s*%?'
+        match = re.match(less_than_pattern, value_str)
+        if match:
+            upper = float(match.group(1))
+            midpoint = upper / 2  # Use half as the midpoint
+            return midpoint
+        
+        # Pattern 3: ">X%" (greater than - use value * 1.5 as approximation)
+        greater_than_pattern = r'>\s*(\d+(?:\.\d+)?)\s*%?'
+        match = re.match(greater_than_pattern, value_str)
+        if match:
+            lower = float(match.group(1))
+            midpoint = lower * 1.5  # Use 1.5x as approximation
+            return midpoint
+        
+        return None
+    
+    def normalize_values_to_100(values):
+        """
+        Normalize a list of numeric values so they sum to 100.
+        Used for pie charts to ensure proper percentage display.
+        """
+        try:
+            # Filter out non-numeric values
+            numeric_values = [float(v) for v in values if isinstance(v, (int, float)) and v is not None]
+            
+            if not numeric_values:
+                return values
+            
+            total = sum(numeric_values)
+            
+            # If total is 0, return original values
+            if total == 0:
+                return values
+            
+            # Normalize to sum to 100
+            normalized = [(v / total) * 100 for v in numeric_values]
+            
+            return normalized
+        except Exception as e:
+            print(f"Error normalizing values: {e}")
+            return values
+    
     def extract_excel_range(sheet, cell_range):
-        """Extract values from Excel cell range, preserving percentage values"""
+        """Extract values from Excel cell range, preserving percentage values and parsing range strings"""
         try:
             # Parse the range (e.g., "A1:B3")
             if ':' in cell_range:
@@ -389,9 +452,20 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
                         cell = sheet.cell(row=row + 1, column=col + 1)
                         cell_value = cell.value
                         if cell_value is not None:
+                            # Check if cell value is a string range (e.g., "35% - 40%")
+                            if isinstance(cell_value, str):
+                                parsed_value = parse_range_value(cell_value)
+                                if parsed_value is not None:
+                                    cell_value = parsed_value
+                                else:
+                                    # Try to convert string to float if possible
+                                    try:
+                                        cell_value = float(cell_value.replace('%', '').strip())
+                                    except:
+                                        pass
                             # Check if cell has percentage format and preserve percentage value
                             # Excel stores percentages as decimals (0.666 = 66.6%), so we need to multiply by 100
-                            if isinstance(cell_value, (int, float)):
+                            elif isinstance(cell_value, (int, float)):
                                 cell_format = cell.number_format
                                 if cell_format and '%' in str(cell_format):
                                     # If value is between 0 and 1, it's likely a percentage stored as decimal
@@ -406,11 +480,22 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
                 row = int(re.sub(r'[A-Z]+', '', cell_range)) - 1
                 cell = sheet.cell(row=row + 1, column=col + 1)
                 cell_value = cell.value
-                if cell_value is not None and isinstance(cell_value, (int, float)):
-                    cell_format = cell.number_format
-                    if cell_format and '%' in str(cell_format):
-                        if 0 <= cell_value <= 1:
-                            cell_value = cell_value * 100
+                if cell_value is not None:
+                    # Check if cell value is a string range
+                    if isinstance(cell_value, str):
+                        parsed_value = parse_range_value(cell_value)
+                        if parsed_value is not None:
+                            cell_value = parsed_value
+                        else:
+                            try:
+                                cell_value = float(cell_value.replace('%', '').strip())
+                            except:
+                                pass
+                    elif isinstance(cell_value, (int, float)):
+                        cell_format = cell.number_format
+                        if cell_format and '%' in str(cell_format):
+                            if 0 <= cell_value <= 1:
+                                cell_value = cell_value * 100
                 return [cell_value] if cell_value is not None else []
         except Exception as e:
             print(f"Error extracting Excel range {cell_range}: {e}")
@@ -439,6 +524,8 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
             wb = openpyxl.load_workbook(data_file_path, data_only=True)
             sheet = wb[chart_meta.get("source_sheet", "sample")]
             overall_values = extract_excel_range(sheet, overall_values)
+            # Normalize values to sum to 100 for pie charts
+            overall_values = normalize_values_to_100(overall_values)
             wb.close()
         except Exception as e:
             print(f"Error extracting overall_values from Excel: {e}")
@@ -447,6 +534,8 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
     if not overall_labels and not overall_values and overall_data:
         overall_labels = [item.get("label", "") for item in overall_data]
         overall_values = [item.get("value", 0) for item in overall_data]
+        # Normalize values to sum to 100 for pie charts
+        overall_values = normalize_values_to_100(overall_values)
     
     # Extract other breakdown data - check for Excel cell references first
     other_data = data.get("other_breakdown", [])
@@ -468,6 +557,8 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
             wb = openpyxl.load_workbook(data_file_path, data_only=True)
             sheet = wb[chart_meta.get("source_sheet", "sample")]
             other_values = extract_excel_range(sheet, other_values)
+            # Normalize values to sum to 100 for pie charts
+            other_values = normalize_values_to_100(other_values)
             wb.close()
         except Exception as e:
             print(f"Error extracting other_values from Excel: {e}")
@@ -476,6 +567,8 @@ def convert_chatgpt_json_to_bar_of_pie_format(chatgpt_json, data_file_path=None)
     if not other_labels and not other_values and other_data:
         other_labels = [item.get("label", "") for item in other_data]
         other_values = [item.get("value", 0) for item in other_data]
+        # Normalize values to sum to 100 for pie charts
+        other_values = normalize_values_to_100(other_values)
     
     # Process cell references in chart_meta attributes
     if data_file_path:
@@ -2814,6 +2907,43 @@ def _generate_report(project_id, template_path, data_file_path):
                 barmode = data_dict.get("barmode") or chart_config.get("barmode") or chart_meta.get("barmode")
 
                 # --- Excel range extraction helpers ---
+                def parse_range_value(value_str):
+                    """
+                    Parse range strings like '35% - 40%', '25%-30%', '5%-10%', '<4%' etc.
+                    Returns the midpoint as a float, or None if not a valid range.
+                    """
+                    if not isinstance(value_str, str):
+                        return None
+                    
+                    value_str = value_str.strip()
+                    
+                    # Pattern 1: "X% - Y%" or "X%-Y%" (range with dash)
+                    range_pattern = r'(\d+(?:\.\d+)?)\s*%?\s*-\s*(\d+(?:\.\d+)?)\s*%?'
+                    match = re.match(range_pattern, value_str)
+                    if match:
+                        lower = float(match.group(1))
+                        upper = float(match.group(2))
+                        midpoint = (lower + upper) / 2
+                        return midpoint
+                    
+                    # Pattern 2: "<X%" (less than - use half of the value as approximation)
+                    less_than_pattern = r'<\s*(\d+(?:\.\d+)?)\s*%?'
+                    match = re.match(less_than_pattern, value_str)
+                    if match:
+                        upper = float(match.group(1))
+                        midpoint = upper / 2  # Use half as the midpoint
+                        return midpoint
+                    
+                    # Pattern 3: ">X%" (greater than - use value * 1.5 as approximation)
+                    greater_than_pattern = r'>\s*(\d+(?:\.\d+)?)\s*%?'
+                    match = re.match(greater_than_pattern, value_str)
+                    if match:
+                        lower = float(match.group(1))
+                        midpoint = lower * 1.5  # Use 1.5x as approximation
+                        return midpoint
+                    
+                    return None
+                
                 def extract_excel_range(sheet, cell_range):
                     # cell_range: e.g., 'E23:E29' or 'AA20:AA23'
                     try:
@@ -2823,9 +2953,21 @@ def _generate_report(project_id, template_path, data_file_path):
                             for cell in row:
                                 if cell.value is not None:
                                     cell_value = cell.value
+                                    # Check if cell value is a string range (e.g., "35% - 40%")
+                                    if isinstance(cell_value, str):
+                                        parsed_value = parse_range_value(cell_value)
+                                        if parsed_value is not None:
+                                            cell_value = parsed_value
+                                            current_app.logger.debug(f"🔍 Cell {cell.coordinate}: Parsed range '{cell.value}' -> {cell_value}")
+                                        else:
+                                            # Try to convert string to float if possible
+                                            try:
+                                                cell_value = float(cell_value.replace('%', '').strip())
+                                            except:
+                                                pass
                                     # Check if cell has percentage format and preserve percentage value
                                     # Excel stores percentages as decimals (0.666 = 66.6%), so we need to multiply by 100
-                                    if isinstance(cell_value, (int, float)):
+                                    elif isinstance(cell_value, (int, float)):
                                         # Check if cell number format contains '%' (percentage format)
                                         cell_format = cell.number_format
                                         if cell_format and '%' in str(cell_format):
@@ -2844,20 +2986,21 @@ def _generate_report(project_id, template_path, data_file_path):
                         return []
 
                 # --- Robust recursive Excel cell range and single cell extraction for all chart types and fields ---
-                def extract_cell_ranges(obj, sheet):
+                def extract_cell_ranges(obj, sheet, path="root"):
                     """Recursively walk through nested dicts/lists and extract cell ranges and single cells from strings"""
                     if isinstance(obj, dict):
                         for k, v in obj.items():
+                            current_path = f"{path}.{k}"
                             if isinstance(v, str):
                                 # Check for cell range pattern (e.g., "A1:B10")
                                 if re.match(r"^[A-Z]+\d+:[A-Z]+\d+$", v):
                                     try:
                                         extracted = extract_excel_range(sheet, v)
                                         obj[k] = extracted
-                                        current_app.logger.debug(f"🔍 Excel extraction: {k} = {v} -> {extracted}")
+                                        current_app.logger.info(f"✅ Excel extraction: {current_path} = {v} -> {extracted}")
                                     except Exception as e:
                                         # Failed to extract data from cell range
-                                        current_app.logger.error(f"❌ Failed to extract Excel range {v} for key {k}: {e}")
+                                        current_app.logger.error(f"❌ Failed to extract Excel range {v} for key {current_path}: {e}")
                                         pass
                                 # Check for single cell pattern (e.g., "U13")
                                 elif re.match(r"^[A-Z]+\d+$", v):
@@ -2865,27 +3008,29 @@ def _generate_report(project_id, template_path, data_file_path):
                                         cell_value = sheet[v].value
                                         if cell_value is not None:
                                             obj[k] = cell_value
+                                            current_app.logger.info(f"✅ Excel extraction: {current_path} = {v} -> {cell_value}")
                                         else:
                                             # Keep original value if cell is empty
+                                            current_app.logger.warning(f"⚠️ Cell {v} is empty at {current_path}")
                                             pass
                                     except Exception as e:
                                         # Failed to extract data from single cell
+                                        current_app.logger.error(f"❌ Failed to extract cell {v} at {current_path}: {e}")
                                         pass
                             else:
-                                extract_cell_ranges(v, sheet)
+                                extract_cell_ranges(v, sheet, current_path)
                     elif isinstance(obj, list):
                         for i, v in enumerate(obj):
-                            extract_cell_ranges(v, sheet)
+                            extract_cell_ranges(v, sheet, f"{path}[{i}]")
                 
                 if "source_sheet" in chart_meta:
                     wb = openpyxl.load_workbook(data_file_path, data_only=True)
                     sheet = wb[chart_meta["source_sheet"]]
                     
                     # Validate chart configuration before extraction
-                    def validate_chart_config(config):
+                    def validate_chart_config(series_config):
                         """Validate chart configuration for dimension consistency"""
-                        if "series" in config and isinstance(config["series"], dict):
-                            series_config = config["series"]
+                        if series_config and isinstance(series_config, dict):
                             x_axis_range = series_config.get("x_axis", "")
                             
                             if x_axis_range and isinstance(x_axis_range, str) and ":" in x_axis_range:
@@ -2937,22 +3082,23 @@ def _generate_report(project_id, template_path, data_file_path):
                                 except Exception as e:
                                     current_app.logger.error(f"❌ Error parsing x_axis range {x_axis_range}: {e}")
                     
-                    # Validate chart configuration
-                    validate_chart_config(chart_meta)
+                    # Validate chart configuration (pass series_meta which contains x_axis)
+                    validate_chart_config(series_meta)
                     
                     # Extract cell ranges from both chart_meta and series_meta
-                    current_app.logger.debug(f"🔍 Starting Excel cell range extraction from: {data_file_path}")
-                    current_app.logger.debug(f"🔍 Using sheet: {chart_meta.get('source_sheet', 'sample')}")
+                    current_app.logger.info(f"🔍 Starting Excel cell range extraction from: {data_file_path}")
+                    current_app.logger.info(f"🔍 Using sheet: {chart_meta.get('source_sheet', 'sample')}")
                     
-                    current_app.logger.debug(f"🔍 Extracting from chart_meta...")
-                    extract_cell_ranges(chart_meta, sheet)
-                    current_app.logger.debug(f"🔍 Extracting from series_meta...")
-                    extract_cell_ranges(series_meta, sheet)
+                    current_app.logger.info(f"🔍 Extracting from chart_meta...")
+                    extract_cell_ranges(chart_meta, sheet, "chart_meta")
+                    current_app.logger.info(f"🔍 Extracting from series_meta...")
+                    extract_cell_ranges(series_meta, sheet, "series_meta")
                     wb.close()
                     
                     # Log the extracted data for debugging
-                    current_app.logger.debug(f"🔍 Chart meta after extraction: {chart_meta}")
-                    current_app.logger.debug(f"🔍 Series meta after extraction: {series_meta}")
+                    current_app.logger.info(f"✅ Chart meta after extraction: {chart_meta}")
+                    current_app.logger.info(f"✅ Series meta after extraction: {series_meta}")
+                    current_app.logger.info(f"✅ Series meta x_axis value: {series_meta.get('x_axis', 'NOT FOUND')}")
                 
                 # Use updated values from series_meta after extraction
                 series_data = series_meta.get("data", [])
@@ -2969,17 +3115,17 @@ def _generate_report(project_id, template_path, data_file_path):
                 # Ensure Excel cell ranges are extracted from series data regardless of source
                 if series_data and data_file_path:
                     try:
-                        current_app.logger.debug(f"🔍 Extracting Excel cell ranges from series data...")
+                        current_app.logger.info(f"🔍 Extracting Excel cell ranges from series data...")
                         wb = openpyxl.load_workbook(data_file_path, data_only=True)
                         sheet = wb[chart_meta.get("source_sheet", "sample")]
                         # Extract cell ranges from the series data
                         for i, series in enumerate(series_data):
                             if isinstance(series, dict):
-                                current_app.logger.debug(f"🔍 Processing series {i+1}: {series}")
-                                extract_cell_ranges(series, sheet)
-                                current_app.logger.debug(f"🔍 Series {i+1} after extraction: {series}")
+                                current_app.logger.info(f"🔍 Processing series {i+1}: {series}")
+                                extract_cell_ranges(series, sheet, f"series_data[{i}]")
+                                current_app.logger.info(f"🔍 Series {i+1} after extraction: {series}")
                         wb.close()
-                        current_app.logger.debug(f"🔍 Extracted Excel cell ranges from series data")
+                        current_app.logger.info(f"🔍 Extracted Excel cell ranges from series data")
                     except Exception as e:
                         current_app.logger.error(f"❌ Error extracting Excel cell ranges from series data: {e}")
                 
@@ -3015,12 +3161,25 @@ def _generate_report(project_id, template_path, data_file_path):
                     # For heatmaps, don't use x_axis from series - let the heatmap handle its own axis labels
                     x_values = []
                 
-                # current_app.logger.info(f"🔍 Extracted x_values: {x_values}")
+                current_app.logger.info(f"🔍 Extracted x_values (raw): {x_values} (type: {type(x_values)})")
                 
                 # Ensure x_values is always defined to prevent "cannot access local variable" error
                 if not x_values:
                     x_values = []
-                    # No x_values found, using empty list as fallback
+                    current_app.logger.info(f"⚠️ No x_values found, using empty list as fallback")
+                
+                # If x_values is still a string (cell range not extracted), extract it now
+                if isinstance(x_values, str) and re.match(r"^[A-Z]+\d+:[A-Z]+\d+$", x_values):
+                    current_app.logger.warning(f"⚠️ x_values is still a cell range string: {x_values}. Extracting now...")
+                    try:
+                        wb = openpyxl.load_workbook(data_file_path, data_only=True)
+                        sheet = wb[chart_meta.get("source_sheet", "sample")]
+                        x_values = extract_excel_range(sheet, x_values)
+                        wb.close()
+                        current_app.logger.info(f"✅ Converted x_axis from cell range to values: {x_values}")
+                    except Exception as e:
+                        current_app.logger.error(f"❌ Error converting x_axis cell range '{x_values}': {e}")
+                        x_values = []
                 
                 # Validate and fix dimension mismatches
                 def validate_and_fix_dimensions(x_vals, series_data):
@@ -3265,12 +3424,48 @@ def _generate_report(project_id, template_path, data_file_path):
                             x_vals, y_vals = zip(*sorted_pairs)
                     return list(x_vals), list(y_vals)
 
+                # Helper function to normalize values to sum to 100
+                def normalize_values_to_100(values):
+                    """
+                    Normalize a list of numeric values so they sum to 100.
+                    Used for pie charts to ensure proper percentage display.
+                    """
+                    try:
+                        # Filter out non-numeric values
+                        numeric_values = [float(v) for v in values if isinstance(v, (int, float)) and v is not None]
+                        
+                        if not numeric_values:
+                            return values
+                        
+                        total = sum(numeric_values)
+                        
+                        # If total is 0, return original values
+                        if total == 0:
+                            return values
+                        
+                        # Normalize to sum to 100
+                        normalized = [(v / total) * 100 for v in numeric_values]
+                        
+                        return normalized
+                    except Exception as e:
+                        current_app.logger.error(f"Error normalizing values: {e}")
+                        return values
+                
                 # Special handling for pie charts and treemaps (single trace)
                 if (chart_type == "pie" or chart_type == "treemap") and len(series_data) == 1:
                     series = series_data[0]
                     label = series.get("name", "Pie Chart")
                     labels = series.get("labels", x_values)
                     values = series.get("values", [])
+                    
+                    # Normalize pie chart values to sum to 100%
+                    if chart_type == "pie" and values:
+                        current_app.logger.debug(f"🔍 Original pie values: {values}")
+                        values = normalize_values_to_100(values)
+                        current_app.logger.debug(f"🔍 Normalized pie values: {values}")
+                        # Update the series with normalized values
+                        series["values"] = values
+                    
                     color = series.get("marker", {}).get("colors") if "marker" in series else colors
                     
                     # Apply value format if specified
@@ -4199,6 +4394,11 @@ def _generate_report(project_id, template_path, data_file_path):
                             series = series_data[0]
                             labels = series.get("labels", x_values)
                             values = series.get("values", [])
+                            
+                            # Normalize pie chart values to sum to 100% (for matplotlib fallback)
+                            if chart_type == "pie" and values:
+                                values = normalize_values_to_100(values)
+                            
                             color = series.get("marker", {}).get("colors") if "marker" in series else colors
                             marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
                             explode = series.get("pull")
@@ -5275,6 +5475,11 @@ def _generate_report(project_id, template_path, data_file_path):
                             series = series_data[0]
                             labels = series.get("labels", x_values)
                             values = series.get("values", [])
+                            
+                            # Normalize pie chart values to sum to 100% (for matplotlib fallback)
+                            if chart_type == "pie" and values:
+                                values = normalize_values_to_100(values)
+                            
                             color = series.get("marker", {}).get("colors") if "marker" in series else colors
                             marker_line = series.get("marker", {}).get("line", {}) if "marker" in series else {}
                             explode = series.get("pull")
