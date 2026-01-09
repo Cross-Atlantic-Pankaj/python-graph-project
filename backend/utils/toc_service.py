@@ -968,12 +968,14 @@ def find_all_headings_and_sections(doc):
                     
                     if is_bold:
                         # Check if it looks like a section heading
-                        # Pattern 1: Numbers (1., 1.1, 1.1.1, etc.)
-                        if re.match(r'^\d+(\.\d+)*\.?\s+', para_text):
+                        # Pattern 1: Numbers (1., 1.1, 1.1.1, etc.) - improved pattern
+                        numbered_match = re.match(r'^(\d+(?:\.\d+)*)\.?\s+(.+)', para_text)
+                        if numbered_match:
                             is_heading = True
                             heading_type = "numbered"
-                            # Count dots to determine level
-                            dots = para_text.split()[0].count('.')
+                            # Count dots to determine level (1. = level 1, 1.1 = level 2, 1.1.1 = level 3, etc.)
+                            number_part = numbered_match.group(1)
+                            dots = number_part.count('.')
                             heading_level = min(6, dots + 1)
                         
                         # Pattern 2: Roman numerals (I., II., III., etc.)
@@ -996,28 +998,88 @@ def find_all_headings_and_sections(doc):
                 except:
                     pass
             
-            # Method 4: Check for common section keywords
+            # Method 3b: Check for numbered sections even if not bold (common in reports)
+            if not is_heading and len(para_text) < 100:
+                try:
+                    # Pattern: Numbers at start (1., 1.1, 1.1.1, etc.) even without bold
+                    numbered_match = re.match(r'^(\d+(?:\.\d+)*)\.?\s+(.+)', para_text)
+                    if numbered_match:
+                        # Check if it's formatted as a heading (larger font, different style, etc.)
+                        is_formatted = False
+                        for run in para.runs:
+                            if (hasattr(run.font, 'size') and run.font.size and run.font.size.pt > 11) or \
+                               (hasattr(run.font, 'bold') and run.font.bold):
+                                is_formatted = True
+                                break
+                        
+                        # Also check if paragraph style suggests it's a heading
+                        style_name_lower = para.style.name.lower()
+                        if 'heading' in style_name_lower or 'title' in style_name_lower:
+                            is_formatted = True
+                        
+                        if is_formatted:
+                            is_heading = True
+                            heading_type = "numbered"
+                            number_part = numbered_match.group(1)
+                            dots = number_part.count('.')
+                            heading_level = min(6, dots + 1)
+                except:
+                    pass
+            
+            # Method 4: Check for common section keywords (improved to catch subsections)
             if not is_heading:
                 section_keywords = [
                     'introduction', 'background', 'methodology', 'results', 'discussion',
                     'conclusion', 'references', 'appendix', 'summary', 'abstract',
                     'executive summary', 'table of contents', 'list of figures',
-                    'acknowledgments', 'bibliography'
+                    'acknowledgments', 'bibliography', 'about this report',
+                    'bnpl definitions', 'disclaimer', 'gross merchandise value',
+                    'average value per transaction', 'transaction volume', 'market share',
+                    'operational kpis', 'revenues', 'active consumer base', 'bad debt',
+                    'spend analysis', 'business model', 'purpose', 'merchant ecosystem',
+                    'distribution model', 'convenience', 'credit', 'open loop', 'closed loop',
+                    'standalone', 'banks & payment service providers'
                 ]
                 
-                if any(keyword in para_text.lower() for keyword in section_keywords):
+                para_lower = para_text.lower()
+                matched_keyword = None
+                for keyword in section_keywords:
+                    # Check if keyword appears at the start or as a standalone word
+                    if para_lower.startswith(keyword) or \
+                       re.search(r'^\d+(\.\d+)*\.?\s*' + re.escape(keyword), para_lower) or \
+                       re.search(r'\b' + re.escape(keyword) + r'\b', para_lower):
+                        matched_keyword = keyword
+                        break
+                
+                if matched_keyword:
                     # Check if it's formatted differently (bold, larger font, etc.)
                     try:
                         is_formatted = False
                         for run in para.runs:
-                            if run.bold or (hasattr(run.font, 'size') and run.font.size and run.font.size.pt > 12):
+                            if run.bold or (hasattr(run.font, 'size') and run.font.size and run.font.size.pt > 11):
                                 is_formatted = True
                                 break
                         
-                        if is_formatted:
+                        # Also check paragraph style
+                        style_name_lower = para.style.name.lower()
+                        if 'heading' in style_name_lower or 'title' in style_name_lower:
+                            is_formatted = True
+                        
+                        if is_formatted or len(para_text) < 80:  # Short paragraphs are likely headings
                             is_heading = True
                             heading_type = "keyword"
-                            heading_level = 2
+                            # Determine level based on whether it has a section number
+                            if re.match(r'^\d+(\.\d+)+', para_text):
+                                # Has subsection number (e.g., 1.1, 1.2)
+                                number_part = re.match(r'^(\d+(?:\.\d+)+)', para_text).group(1)
+                                dots = number_part.count('.')
+                                heading_level = min(6, dots + 1)
+                            elif re.match(r'^\d+\.', para_text):
+                                # Has main section number (e.g., 1., 2.)
+                                heading_level = 1
+                            else:
+                                # No section number, assume level 2
+                                heading_level = 2
                     except:
                         pass
             
@@ -1041,9 +1103,19 @@ def find_all_headings_and_sections(doc):
         return []
 
 
-def find_all_figures_and_tables(doc):
+def find_all_figures_and_tables(doc, cover_page_end_idx=0, toc_pages=0, lof_pages=0, lot_pages=0):
     """
     Find all figures and tables in the document for List of Figures and List of Tables.
+    ONLY detects from captions with exact format: "Figure 1: title" and "Table 1: title"
+    WITH DEDUPLICATION to prevent duplicates.
+    Checks both standalone paragraphs AND paragraphs inside table cells.
+    
+    Args:
+        doc: Document object
+        cover_page_end_idx: Index of last paragraph on cover page (to skip)
+        toc_pages: Number of pages used by Table of Contents
+        lof_pages: Number of pages used by List of Figures
+        lot_pages: Number of pages used by List of Tables
     
     Returns:
         tuple: (figures_list, tables_list) where each is a list of dicts with 'text', 'page', 'type'
@@ -1051,6 +1123,8 @@ def find_all_figures_and_tables(doc):
     try:
         figures = []
         tables = []
+        seen_figures = set()  # Track seen figure numbers to prevent duplicates
+        seen_tables = set()   # Track seen table numbers to prevent duplicates
         namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
         
         # Get document settings for page calculation
@@ -1058,125 +1132,244 @@ def find_all_figures_and_tables(doc):
         avg_line_height = doc_settings['default_font_size'] * doc_settings['line_spacing']
         lines_per_page = doc_settings['usable_height'] / avg_line_height
         
-        # Track current position
-        current_page = 1
+        # Track current position - start after cover page + TOC + LOF + LOT
+        # Main content starts on page 2 + toc_pages + lof_pages + lot_pages
+        current_page = 2 + toc_pages + lof_pages + lot_pages
         current_line_position = 0
         
-        # Find figures and tables in paragraphs
-        for para_idx, para in enumerate(doc.paragraphs):
-            para_text = para.text.strip()
+        # Helper function to process a paragraph for captions
+        def process_paragraph_for_captions(para, para_idx, is_in_table=False):
+            nonlocal current_page, current_line_position
             
-            if para_text:
-                # Calculate lines used by this paragraph
-                lines_used = analyze_paragraph_layout(para, doc_settings)
+            # IMPROVED: Get all text from all runs to handle split formatting
+            para_text = ""
+            try:
+                # Try to get text from all runs (handles split formatting)
+                for run in para.runs:
+                    if run.text:
+                        para_text += run.text
+            except:
+                # Fallback to para.text if runs don't work
+                para_text = para.text if para.text else ""
+            
+            para_text = para_text.strip()
+            
+            if not para_text:
+                return
+            
+            # ENHANCED DEBUG: Log ALL paragraphs that contain "figure" or "fig" (not just first 100)
+            if 'figure' in para_text.lower() or 'fig' in para_text.lower():
+                location = "table cell" if is_in_table else f"paragraph {para_idx}"
+                current_app.logger.info(f"🔍 [FIGURE DETECTION] Checking {location}: '{para_text[:150]}...'")
                 
-                # Check for explicit page breaks
+                # ENHANCED: Also log individual runs to see if number is in separate run
                 try:
-                    para_xml = etree.fromstring(etree.tostring(para._element))
-                    page_breaks = para_xml.xpath('.//w:br[@w:type="page"]', namespaces=namespaces)
-                    if page_breaks:
-                        current_page += 1
-                        current_line_position = 0
+                    run_texts = [run.text for run in para.runs if run.text]
+                    if len(run_texts) > 1:
+                        current_app.logger.info(f"   📝 Individual runs: {run_texts}")
                 except:
                     pass
-                
-                # Check if this paragraph contains figure references
-                figure_patterns = [
-                    r'figure\s+(\d+(?:\.\d+)*)[:\s]*(.*?)(?:\n|$)',
-                    r'fig\s+(\d+(?:\.\d+)*)[:\s]*(.*?)(?:\n|$)',
-                    r'chart\s+(\d+(?:\.\d+)*)[:\s]*(.*?)(?:\n|$)',
-                    r'graph\s+(\d+(?:\.\d+)*)[:\s]*(.*?)(?:\n|$)',
-                    r'diagram\s+(\d+(?:\.\d+)*)[:\s]*(.*?)(?:\n|$)'
-                ]
-                
-                for pattern in figure_patterns:
-                    matches = re.finditer(pattern, para_text, re.IGNORECASE)
-                    for match in matches:
-                        figure_num = match.group(1)
-                        figure_title = match.group(2).strip()
-                        if not figure_title:
-                            figure_title = f"Figure {figure_num}"
-                        
-                        page_num = current_page
-                        if current_line_position + lines_used > lines_per_page:
-                            page_num = current_page + 1
-                        
-                        figures.append({
-                            'text': f"Figure {figure_num}: {figure_title}",
-                            'page': page_num,
-                            'type': 'figure',
-                            'number': figure_num
-                        })
-                        current_app.logger.debug(f"📊 Found figure: Figure {figure_num} -> Page {page_num}")
-                
-                # Check if this paragraph contains table references
-                table_patterns = [
-                    r'table\s+(\d+(?:\.\d+)*)[:\s]*(.*?)(?:\n|$)',
-                    r'tbl\s+(\d+(?:\.\d+)*)[:\s]*(.*?)(?:\n|$)'
-                ]
-                
-                for pattern in table_patterns:
-                    matches = re.finditer(pattern, para_text, re.IGNORECASE)
-                    for match in matches:
-                        table_num = match.group(1)
-                        table_title = match.group(2).strip()
-                        if not table_title:
-                            table_title = f"Table {table_num}"
-                        
-                        page_num = current_page
-                        if current_line_position + lines_used > lines_per_page:
-                            page_num = current_page + 1
-                        
-                        tables.append({
-                            'text': f"Table {table_num}: {table_title}",
-                            'page': page_num,
-                            'type': 'table',
-                            'number': table_num
-                        })
-                        current_app.logger.debug(f"📋 Found table: Table {table_num} -> Page {page_num}")
-                
-                # Update position
-                current_line_position += lines_used
-                
-                # Check if we need to go to next page
-                if current_line_position >= lines_per_page:
-                    pages_to_add = int(current_line_position / lines_per_page)
-                    current_page += pages_to_add
-                    current_line_position = current_line_position % lines_per_page
-        
-        # Also check actual table elements in the document
-        for table_idx, table in enumerate(doc.tables):
-            # Estimate page for this table
-            estimated_page = max(1, current_page - 5)  # Tables are usually recent
             
-            # Look for table caption in cells
-            table_caption = None
-            for row in table.rows:
-                for cell in row.cells:
-                    for cell_para in cell.paragraphs:
-                        cell_text = cell_para.text.strip()
-                        if cell_text and ('table' in cell_text.lower() or len(cell_text) > 20):
-                            # This might be a table caption
-                            if not table_caption or len(cell_text) > len(table_caption):
-                                table_caption = cell_text
+            # Calculate lines used by this paragraph
+            lines_used = analyze_paragraph_layout(para, doc_settings)
             
-            if not table_caption:
-                table_caption = f"Table {table_idx + 1}"
+            # Check for explicit page breaks
+            try:
+                para_xml = etree.fromstring(etree.tostring(para._element))
+                page_breaks = para_xml.xpath('.//w:br[@w:type="page"]', namespaces=namespaces)
+                if page_breaks:
+                    current_page += 1
+                    current_line_position = 0
+            except:
+                pass
             
-            # Check if we already found this table
-            table_exists = any(t['text'].lower() in table_caption.lower() or 
-                             table_caption.lower() in t['text'].lower() for t in tables)
+            # IMPROVED: More flexible pattern that handles various formats
+            # Matches: "Figure 1: title", "Figure 1. title", "Fig 1: title", etc.
+            # Captures everything after colon/period until end of line or end of string
+            figure_pattern = r'(?:^|\s)(?:figure|fig)\.?\s+(\d+)\s*[:.]\s*(.+?)(?:\n|$)'
+            figure_matches = re.finditer(figure_pattern, para_text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
             
-            if not table_exists:
-                tables.append({
-                    'text': table_caption,
-                    'page': estimated_page,
-                    'type': 'table',
-                    'number': str(table_idx + 1)
+            match_found = False
+            for match in figure_matches:
+                match_found = True
+                figure_num = match.group(1)
+                figure_title = match.group(2).strip()
+                
+                current_app.logger.info(f"🎯 [FIGURE MATCH] Found potential figure: '{match.group(0)[:100]}...' -> Number: {figure_num}, Title: '{figure_title[:50]}...'")
+                
+                # Skip if already seen (deduplication)
+                if figure_num in seen_figures:
+                    current_app.logger.debug(f"⏭️ Skipping duplicate figure: Figure {figure_num}")
+                    continue
+                
+                # Clean up title (remove quotes if present, handle trailing punctuation)
+                figure_title = figure_title.strip('"').strip("'").strip().rstrip('.,;:')
+                if not figure_title:
+                    figure_title = f"Figure {figure_num}"
+                
+                # Calculate page number (already accounts for front matter via current_page)
+                page_num = current_page
+                if current_line_position + lines_used > lines_per_page:
+                    page_num = current_page + 1
+                
+                # Ensure page number accounts for front matter
+                min_page = 2 + toc_pages + lof_pages + lot_pages
+                if page_num < min_page:
+                    page_num = min_page
+                
+                figures.append({
+                    'text': f"Figure {figure_num}: {figure_title}",
+                    'page': page_num,
+                    'type': 'figure',
+                    'number': figure_num
                 })
-                current_app.logger.debug(f"📋 Found table element: {table_caption[:40]}... -> Page {estimated_page}")
+                seen_figures.add(figure_num)
+                location = "table cell" if is_in_table else "paragraph"
+                current_app.logger.info(f"✅ [FIGURE ADDED] Figure {figure_num}: {figure_title[:50]}... -> Page {page_num} (from {location})")
+            
+            # FALLBACK: Handle "Figure :" (no number) - infer number from context
+            if ('figure' in para_text.lower() or 'fig' in para_text.lower()) and not match_found:
+                # Check for pattern "Figure :" or "Figure:" (with colon but no number)
+                fallback_pattern = r'(?:^|\s)(?:figure|fig)\.?\s*[:.]\s*(.+?)(?:\n|$)'
+                fallback_match = re.search(fallback_pattern, para_text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+                
+                if fallback_match:
+                    figure_title = fallback_match.group(1).strip()
+                    figure_title = figure_title.strip('"').strip("'").strip().rstrip('.,;:')
+                    
+                    if figure_title:
+                        # Infer figure number: if no figures seen yet, it's Figure 1
+                        # Otherwise, use the next number after the highest seen figure
+                        if len(seen_figures) == 0:
+                            inferred_num = "1"
+                        else:
+                            # Get the highest figure number seen and add 1
+                            try:
+                                max_num = max(int(num) for num in seen_figures if num.isdigit())
+                                inferred_num = str(max_num + 1)
+                            except (ValueError, TypeError):
+                                # If no valid numbers found, default to 1
+                                inferred_num = "1"
+                        
+                        # Only add if we haven't seen this number yet
+                        if inferred_num not in seen_figures:
+                            current_app.logger.warning(f"⚠️ [FIGURE FALLBACK] Found 'Figure :' without number, inferring Figure {inferred_num}: '{figure_title[:50]}...'")
+                            
+                            # Calculate page number
+                            page_num = current_page
+                            if current_line_position + lines_used > lines_per_page:
+                                page_num = current_page + 1
+                            
+                            min_page = 2 + toc_pages + lof_pages + lot_pages
+                            if page_num < min_page:
+                                page_num = min_page
+                            
+                            figures.append({
+                                'text': f"Figure {inferred_num}: {figure_title}",
+                                'page': page_num,
+                                'type': 'figure',
+                                'number': inferred_num
+                            })
+                            seen_figures.add(inferred_num)
+                            location = "table cell" if is_in_table else "paragraph"
+                            current_app.logger.info(f"✅ [FIGURE ADDED] Figure {inferred_num}: {figure_title[:50]}... -> Page {page_num} (from {location}, inferred)")
+                            match_found = True  # Mark as found so we don't log the warning below
+            
+            # If paragraph contains "figure" but no match was found, log why
+            if ('figure' in para_text.lower() or 'fig' in para_text.lower()) and not match_found:
+                current_app.logger.warning(f"⚠️ [FIGURE NOT MATCHED] Paragraph contains 'figure' but pattern didn't match: '{para_text[:150]}...'")
+                # Try to diagnose why
+                if 'figure' in para_text.lower():
+                    # Check if it has a number
+                    has_number = bool(re.search(r'figure\s+\d+', para_text, re.IGNORECASE))
+                    has_colon = ':' in para_text
+                    has_period = '.' in para_text
+                    current_app.logger.warning(f"   Diagnosis: has_number={has_number}, has_colon={has_colon}, has_period={has_period}")
+            
+            # IMPROVED: More flexible pattern for tables too
+            # Matches: "Table 1: title", "Table 1. title", etc.
+            table_pattern = r'(?:^|\s)table\.?\s+(\d+)\s*[:.]\s*(.+?)(?:\n|$)'
+            table_matches = re.finditer(table_pattern, para_text, re.IGNORECASE | re.MULTILINE | re.DOTALL)
+            
+            for match in table_matches:
+                table_num = match.group(1)
+                table_title = match.group(2).strip()
+                
+                # Skip if already seen (deduplication)
+                if table_num in seen_tables:
+                    current_app.logger.debug(f"⏭️ Skipping duplicate table: Table {table_num}")
+                    continue
+                
+                # Clean up title (remove quotes if present, handle trailing punctuation)
+                table_title = table_title.strip('"').strip("'").strip().rstrip('.,;:')
+                if not table_title:
+                    table_title = f"Table {table_num}"
+                
+                # Calculate page number (already accounts for front matter via current_page)
+                page_num = current_page
+                if current_line_position + lines_used > lines_per_page:
+                    page_num = current_page + 1
+                
+                # Ensure page number accounts for front matter
+                min_page = 2 + toc_pages + lof_pages + lot_pages
+                if page_num < min_page:
+                    page_num = min_page
+                
+                tables.append({
+                    'text': f"Table {table_num}: {table_title}",
+                    'page': page_num,
+                    'type': 'table',
+                    'number': table_num
+                })
+                seen_tables.add(table_num)
+                location = "table cell" if is_in_table else "paragraph"
+                current_app.logger.debug(f"📋 Found table in {location}: Table {table_num}: {table_title[:50]}... -> Page {page_num}")
+            
+            # Update position
+            current_line_position += lines_used
+            
+            # Check if we need to go to next page
+            if current_line_position >= lines_per_page:
+                pages_to_add = int(current_line_position / lines_per_page)
+                current_page += pages_to_add
+                current_line_position = current_line_position % lines_per_page
         
-        current_app.logger.info(f"✅ Found {len(figures)} figures and {len(tables)} tables")
+        # Step 1: Check standalone paragraphs (skip cover page)
+        current_app.logger.info(f"🔍 Starting figure detection: Processing paragraphs after cover page (cover_page_end_idx={cover_page_end_idx})")
+        for para_idx, para in enumerate(doc.paragraphs):
+            # Skip cover page paragraphs
+            if para_idx <= cover_page_end_idx:
+                continue
+            
+            # Check if this paragraph is a TOC/LOF/LOT field (skip it)
+            is_toc_field = False
+            try:
+                para_xml = etree.fromstring(etree.tostring(para._element))
+                instr_texts = para_xml.xpath('.//w:instrText', namespaces=namespaces)
+                for instr in instr_texts:
+                    if instr.text and instr.text.strip().upper().startswith('TOC'):
+                        is_toc_field = True
+                        # Skip TOC/LOF/LOT pages - main content starts after them
+                        current_page = 2 + toc_pages + lof_pages + lot_pages
+                        current_line_position = 0
+                        break
+            except:
+                pass
+            
+            if is_toc_field:
+                continue
+            
+            process_paragraph_for_captions(para, para_idx, is_in_table=False)
+        
+        # Step 2: Check paragraphs inside table cells (where captions likely are)
+        current_app.logger.info(f"🔍 Checking {len(doc.tables)} tables for figure captions in cells...")
+        for table_idx, table in enumerate(doc.tables):
+            for row_idx, row in enumerate(table.rows):
+                for cell_idx, cell in enumerate(row.cells):
+                    for para_idx, para in enumerate(cell.paragraphs):
+                        process_paragraph_for_captions(para, para_idx, is_in_table=True)
+        
+        current_app.logger.info(f"✅ Found {len(figures)} unique figures and {len(tables)} unique tables")
         return figures, tables
         
     except Exception as e:
@@ -1186,7 +1379,7 @@ def find_all_figures_and_tables(doc):
         return [], []
 
 
-def calculate_page_numbers_for_headings(docx_path):
+def calculate_page_numbers_for_headings(docx_path, lof_pages=0, lot_pages=0, toc_pages=None):
     """
     Enhanced page number calculation with improved accuracy.
     
@@ -1196,9 +1389,13 @@ def calculate_page_numbers_for_headings(docx_path):
     - Accounting for tables, images, and complex layouts
     - Finding ALL types of headings (not just standard styles)
     - Better line height calculations
+    - Accounting for TOC, LOF, and LOT pages
     
     Args:
         docx_path: Path to the .docx file
+        lof_pages: Number of pages used by List of Figures (default: 0)
+        lot_pages: Number of pages used by List of Tables (default: 0)
+        toc_pages: Number of pages used by TOC (if None, will calculate)
         
     Returns:
         dict: Mapping of heading text to page information
@@ -1226,39 +1423,128 @@ def calculate_page_numbers_for_headings(docx_path):
             return {}
         
         # Track current position more accurately
-        current_page = 1
+        current_page = 1  # Start from page 1 (cover page)
         current_line_position = 0
-        toc_pages = 0  # Pages used by TOC
         heading_pages = {}
         
         namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
         
-        # First pass: Calculate TOC size
-        toc_entries_count = len(all_headings)
-        toc_lines_needed = toc_entries_count * 1.2  # Each TOC entry ~1.2 lines
-        toc_pages = max(1, int(toc_lines_needed / lines_per_page))
+        # Calculate TOC size if not provided
+        if toc_pages is None:
+            toc_entries_count = len(all_headings)
+            toc_lines_needed = toc_entries_count * 1.2  # Each TOC entry ~1.2 lines
+            toc_pages = max(1, int(toc_lines_needed / lines_per_page))
+            current_app.logger.info(f"📋 Calculated TOC will need ~{toc_pages} page(s) for {toc_entries_count} entries")
+        else:
+            current_app.logger.info(f"📋 Using provided TOC pages: {toc_pages}")
         
-        current_app.logger.info(f"📋 TOC will need ~{toc_pages} page(s) for {toc_entries_count} entries")
+        # Find where cover page ends (first page break or end of first page worth of content)
+        cover_page_end_idx = 0
+        cover_page_lines = 0
+        for para_idx, para in enumerate(doc.paragraphs):
+            # Check for page break
+            try:
+                para_xml = etree.fromstring(etree.tostring(para._element))
+                page_breaks = para_xml.xpath('.//w:br[@w:type="page"]', namespaces=namespaces)
+                if page_breaks:
+                    cover_page_end_idx = para_idx
+                    break
+            except:
+                pass
+            
+            # Or check if we've used up a page worth of lines
+            lines_used = analyze_paragraph_layout(para, doc_settings)
+            cover_page_lines += lines_used
+            if cover_page_lines >= lines_per_page:
+                cover_page_end_idx = para_idx
+                break
+        
+        current_app.logger.info(f"📋 Cover page ends at paragraph {cover_page_end_idx}, TOC will start on page 2")
         
         # Second pass: Calculate page numbers for each paragraph
+        # Skip cover page content, then account for TOC/LOF/LOT pages
+        # Main content starts after: cover page (1) + TOC pages + LOF pages + LOT pages
+        main_content_start_page = 2 + toc_pages + lof_pages + lot_pages
+        current_app.logger.info(f"📋 Main content will start on page {main_content_start_page} (after cover + TOC({toc_pages}) + LOF({lof_pages}) + LOT({lot_pages}))")
+        
+        # Track if we've passed the TOC/LOF/LOT sections
+        passed_toc_section = False
+        toc_section_lines = 0
+        
         for para_idx, para in enumerate(doc.paragraphs):
-            # Check if this paragraph is a TOC field (skip it)
+            # Skip cover page paragraphs
+            if para_idx <= cover_page_end_idx:
+                continue
+            
+            # Check if this paragraph is a TOC/LOF/LOT field or content (skip it)
             is_toc_field = False
+            is_toc_content = False
             try:
                 para_xml = etree.fromstring(etree.tostring(para._element))
                 instr_texts = para_xml.xpath('.//w:instrText', namespaces=namespaces)
                 for instr in instr_texts:
                     if instr.text and instr.text.strip().upper().startswith('TOC'):
                         is_toc_field = True
-                        # Skip TOC pages
-                        current_page += toc_pages
-                        current_line_position = 0
                         break
+                
+                # Also check if this is TOC content (has page numbers at end, section numbers, etc.)
+                para_text = para.text.strip() if para.text else ""
+                if not is_toc_field and not passed_toc_section:
+                    # Check if this looks like TOC content
+                    has_page_number = bool(re.search(r'\s+\d{1,3}\s*$', para_text))
+                    has_section_number = bool(re.search(r'^\d+(\.\d+)*\s+', para_text))
+                    is_toc_title = para_text.lower() in ['table of contents', 'list of figures', 'list of tables', 'contents', 'toc', 'figures', 'tables']
+                    
+                    if is_toc_title or (has_page_number and has_section_number):
+                        is_toc_content = True
+                        toc_section_lines += analyze_paragraph_layout(para, doc_settings)
+                        # Check if we've used up the TOC pages
+                        if toc_section_lines >= (toc_pages + lof_pages + lot_pages) * lines_per_page:
+                            passed_toc_section = True
+                            current_page = main_content_start_page
+                            current_line_position = 0
+                            current_app.logger.debug(f"📄 Finished TOC section, now on page {current_page}")
             except:
                 pass
             
-            if is_toc_field:
+            if is_toc_field or is_toc_content:
                 continue
+            
+            # If we haven't passed TOC section yet, skip until we do
+            if not passed_toc_section:
+                # Check if this is clearly main content (not TOC)
+                para_text = para.text.strip() if para.text else ""
+                
+                # Check for main section headings (not TOC entries)
+                # Main content typically:
+                # 1. Has longer text without page numbers at the end
+                # 2. Starts with section keywords like "About", "Introduction", etc.
+                # 3. Is a heading (bold, larger font, or heading style)
+                is_main_content = False
+                
+                # Check if it's a heading that looks like main content
+                for heading in all_headings:
+                    if heading['paragraph_index'] == para_idx:
+                        # This is a heading - check if it's main content
+                        # Main content headings are usually longer and don't have page numbers
+                        if len(para_text) > 15 and not re.search(r'\s+\d{1,3}\s*$', para_text):
+                            # Check if it starts with common main section keywords
+                            main_section_keywords = ['about', 'introduction', 'summary', 'methodology', 
+                                                    'india buy now pay later', 'bnpl', 'attractiveness']
+                            para_lower = para_text.lower()
+                            if any(keyword in para_lower for keyword in main_section_keywords) or \
+                               re.match(r'^\d+\.\s+[A-Z]', para_text):  # Section number followed by capital
+                                is_main_content = True
+                                break
+                
+                if is_main_content:
+                    passed_toc_section = True
+                    current_page = main_content_start_page
+                    current_line_position = 0
+                    current_app.logger.debug(f"📄 Detected main content start at '{para_text[:50]}...', now on page {current_page}")
+                else:
+                    # Still in TOC section, skip this paragraph
+                    continue
             
             # Calculate lines used by this paragraph
             lines_used = analyze_paragraph_layout(para, doc_settings)
@@ -1289,9 +1575,16 @@ def calculate_page_numbers_for_headings(docx_path):
             for heading in all_headings:
                 if heading['paragraph_index'] == para_idx:
                     # This is a heading - record its page number
+                    # Main content starts after cover page (1) + TOC/LOF/LOT pages
                     page_num = current_page
                     if current_line_position + lines_used > lines_per_page:
                         page_num = current_page + 1
+                    
+                    # Ensure page number accounts for cover page + TOC + LOF + LOT
+                    # TOC starts on page 2, so main content starts after TOC/LOF/LOT pages
+                    min_page = 2 + toc_pages + lof_pages + lot_pages
+                    if page_num < min_page:
+                        page_num = min_page
                     
                     heading_pages[heading['text']] = {
                         'page': page_num,
@@ -1381,6 +1674,84 @@ def calculate_page_numbers_for_headings(docx_path):
         import traceback
         current_app.logger.debug(traceback.format_exc())
         return {}
+
+
+def update_toc_page_numbers_in_xml(root, toc_entry_paragraphs, heading_pages_dict):
+    """
+    Updates page numbers in TOC entry paragraphs based on recalculated heading pages.
+    
+    Args:
+        root: Document XML root element
+        toc_entry_paragraphs: List of tuples (heading_text, paragraph_element) for TOC entries
+        heading_pages_dict: Dictionary mapping heading text to updated page information
+        
+    Returns:
+        int: Number of TOC entries updated
+    """
+    try:
+        namespaces = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
+        updated_count = 0
+        
+        for heading_text, toc_para in toc_entry_paragraphs:
+            # Find the page number run in this TOC entry paragraph
+            # Page number is typically in the last run with text
+            runs = toc_para.xpath('.//w:r', namespaces=namespaces)
+            
+            # Look for the run containing the page number (usually the last text run)
+            page_num_run = None
+            for run in reversed(runs):
+                text_elems = run.xpath('.//w:t', namespaces=namespaces)
+                for text_elem in text_elems:
+                    if text_elem.text and text_elem.text.strip().isdigit():
+                        page_num_run = text_elem
+                        break
+                if page_num_run:
+                    break
+            
+            # Find matching heading in heading_pages_dict
+            # Try exact match first
+            matching_heading = None
+            if heading_text in heading_pages_dict:
+                matching_heading = heading_pages_dict[heading_text]
+            else:
+                # Try matching by original_text or partial match
+                # Extract text without section number for matching
+                heading_text_no_number = re.sub(r'^\d+(\.\d+)*\.?\s+', '', heading_text).strip()
+                
+                for key, value in heading_pages_dict.items():
+                    # Get original text or key without section number
+                    key_text = value.get('original_text', key)
+                    key_text_no_number = re.sub(r'^\d+(\.\d+)*\.?\s+', '', key_text).strip()
+                    
+                    # Check multiple matching strategies
+                    if (heading_text == key_text or 
+                        heading_text_no_number == key_text_no_number or
+                        heading_text_no_number == key_text or
+                        key_text_no_number == heading_text or
+                        heading_text_no_number in key_text or
+                        key_text_no_number in heading_text):
+                        matching_heading = value
+                        break
+            
+            if matching_heading and page_num_run:
+                new_page_num = str(matching_heading['page'])
+                old_page_num = page_num_run.text.strip() if page_num_run.text else ""
+                
+                if old_page_num != new_page_num:
+                    page_num_run.text = new_page_num
+                    updated_count += 1
+                    current_app.logger.debug(f"🔄 Updated TOC entry '{heading_text[:40]}...' page number: {old_page_num} -> {new_page_num}")
+        
+        if updated_count > 0:
+            current_app.logger.info(f"✅ Updated {updated_count} TOC entry page numbers")
+        
+        return updated_count
+        
+    except Exception as e:
+        current_app.logger.error(f"❌ Error updating TOC page numbers: {e}")
+        import traceback
+        current_app.logger.debug(traceback.format_exc())
+        return 0
 
 
 def write_complete_toc_content(docx_path, heading_pages, toc_location):
@@ -1737,12 +2108,10 @@ def update_toc_via_word_automation(docx_path, timeout=60):
 def force_complete_toc_rebuild(docx_path):
     """
     Forces complete TOC rebuild by:
-    1. Removing ALL existing TOC fields entirely
-    2. Calculating page numbers programmatically for all headings
-    3. Writing complete TOC content directly (not as a field)
-    
-    This completely eliminates Word's field calculation and writes the TOC
-    with our calculated page numbers directly into the document.
+    1. Aggressively cleaning pages 2-4 to remove ALL existing TOC/LOF/LOT content FIRST
+    2. Removing any remaining TOC/LOF/LOT sections using content-based detection (backup)
+    3. Calculating page numbers programmatically for all headings
+    4. Writing complete TOC/LOF/LOT content directly (all left-aligned, not as a field)
     
     Args:
         docx_path: Path to the saved .docx file
@@ -1751,18 +2120,28 @@ def force_complete_toc_rebuild(docx_path):
         int: Number of TOC fields completely rebuilt
     """
     try:
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"toc_service.py:1751","message":"force_complete_toc_rebuild ENTRY","data":{"docx_path":docx_path},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
         fields_rebuilt = 0
         
-        current_app.logger.info("🔄 Calculating page numbers and writing complete TOC content...")
+        # STEP 1: Aggressively clean pages 2-4 FIRST (removes ALL content from pages 2-4)
+        current_app.logger.info("🔄 Step 1: Aggressively cleaning pages 2-4 to remove ALL existing TOC/LOF/LOT content...")
+        clean_result = clean_pages_2_3_4_completely(docx_path)
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"toc_service.py:1756","message":"After aggressive cleaning","data":{"success":clean_result.get('success'),"removed":clean_result.get('paragraphs_removed',0)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        if clean_result.get('success'):
+            current_app.logger.info(f"✅ Aggressive cleaning complete: Removed {clean_result.get('paragraphs_removed', 0)} paragraphs from pages 2-4")
+        else:
+            current_app.logger.warning(f"⚠️ Aggressive cleaning had issues: {clean_result.get('error', 'Unknown error')}. Will use content-based removal as backup.")
         
-        # Step 1: Calculate page numbers for all headings
-        heading_pages = calculate_page_numbers_for_headings(docx_path)
+        current_app.logger.info("🔄 Step 2: Removing any remaining TOC/LOF/LOT sections using content-based detection (backup)...")
         
-        if not heading_pages:
-            current_app.logger.warning("⚠️ No headings found for TOC")
-            return 0
-        
-        # Step 2: Remove existing TOC fields and write new content
+        # STEP 2: Remove ALL existing TOC/LOF/LOT sections using content-based detection (backup method)
         # Create temporary directory for processing
         temp_dir = tempfile.mkdtemp()
         
@@ -1787,57 +2166,88 @@ def force_complete_toc_rebuild(docx_path):
             'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
         }
         
-        current_app.logger.debug("🔄 Removing existing TOC fields and content...")
+        current_app.logger.debug("🔄 Finding and removing TOC/LOF/LOT sections...")
         
-        # Find and completely remove existing TOC fields AND any existing TOC content
-        toc_locations = []  # Store where TOCs were for recreation
+        # Get all paragraphs
         all_paragraphs = root.xpath('.//w:p', namespaces=namespaces)
         
         paragraphs_to_remove = []
-        in_toc_field = False
-        toc_content_found = False
+        toc_locations = []  # Store where to insert new TOC
+        
+        # Helper function to get paragraph text
+        def get_para_text(para):
+            text_elements = para.xpath('.//w:t', namespaces=namespaces)
+            para_text = ""
+            for text_elem in text_elements:
+                if text_elem.text:
+                    para_text += text_elem.text
+            return para_text.strip()
+        
+        # Helper function to check if paragraph looks like a TOC/LOF/LOT entry
+        def is_toc_entry(para_text):
+            if not para_text or len(para_text) < 3:
+                return False
+            
+            # Check for page number at the end (common in TOC entries)
+            has_page_number = bool(re.search(r'\s+\d{1,3}\s*$', para_text))
+            
+            # Check for section numbering (1., 1.1, 1.1.1, etc.)
+            has_section_number = bool(re.search(r'^\d+(\.\d+)*\s+', para_text))
+            
+            # Check for figure/table references
+            has_figure_table = bool(re.search(r'(figure|table)\s*\d+', para_text.lower()))
+            
+            # Check for dotted line pattern (TOC entries often have dots)
+            has_dots = bool(re.search(r'\.{2,}', para_text))
+            
+            # Check if it's a title (exact match)
+            is_title = para_text.lower() in ['table of contents', 'list of figures', 'list of tables', 
+                                            'contents', 'toc', 'figures', 'tables']
+            
+            return is_title or (has_page_number and (has_section_number or has_figure_table or has_dots))
+        
+        # Helper function to check if paragraph is a clear break (not part of TOC/LOF/LOT)
+        def is_clear_break(para_text):
+            """Check if this paragraph is clearly NOT part of TOC/LOF/LOT"""
+            if not para_text or len(para_text) < 3:
+                return False  # Empty paragraphs might be spacing in TOC
+            
+            # Check if it's a main heading (not a TOC entry)
+            # Main headings usually don't have page numbers at the end
+            # and are longer, more descriptive
+            is_long_heading = len(para_text) > 50 and not re.search(r'\s+\d{1,3}\s*$', para_text)
+            
+            # Check if it starts with common document section patterns (not TOC numbering)
+            starts_with_section_word = bool(re.search(r'^(about|introduction|executive|summary|methodology|conclusion|references|appendix)', para_text.lower()))
+            
+            return is_long_heading or starts_with_section_word
+        
+        # Find TOC section: "Table of Contents" title + all entries until next section
+        in_toc_section = False
+        toc_start_idx = None
+        consecutive_non_toc = 0  # Count consecutive non-TOC paragraphs
+        
+        # Find LOF section: "List of Figures" title + all entries until next section
+        in_lof_section = False
+        lof_start_idx = None
+        
+        # Find LOT section: "List of Tables" title + all entries until next section
+        in_lot_section = False
+        lot_start_idx = None
         
         for para_idx, para in enumerate(all_paragraphs):
-            # Look for TOC field start
-            instr_texts = para.xpath('.//w:instrText', namespaces=namespaces)
+            para_text = get_para_text(para)
             
-            for instr_text in instr_texts:
-                if instr_text.text and instr_text.text.strip().upper().startswith('TOC'):
-                    field_code = instr_text.text.strip()
-                    field_type = "List of Figures" if ('\\C' in field_code or 'FIGURE' in field_code) else "Table of Contents"
-                    
-                    current_app.logger.debug(f"🔄 Found {field_type} to rebuild: {field_code}")
-                    
-                    # Mark start of TOC field for complete removal
-                    in_toc_field = True
-                    
-                    # Store location for recreation (use first TOC found)
-                    if not toc_locations:
-                        toc_locations.append({
-                            'parent': para.getparent(),
-                            'index': list(para.getparent()).index(para),
-                            'field_code': field_code,
-                            'field_type': field_type
-                        })
-                    break
-            
-            # Also look for existing TOC content (paragraphs that look like TOC entries)
-            if not in_toc_field:
-                para_text = ""
-                text_elements = para.xpath('.//w:t', namespaces=namespaces)
-                for text_elem in text_elements:
-                    if text_elem.text:
-                        para_text += text_elem.text
-                
-                para_text = para_text.strip()
-                
-                # Check if this looks like a TOC title
-                if para_text.lower() in ['table of contents', 'contents', 'toc']:
+            # Check for TOC title
+            if para_text.lower() in ['table of contents', 'contents', 'toc']:
+                if not in_toc_section and not in_lof_section and not in_lot_section:
+                    in_toc_section = True
+                    consecutive_non_toc = 0
+                    toc_start_idx = para_idx
                     paragraphs_to_remove.append(para)
-                    toc_content_found = True
-                    current_app.logger.debug(f"🗑️ Found TOC title to remove: {para_text}")
+                    current_app.logger.debug(f"🗑️ Found TOC title: '{para_text}' at paragraph {para_idx}")
                     
-                    # Store location for recreation if we haven't found a field location
+                    # Store location for recreation
                     if not toc_locations:
                         toc_locations.append({
                             'parent': para.getparent(),
@@ -1845,164 +2255,346 @@ def force_complete_toc_rebuild(docx_path):
                             'field_code': 'TOC \\o "1-3" \\h \\z \\u',
                             'field_type': 'Table of Contents'
                         })
-                
-                # Check if this looks like a TOC/LOF/LOT title
-                elif para_text.lower() in ['list of figures', 'list of tables', 'figures', 'tables']:
-                    paragraphs_to_remove.append(para)
-                    toc_content_found = True
-                    current_app.logger.debug(f"🗑️ Found {para_text} title to remove")
-                
-                # Check if this looks like a TOC/LOF/LOT entry (text with page number at end)
-                elif para_text and len(para_text) > 5:
-                    # Pattern: text followed by page number or dotted line with page number
-                    if re.search(r'.+[\.\s]+\d+\s*$', para_text) or re.search(r'.+\s+\d+\s*$', para_text):
-                        # Additional checks to avoid false positives
-                        words = para_text.split()
-                        if len(words) >= 2:
-                            # Extract potential page number (could be after dots)
-                            last_word = words[-1]
-                            if last_word.isdigit() and int(last_word) < 1000:  # Reasonable page number
-                                # Check if it contains common TOC/LOF/LOT terms or patterns
-                                content_indicators = [
-                                    'analysis', 'market', 'trend', 'forecast', 'revenue', 'summary', 
-                                    'methodology', 'introduction', 'conclusion', 'figure', 'table',
-                                    'chart', 'graph', 'diagram', 'buy now pay later', 'bnpl',
-                                    'gross merchandise', 'transaction', 'consumer', 'retail',
-                                    'attractiveness', 'kpis', 'business model', 'purpose',
-                                    'merchant', 'distribution', 'channel', 'sector', 'shopping',
-                                    'improvement', 'travel', 'entertainment', 'service', 'automotive',
-                                    'healthcare', 'wellness', 'attitude', 'behaviour', 'age group',
-                                    'income', 'gender', 'adoption', 'expense'
-                                ]
-                                # Also check for numbered patterns like "1.1", "Figure 1", "Table 2"
-                                has_numbering = bool(re.search(r'^\d+(\.\d+)*', para_text) or 
-                                                   re.search(r'(figure|table)\s*\d+', para_text.lower()))
-                                
-                                # More aggressive detection - if it has dots and a page number, it's likely TOC
-                                has_dots = len([c for c in para_text if c == '.']) > 3
-                                
-                                # Check for blue hyperlink text (common in TOC entries)
-                                has_hyperlink_pattern = bool(re.search(r'<[^>]+>', para_text))
-                                
-                                # Check if it starts with common section patterns
-                                starts_with_section = bool(re.search(r'^\d+\.?\d*\s+', para_text))
-                                
-                                if (any(indicator in para_text.lower() for indicator in content_indicators) or 
-                                    has_numbering or has_dots or has_hyperlink_pattern or starts_with_section):
-                                    paragraphs_to_remove.append(para)
-                                    toc_content_found = True
-                                    current_app.logger.debug(f"🗑️ Found TOC/LOF/LOT entry to remove: {para_text[:50]}...")
-                
-                # Additional check for any paragraph that looks like it's part of a list with page numbers
-                elif para_text and len(para_text) > 10:
-                    # Check if this paragraph contains multiple dots in a row (typical TOC formatting)
-                    if re.search(r'\.{3,}', para_text):  # 3 or more consecutive dots
-                        paragraphs_to_remove.append(para)
-                        toc_content_found = True
-                        current_app.logger.debug(f"🗑️ Found dotted TOC entry to remove: {para_text[:50]}...")
-                    
-                    # Check for blue hyperlinked text patterns (TOC entries are often hyperlinked)
-                    elif ('country' in para_text.lower() and 'buy now pay later' in para_text.lower()):
-                        paragraphs_to_remove.append(para)
-                        toc_content_found = True
-                        current_app.logger.debug(f"🗑️ Found BNPL TOC entry to remove: {para_text[:50]}...")
+                    continue
             
-            # If we're in a TOC field, mark paragraphs for removal
-            if in_toc_field:
+            # Check for LOF title
+            elif para_text.lower() in ['list of figures', 'figures']:
+                if in_toc_section:
+                    # End of TOC section, start of LOF section
+                    in_toc_section = False
+                    consecutive_non_toc = 0
+                in_lof_section = True
+                lof_start_idx = para_idx
                 paragraphs_to_remove.append(para)
-                
-                # Look for field end markers
-                fld_chars = para.xpath('.//w:fldChar', namespaces=namespaces)
-                for fld_char in fld_chars:
-                    if fld_char.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fldCharType') == 'end':
-                        # End of TOC field found - stop removing paragraphs
-                        in_toc_field = False
-                        fields_rebuilt += 1
-                        break
+                current_app.logger.debug(f"🗑️ Found LOF title: '{para_text}' at paragraph {para_idx}")
+                continue
+            
+            # Check for LOT title
+            elif para_text.lower() in ['list of tables', 'tables']:
+                if in_lof_section:
+                    # End of LOF section, start of LOT section
+                    in_lof_section = False
+                    consecutive_non_toc = 0
+                in_lot_section = True
+                lot_start_idx = para_idx
+                paragraphs_to_remove.append(para)
+                current_app.logger.debug(f"🗑️ Found LOT title: '{para_text}' at paragraph {para_idx}")
+                continue
+            
+            # If we're in a TOC/LOF/LOT section, check if this is an entry
+            if in_toc_section or in_lof_section or in_lot_section:
+                if is_toc_entry(para_text):
+                    # This looks like a TOC/LOF/LOT entry - remove it
+                    paragraphs_to_remove.append(para)
+                    consecutive_non_toc = 0  # Reset counter
+                    current_app.logger.debug(f"🗑️ Found entry in section: '{para_text[:50]}...'")
+                elif is_clear_break(para_text):
+                    # This is clearly NOT part of TOC/LOF/LOT - end the section
+                    if in_toc_section:
+                        in_toc_section = False
+                        current_app.logger.debug(f"✅ End of TOC section at paragraph {para_idx} (clear break: '{para_text[:50]}...')")
+                    elif in_lof_section:
+                        in_lof_section = False
+                        current_app.logger.debug(f"✅ End of LOF section at paragraph {para_idx} (clear break: '{para_text[:50]}...')")
+                    elif in_lot_section:
+                        in_lot_section = False
+                        current_app.logger.debug(f"✅ End of LOT section at paragraph {para_idx} (clear break: '{para_text[:50]}...')")
+                    consecutive_non_toc = 0
+                else:
+                    # Ambiguous paragraph - could be spacing or formatting in TOC
+                    # If we see 3+ consecutive non-TOC paragraphs, end the section
+                    consecutive_non_toc += 1
+                    if consecutive_non_toc >= 3:
+                        # Too many non-TOC paragraphs in a row - end the section
+                        if in_toc_section:
+                            in_toc_section = False
+                            current_app.logger.debug(f"✅ End of TOC section at paragraph {para_idx} ({consecutive_non_toc} consecutive non-TOC paragraphs)")
+                        elif in_lof_section:
+                            in_lof_section = False
+                            current_app.logger.debug(f"✅ End of LOF section at paragraph {para_idx} ({consecutive_non_toc} consecutive non-TOC paragraphs)")
+                        elif in_lot_section:
+                            in_lot_section = False
+                            current_app.logger.debug(f"✅ End of LOT section at paragraph {para_idx} ({consecutive_non_toc} consecutive non-TOC paragraphs)")
+                        consecutive_non_toc = 0
+                    else:
+                        # Still might be part of TOC - remove it to be safe
+                        paragraphs_to_remove.append(para)
+                        current_app.logger.debug(f"🗑️ Removing ambiguous paragraph in section: '{para_text[:50] if para_text else '(empty)'}...'")
         
-        # Additional pass: Look for consecutive paragraphs that look like TOC entries
-        # This catches cases where individual entries might not match but together they form a TOC
-        additional_removals = []
-        consecutive_toc_like = []
-        
+        # Also check for TOC field codes (Word fields)
         for para_idx, para in enumerate(all_paragraphs):
             if para in paragraphs_to_remove:
-                continue  # Already marked for removal
-                
-            para_text = ""
-            text_elements = para.xpath('.//w:t', namespaces=namespaces)
-            for text_elem in text_elements:
-                if text_elem.text:
-                    para_text += text_elem.text
+                continue
             
-            para_text = para_text.strip()
-            
-            # Check if this looks like a TOC entry
-            is_toc_like = False
-            if para_text and len(para_text) > 5:
-                # Multiple criteria for TOC-like content
-                has_page_number = bool(re.search(r'\s+\d{1,3}\s*$', para_text))
-                has_section_number = bool(re.search(r'^\d+(\.\d+)*\s+', para_text))
-                has_figure_table = bool(re.search(r'(figure|table)\s*\d+', para_text.lower()))
-                has_business_terms = any(term in para_text.lower() for term in [
-                    'buy now pay later', 'bnpl', 'gross merchandise', 'transaction volume',
-                    'market share', 'revenue segments', 'business model', 'retail shopping'
-                ])
-                
-                if (has_page_number and (has_section_number or has_figure_table or has_business_terms)):
-                    is_toc_like = True
-            
-            if is_toc_like:
-                consecutive_toc_like.append(para)
-            else:
-                # If we have accumulated consecutive TOC-like paragraphs, decide if they should be removed
-                if len(consecutive_toc_like) >= 3:  # 3 or more consecutive TOC-like entries
-                    additional_removals.extend(consecutive_toc_like)
-                    current_app.logger.debug(f"🗑️ Found {len(consecutive_toc_like)} consecutive TOC-like entries to remove")
-                consecutive_toc_like = []
+            instr_texts = para.xpath('.//w:instrText', namespaces=namespaces)
+            for instr_text in instr_texts:
+                if instr_text.text and instr_text.text.strip().upper().startswith('TOC'):
+                    paragraphs_to_remove.append(para)
+                    current_app.logger.debug(f"🗑️ Found TOC field code to remove")
+                    
+                    # Also remove field content (until field end)
+                    in_field = True
+                    for next_idx in range(para_idx + 1, len(all_paragraphs)):
+                        next_para = all_paragraphs[next_idx]
+                        if next_para in paragraphs_to_remove:
+                            continue
+                        
+                        fld_chars = next_para.xpath('.//w:fldChar', namespaces=namespaces)
+                        for fld_char in fld_chars:
+                            if fld_char.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fldCharType') == 'end':
+                                in_field = False
+                                break
+                        
+                        if in_field:
+                            paragraphs_to_remove.append(next_para)
+                        else:
+                            break
+                    break
         
-        # Handle any remaining consecutive entries at the end
-        if len(consecutive_toc_like) >= 3:
-            additional_removals.extend(consecutive_toc_like)
-            current_app.logger.debug(f"🗑️ Found {len(consecutive_toc_like)} final consecutive TOC-like entries to remove")
-        
-        # Add additional removals to the main list
-        paragraphs_to_remove.extend(additional_removals)
-        
-        # Remove all TOC paragraphs completely
+        # Remove all identified paragraphs
         for para in paragraphs_to_remove:
             parent = para.getparent()
             if parent is not None:
                 parent.remove(para)
         
-        if toc_content_found or additional_removals:
-            current_app.logger.info(f"🗑️ Removed {len(paragraphs_to_remove)} old TOC/LOF/LOT paragraphs (fields + content + consecutive entries)")
+        removed_count = len(paragraphs_to_remove)
+        if removed_count > 0:
+            current_app.logger.info(f"🗑️ Removed {removed_count} paragraphs (TOC/LOF/LOT titles + entries + field codes)")
         else:
-            current_app.logger.debug(f"🗑️ Removed {len(paragraphs_to_remove)} TOC field paragraphs")
+            current_app.logger.debug("ℹ️ No TOC/LOF/LOT content found to remove")
         
-        # Step 3: Write complete TOC content with calculated page numbers directly into XML
-        if toc_locations:
-            toc_location = toc_locations[0]  # Use first TOC location
+        # Save the document after removal (before calculating page numbers)
+        modified_xml = etree.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
+        with open(doc_xml_path, 'w', encoding='utf-8') as f:
+            f.write(modified_xml)
+        
+        # Repackage temporarily to ensure clean state
+        temp_docx = docx_path + '.clean'
+        with zipfile.ZipFile(temp_docx, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+            for root_dir, dirs, files in os.walk(extract_dir):
+                for file in files:
+                    file_path = os.path.join(root_dir, file)
+                    arcname = os.path.relpath(file_path, extract_dir)
+                    zip_out.write(file_path, arcname)
+        
+        # Replace original with cleaned version
+        shutil.move(temp_docx, docx_path)
+        
+        # Re-extract for writing new content
+        with zipfile.ZipFile(docx_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+        
+        # Re-parse after cleanup
+        with open(doc_xml_path, 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+        root = etree.fromstring(xml_content.encode('utf-8'))
+        all_paragraphs = root.xpath('.//w:p', namespaces=namespaces)
+        
+        current_app.logger.info("✅ Step 2 complete: All remaining TOC/LOF/LOT sections removed (content-based backup)")
+        
+        # STEP 3: Prepare for page number calculations
+        # First, find all content to calculate front matter page counts
+        current_app.logger.info("🔄 Step 3: Finding all content and calculating front matter page counts...")
+        from docx import Document
+        doc_for_figures = Document(docx_path)
+        
+        # Get document settings to calculate page capacity
+        doc_settings = get_document_properties(doc_for_figures)
+        avg_line_height = doc_settings['default_font_size'] * doc_settings['line_spacing']
+        lines_per_page = doc_settings['usable_height'] / avg_line_height
+        
+        # Find cover page end index first
+        cover_page_end_idx = 0
+        cover_page_lines = 0
+        for para_idx, para in enumerate(doc_for_figures.paragraphs):
+            # Check for page break
+            try:
+                para_xml = etree.fromstring(etree.tostring(para._element))
+                page_breaks = para_xml.xpath('.//w:br[@w:type="page"]', namespaces=namespaces)
+                if page_breaks:
+                    cover_page_end_idx = para_idx
+                    break
+            except:
+                pass
             
-            # Sort headings by page number, then by level
-            sorted_headings = sorted(heading_pages.values(), key=lambda x: (x['page'], x['level']))
-            
-            # Filter out table headings and other noise for cleaner TOC
-            clean_headings = []
-            section_counter = {'1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0}
-            
-            for heading_info in sorted_headings:
-                # Skip table headings and placeholder variables for main TOC
-                if heading_info.get('type') == 'table':
-                    continue
-                if heading_info['text'].startswith('${'):
-                    continue
-                if heading_info['text'] in ['Category', 'Sub-Category', 'Definition', 'Years']:
-                    continue
+            # Or check if we've used up a page worth of lines
+            lines_used = analyze_paragraph_layout(para, doc_settings)
+            cover_page_lines += lines_used
+            if cover_page_lines >= lines_per_page:
+                cover_page_end_idx = para_idx
+                break
+        
+        # Calculate TOC pages (get headings count first)
+        all_headings_preview = find_all_headings_and_sections(doc_for_figures)
+        toc_entries_count = len(all_headings_preview)
+        toc_lines_needed = toc_entries_count * 1.2  # Each TOC entry ~1.2 lines
+        toc_pages = max(1, int(toc_lines_needed / lines_per_page))
+        
+        # Find figures and tables FIRST with default parameters to get counts
+        # (We'll recalculate page numbers with correct parameters later)
+        figures_temp, tables_temp = find_all_figures_and_tables(doc_for_figures, cover_page_end_idx=cover_page_end_idx, toc_pages=0, lof_pages=0, lot_pages=0)
+        
+        # Calculate LOF pages
+        lof_entries_count = len(figures_temp)
+        lof_lines_needed = lof_entries_count * 1.2  # Each LOF entry ~1.2 lines
+        lof_pages = max(1, int(lof_lines_needed / lines_per_page)) if figures_temp else 0
+        
+        # Calculate LOT pages
+        lot_entries_count = len(tables_temp)
+        lot_lines_needed = lot_entries_count * 1.2  # Each LOT entry ~1.2 lines
+        lot_pages = max(1, int(lot_lines_needed / lines_per_page)) if tables_temp else 0
+        
+        current_app.logger.info(f"📋 Front matter page estimates: TOC={toc_pages}, LOF={lof_pages}, LOT={lot_pages}")
+        
+        # Now find figures and tables WITH correct page numbers
+        current_app.logger.info("🔄 Step 3b: Finding figures and tables with correct page numbers...")
+        figures, tables = find_all_figures_and_tables(doc_for_figures, cover_page_end_idx=cover_page_end_idx, toc_pages=toc_pages, lof_pages=lof_pages, lot_pages=lot_pages)
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"toc_service.py:2065","message":"Figures and tables found with correct page numbers","data":{"figures_count":len(figures),"tables_count":len(tables)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # STEP 4: Calculate page numbers for all headings (AFTER finding figures/tables and calculating page counts)
+        current_app.logger.info("🔄 Step 4: Calculating page numbers for all headings...")
+        heading_pages = calculate_page_numbers_for_headings(docx_path, lof_pages=lof_pages, lot_pages=lot_pages, toc_pages=toc_pages)
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"toc_service.py:2017","message":"After page number calculation","data":{"headings_found":len(heading_pages) if heading_pages else 0},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        if not heading_pages:
+            current_app.logger.warning("⚠️ No headings found for TOC")
+            # #region agent log
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"toc_service.py:2020","message":"EARLY RETURN - No headings","data":{},"timestamp":int(time.time()*1000)}) + '\n')
+            # #endregion
+            shutil.rmtree(temp_dir)
+            return 0
+        
+        # STEP 4: Write complete TOC content with calculated page numbers directly into XML
+        current_app.logger.info("🔄 Step 4: Writing new TOC/LOF/LOT content (all lines left-aligned)...")
+        
+        # Helper function to get paragraph text
+        def get_para_text(para):
+            text_elements = para.xpath('.//w:t', namespaces=namespaces)
+            para_text = ""
+            for text_elem in text_elements:
+                if text_elem.text:
+                    para_text += text_elem.text
+            return para_text.strip()
+        
+        # Find insertion point (where TOC was removed, or find a good location)
+        # After re-parsing, we need to find the insertion point again
+        body = root.xpath('.//w:body', namespaces=namespaces)
+        if not body:
+            current_app.logger.warning("⚠️ No document body found")
+            shutil.rmtree(temp_dir)
+            return 0
+        
+        parent = body[0]
+        insertion_index = None
+        
+        # Find where page 1 (cover page) actually ends
+        # Strategy: Find the FIRST page break, or calculate where page 1 content ends
+        all_paragraphs_after_cleanup = root.xpath('.//w:p', namespaces=namespaces)
+        
+        # Get document settings to calculate page 1 capacity
+        from docx import Document
+        doc_for_calc = Document(docx_path)
+        doc_settings = get_document_properties(doc_for_calc)
+        avg_line_height = doc_settings['default_font_size'] * doc_settings['line_spacing']
+        lines_per_page = doc_settings['usable_height'] / avg_line_height
+        
+        # Strategy 1: Look for the FIRST page break (marks end of page 1)
+        cover_page_end_idx = None
+        page_break_already_exists = False  # Track if page break already exists
+        for para_idx, para in enumerate(all_paragraphs_after_cleanup):
+            # Check for page break
+            try:
+                page_breaks = para.xpath('.//w:br[@w:type="page"]', namespaces=namespaces)
+                if page_breaks:
+                    cover_page_end_idx = para_idx
+                    page_break_already_exists = True  # Page break already exists!
+                    current_app.logger.info(f"📍 Found first page break at paragraph {para_idx} - this marks end of cover page")
+                    break
+            except:
+                pass
+        
+        # Strategy 2: If no page break found, calculate where page 1 content ends
+        if cover_page_end_idx is None:
+            current_app.logger.info("📍 No page break found, calculating page 1 content end...")
+            cover_page_lines = 0
+            for para_idx, para in enumerate(all_paragraphs_after_cleanup):
+                para_text = get_para_text(para)
+                # Estimate lines used (rough calculation)
+                lines_used = max(1, len(para_text) / 80)  # Rough estimate: 80 chars per line
+                cover_page_lines += lines_used
                 
-                # Add section numbering
-                level = heading_info['level']
-                if level <= 6:
+                if cover_page_lines >= lines_per_page:
+                    cover_page_end_idx = para_idx
+                    current_app.logger.info(f"📍 Calculated cover page ends at paragraph {para_idx} ({cover_page_lines:.1f} lines)")
+                    break
+        
+        # Set insertion point: AFTER cover page ends
+        if cover_page_end_idx is not None:
+            insertion_index = cover_page_end_idx + 1  # Insert AFTER cover page
+        else:
+            # Fallback: Insert after first 10 paragraphs (should be cover page)
+            insertion_index = min(10, len(all_paragraphs_after_cleanup))
+            current_app.logger.info(f"📍 Using fallback: Insert after paragraph {insertion_index}")
+        
+        current_app.logger.info(f"📍 Will insert TOC/LOF/LOT AFTER cover page at paragraph index {insertion_index}")
+        if page_break_already_exists:
+            current_app.logger.info("📄 Page break already exists - TOC will start on page 2 without adding another page break")
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"toc_service.py:2088","message":"Insertion point determined","data":{"insertion_index":insertion_index,"total_paragraphs":len(all_paragraphs_after_cleanup)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # Always proceed with insertion
+        # Sort headings by page number, then by level
+        sorted_headings = sorted(heading_pages.values(), key=lambda x: (x['page'], x['level']))
+        
+        # Filter out table headings and other noise for cleaner TOC
+        clean_headings = []
+        section_counter = {'1': 0, '2': 0, '3': 0, '4': 0, '5': 0, '6': 0}
+        
+        for heading_info in sorted_headings:
+            # Skip table headings and placeholder variables for main TOC
+            if heading_info.get('type') == 'table':
+                continue
+            if heading_info['text'].startswith('${'):
+                continue
+            if heading_info['text'] in ['Category', 'Sub-Category', 'Definition', 'Years']:
+                continue
+            
+            # Check if heading already has a section number
+            original_text = heading_info['text']
+            existing_match = re.match(r'^(\d+(?:\.\d+)*)\.?\s+(.+)', original_text)
+            has_existing_number = existing_match is not None
+            
+            # Add section numbering (only if not already present)
+            level = heading_info['level']
+            if level <= 6:
+                if has_existing_number:
+                    # Extract existing section number and update counters to match
+                    existing_number_str = existing_match.group(1)
+                    existing_parts = existing_number_str.split('.')
+                    
+                    # Update section counters to match existing number
+                    for idx, part in enumerate(existing_parts, 1):
+                        section_counter[str(idx)] = int(part)
+                        # Reset lower level counters
+                        for reset_level in range(idx + 1, 7):
+                            section_counter[str(reset_level)] = 0
+                    
+                    # Use the existing number and text as-is
+                    heading_text = original_text
+                    level = len(existing_parts)  # Update level based on existing number
+                else:
                     # Reset lower level counters when we encounter a higher level
                     for reset_level in range(level + 1, 7):
                         section_counter[str(reset_level)] = 0
@@ -2019,59 +2611,133 @@ def force_complete_toc_rebuild(docx_path):
                     section_number = '.'.join(section_parts)
                     
                     # Create formatted heading text with section number
-                    formatted_text = f"{section_number} {heading_info['text']}"
-                    
-                    clean_headings.append({
-                        'text': formatted_text,
-                        'page': heading_info['page'],
-                        'level': level,
-                        'original_text': heading_info['text']
-                    })
+                    heading_text = f"{section_number} {original_text}"
+                
+                clean_headings.append({
+                    'text': heading_text,
+                    'page': heading_info['page'],
+                    'level': level,
+                    'original_text': original_text
+                })
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"toc_service.py:2116","message":"Clean headings prepared","data":{"clean_headings_count":len(clean_headings)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # Get the target paragraph for insertion
+        target_para = None
+        if insertion_index < len(all_paragraphs_after_cleanup):
+            target_para = all_paragraphs_after_cleanup[insertion_index]
+        
+        # Find the parent element and index for insertion
+        if target_para is not None:
+            insert_parent = target_para.getparent()
+            # Find the index of target_para in its parent
+            parent_children = list(insert_parent)
+            insert_index = None
+            for idx, child in enumerate(parent_children):
+                if target_para in child.iter() or child == target_para:
+                    insert_index = idx
+                    break
+            if insert_index is None:
+                insert_index = len(parent_children)
+        else:
+            # Insert at end of body
+            insert_parent = parent
+            insert_index = len(list(parent))
+        
+        current_app.logger.debug(f"📍 Inserting TOC at parent index {insert_index}")
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"toc_service.py:2167","message":"Insert parent determined","data":{"insert_index":insert_index,"parent_children_count":len(list(insert_parent)) if insert_parent else 0},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # Create TOC paragraphs
+        index = insert_index
+        
+        # Only add page break if one doesn't already exist
+        if not page_break_already_exists:
+            # Add page break BEFORE TOC title to ensure it starts on page 2 (after cover page)
+            page_break_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
+            page_break_pPr = etree.SubElement(page_break_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
+            page_break_run = etree.SubElement(page_break_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+            page_break_br = etree.SubElement(page_break_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}br')
+            page_break_br.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type', 'page')
             
-            # Create TOC paragraphs
-            parent = toc_location['parent']
-            index = toc_location['index']
-            
-            # Add TOC title first
-            toc_title_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
-            
-            # Title paragraph properties
-            title_pPr = etree.SubElement(toc_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
-            title_spacing = etree.SubElement(title_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
-            title_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}after', '240')  # Space after title
-            
-            # Title run
-            title_run = etree.SubElement(toc_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-            title_rPr = etree.SubElement(title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-            title_fonts = etree.SubElement(title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
-            title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
-            title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
-            title_sz = etree.SubElement(title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
-            title_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '32')  # 16pt
-            title_bold = etree.SubElement(title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}b')
-            title_color = etree.SubElement(title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color')
-            title_color.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '2F5496')  # Blue color
-            
-            title_text = etree.SubElement(title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
-            title_text.text = "Table of Contents"
-            
-            # Insert title
-            if index < len(parent):
-                parent.insert(index, toc_title_para)
+            # Insert page break
+            if index < len(list(insert_parent)):
+                insert_parent.insert(index, page_break_para)
                 index += 1
             else:
-                parent.append(toc_title_para)
+                insert_parent.append(page_break_para)
+                index += 1
             
-            # Create TOC entries
-            for heading_info in clean_headings:
+            current_app.logger.info("📄 Added page break before TOC to ensure it starts on page 2")
+        else:
+            current_app.logger.info("📄 Page break already exists - TOC will start on page 2 without adding another page break")
+        
+        # Add TOC title first
+        toc_title_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
+        
+        # Title paragraph properties
+        title_pPr = etree.SubElement(toc_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
+        title_spacing = etree.SubElement(title_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
+        title_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}after', '480')  # Space after TOC title (before LOF)
+        
+        # Title run
+        title_run = etree.SubElement(toc_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+        title_rPr = etree.SubElement(title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
+        title_fonts = etree.SubElement(title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
+        title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
+        title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
+        title_sz = etree.SubElement(title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
+        title_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '32')  # 16pt
+        title_bold = etree.SubElement(title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}b')
+        title_color = etree.SubElement(title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color')
+        title_color.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '2F5496')  # Blue color
+        
+        title_text = etree.SubElement(title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
+        title_text.text = "Table of Contents"
+        
+        # Insert title
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            parent_list = list(insert_parent)
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2168","message":"Title insertion decision","data":{"index":index,"parent_length":len(parent_list),"will_insert":index < len(parent_list)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        if index < len(list(insert_parent)):
+            insert_parent.insert(index, toc_title_para)
+            index += 1
+            # #region agent log
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2208","message":"Title INSERTED","data":{"index":index},"timestamp":int(time.time()*1000)}) + '\n')
+            # #endregion
+        else:
+            insert_parent.append(toc_title_para)
+            # #region agent log
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2215","message":"Title APPENDED","data":{},"timestamp":int(time.time()*1000)}) + '\n')
+            # #endregion
+        
+        # Create TOC entries - ALL LEFT-ALIGNED (no indentation based on level)
+        # Store references to TOC entry paragraphs for later page number updates
+        toc_entry_paragraphs = []  # List of (heading_text, paragraph_element) tuples
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2221","message":"Creating TOC entries","data":{"clean_headings_count":len(clean_headings)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        for heading_info in clean_headings:
                 heading_text = heading_info['text']
                 page_num = heading_info['page']
-                level = heading_info['level']
                 
                 # Create paragraph for TOC entry
                 toc_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
                 
-                # Create paragraph properties with indentation and tabs
+                # Create paragraph properties - NO INDENTATION (all lines start at same left margin)
                 pPr = etree.SubElement(toc_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
                 
                 # Line spacing
@@ -2079,10 +2745,9 @@ def force_complete_toc_rebuild(docx_path):
                 spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}line', '276')  # 1.15 line spacing
                 spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lineRule', 'auto')
                 
-                # Indentation based on heading level
+                # Explicit indentation for uniform left margin (all entries at same level)
                 ind = etree.SubElement(pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ind')
-                left_indent = (level - 1) * 360  # 0.25" per level (in twips: 1440 twips = 1 inch)
-                ind.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}left', str(left_indent))
+                ind.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}left', '180')  # Small uniform margin (0.125" = 180 twips)
                 
                 # Tab stops for proper alignment
                 tabs = etree.SubElement(pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tabs')
@@ -2127,244 +2792,306 @@ def force_complete_toc_rebuild(docx_path):
                 text2.text = str(page_num)
                 
                 # Insert paragraph at TOC location
-                if index < len(parent):
-                    parent.insert(index, toc_para)
+                if index < len(list(insert_parent)):
+                    insert_parent.insert(index, toc_para)
                     index += 1
                 else:
-                    parent.append(toc_para)
-            
-            current_app.logger.info(f"✅ Wrote formatted TOC with {len(clean_headings)} entries and calculated page numbers")
-            
-            # Add List of Figures after TOC
-            # Re-open document to find figures and tables
-            from docx import Document
-            doc = Document(docx_path)
-            figures, tables = find_all_figures_and_tables(doc)
-            
-            if figures:
-                # Add some space between TOC and LOF
-                space_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
-                if index < len(parent):
-                    parent.insert(index, space_para)
-                    index += 1
-                else:
-                    parent.append(space_para)
+                    insert_parent.append(toc_para)
                 
-                # Add List of Figures title
-                lof_title_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
-                
-                # LOF Title paragraph properties
-                lof_title_pPr = etree.SubElement(lof_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
-                lof_title_spacing = etree.SubElement(lof_title_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
-                lof_title_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}after', '240')  # Space after title
-                
-                # LOF Title run
-                lof_title_run = etree.SubElement(lof_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-                lof_title_rPr = etree.SubElement(lof_title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-                lof_title_fonts = etree.SubElement(lof_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
-                lof_title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
-                lof_title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
-                lof_title_sz = etree.SubElement(lof_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
-                lof_title_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '32')  # 16pt
-                lof_title_bold = etree.SubElement(lof_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}b')
-                lof_title_color = etree.SubElement(lof_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color')
-                lof_title_color.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '2F5496')  # Blue color
-                
-                lof_title_text = etree.SubElement(lof_title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
-                lof_title_text.text = "List of Figures"
-                
-                # Insert LOF title
-                if index < len(parent):
-                    parent.insert(index, lof_title_para)
-                    index += 1
-                else:
-                    parent.append(lof_title_para)
-                
-                # Add LOF entries
-                for figure_info in sorted(figures, key=lambda x: x['page']):
-                    figure_text = figure_info['text']
-                    page_num = figure_info['page']
-                    
-                    # Create paragraph for LOF entry
-                    lof_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
-                    
-                    # Create paragraph properties
-                    lof_pPr = etree.SubElement(lof_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
-                    
-                    # Line spacing
-                    lof_spacing = etree.SubElement(lof_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
-                    lof_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}line', '276')  # 1.15 line spacing
-                    lof_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lineRule', 'auto')
-                    
-                    # Tab stops for proper alignment
-                    lof_tabs = etree.SubElement(lof_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tabs')
-                    lof_tab_stop = etree.SubElement(lof_tabs, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tab')
-                    lof_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', 'right')
-                    lof_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}leader', 'dot')  # Dotted line
-                    lof_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pos', '9360')  # Right align at 6.5"
-                    
-                    # Create run for figure text
-                    lof_run1 = etree.SubElement(lof_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-                    lof_run1Pr = etree.SubElement(lof_run1, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-                    lof_rFonts = etree.SubElement(lof_run1Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
-                    lof_rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
-                    lof_rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
-                    lof_sz = etree.SubElement(lof_run1Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
-                    lof_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
-                    
-                    lof_text1 = etree.SubElement(lof_run1, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
-                    lof_text1.text = figure_text
-                    
-                    # Create tab run
-                    lof_tab_run = etree.SubElement(lof_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-                    lof_tab_run_pr = etree.SubElement(lof_tab_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-                    lof_tab_fonts = etree.SubElement(lof_tab_run_pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
-                    lof_tab_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
-                    lof_tab_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
-                    lof_tab_sz = etree.SubElement(lof_tab_run_pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
-                    lof_tab_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
-                    
-                    lof_tab = etree.SubElement(lof_tab_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tab')
-                    
-                    # Create run for page number
-                    lof_run2 = etree.SubElement(lof_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-                    lof_run2Pr = etree.SubElement(lof_run2, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-                    lof_rFonts2 = etree.SubElement(lof_run2Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
-                    lof_rFonts2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
-                    lof_rFonts2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
-                    lof_sz2 = etree.SubElement(lof_run2Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
-                    lof_sz2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
-                    
-                    lof_text2 = etree.SubElement(lof_run2, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
-                    lof_text2.text = str(page_num)
-                    
-                    # Insert paragraph
-                    if index < len(parent):
-                        parent.insert(index, lof_para)
-                        index += 1
-                    else:
-                        parent.append(lof_para)
-                
-                current_app.logger.info(f"✅ Added List of Figures with {len(figures)} entries")
-            
-            # Add List of Tables after LOF
-            if tables:
-                # Add some space between LOF and LOT
-                space_para2 = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
-                if index < len(parent):
-                    parent.insert(index, space_para2)
-                    index += 1
-                else:
-                    parent.append(space_para2)
-                
-                # Add List of Tables title
-                lot_title_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
-                
-                # LOT Title paragraph properties
-                lot_title_pPr = etree.SubElement(lot_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
-                lot_title_spacing = etree.SubElement(lot_title_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
-                lot_title_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}after', '240')  # Space after title
-                
-                # LOT Title run
-                lot_title_run = etree.SubElement(lot_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-                lot_title_rPr = etree.SubElement(lot_title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-                lot_title_fonts = etree.SubElement(lot_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
-                lot_title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
-                lot_title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
-                lot_title_sz = etree.SubElement(lot_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
-                lot_title_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '32')  # 16pt
-                lot_title_bold = etree.SubElement(lot_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}b')
-                lot_title_color = etree.SubElement(lot_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color')
-                lot_title_color.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '2F5496')  # Blue color
-                
-                lot_title_text = etree.SubElement(lot_title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
-                lot_title_text.text = "List of Tables"
-                
-                # Insert LOT title
-                if index < len(parent):
-                    parent.insert(index, lot_title_para)
-                    index += 1
-                else:
-                    parent.append(lot_title_para)
-                
-                # Add LOT entries
-                for table_info in sorted(tables, key=lambda x: x['page']):
-                    table_text = table_info['text']
-                    page_num = table_info['page']
-                    
-                    # Create paragraph for LOT entry
-                    lot_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
-                    
-                    # Create paragraph properties
-                    lot_pPr = etree.SubElement(lot_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
-                    
-                    # Line spacing
-                    lot_spacing = etree.SubElement(lot_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
-                    lot_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}line', '276')  # 1.15 line spacing
-                    lot_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lineRule', 'auto')
-                    
-                    # Tab stops for proper alignment
-                    lot_tabs = etree.SubElement(lot_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tabs')
-                    lot_tab_stop = etree.SubElement(lot_tabs, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tab')
-                    lot_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', 'right')
-                    lot_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}leader', 'dot')  # Dotted line
-                    lot_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pos', '9360')  # Right align at 6.5"
-                    
-                    # Create run for table text
-                    lot_run1 = etree.SubElement(lot_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-                    lot_run1Pr = etree.SubElement(lot_run1, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-                    lot_rFonts = etree.SubElement(lot_run1Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
-                    lot_rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
-                    lot_rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
-                    lot_sz = etree.SubElement(lot_run1Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
-                    lot_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
-                    
-                    lot_text1 = etree.SubElement(lot_run1, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
-                    lot_text1.text = table_text
-                    
-                    # Create tab run
-                    lot_tab_run = etree.SubElement(lot_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-                    lot_tab_run_pr = etree.SubElement(lot_tab_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-                    lot_tab_fonts = etree.SubElement(lot_tab_run_pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
-                    lot_tab_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
-                    lot_tab_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
-                    lot_tab_sz = etree.SubElement(lot_tab_run_pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
-                    lot_tab_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
-                    
-                    lot_tab = etree.SubElement(lot_tab_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tab')
-                    
-                    # Create run for page number
-                    lot_run2 = etree.SubElement(lot_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
-                    lot_run2Pr = etree.SubElement(lot_run2, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
-                    lot_rFonts2 = etree.SubElement(lot_run2Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
-                    lot_rFonts2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
-                    lot_rFonts2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
-                    lot_sz2 = etree.SubElement(lot_run2Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
-                    lot_sz2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
-                    
-                    lot_text2 = etree.SubElement(lot_run2, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
-                    lot_text2.text = str(page_num)
-                    
-                    # Insert paragraph
-                    if index < len(parent):
-                        parent.insert(index, lot_para)
-                        index += 1
-                    else:
-                        parent.append(lot_para)
-                
-                current_app.logger.info(f"✅ Added List of Tables with {len(tables)} entries")
-        else:
-            current_app.logger.warning("⚠️ No TOC location found to write content")
-            shutil.rmtree(temp_dir)
-            return 0
+                # Store reference to this TOC entry paragraph for later page number update
+                toc_entry_paragraphs.append((heading_text, toc_para))
         
-        # Save the modified XML back
+        current_app.logger.info(f"✅ Wrote formatted TOC with {len(clean_headings)} entries (all left-aligned)")
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2295","message":"TOC entries created","data":{"entries_count":len(clean_headings)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        # Add List of Figures after TOC
+        # Use figures and tables already found in Step 3 (no need to re-find them)
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"toc_service.py:2305","message":"Using previously found figures and tables","data":{"figures_count":len(figures),"tables_count":len(tables)},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        
+        if figures:
+            # Add page break before LOF to start it on a new page
+            lof_page_break_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
+            lof_page_break_pPr = etree.SubElement(lof_page_break_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
+            lof_page_break_run = etree.SubElement(lof_page_break_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+            lof_page_break_br = etree.SubElement(lof_page_break_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}br')
+            lof_page_break_br.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type', 'page')
+            
+            # Insert page break
+            if index < len(list(insert_parent)):
+                insert_parent.insert(index, lof_page_break_para)
+                index += 1
+            else:
+                insert_parent.append(lof_page_break_para)
+                index += 1
+            
+            current_app.logger.info("📄 Added page break before LOF to ensure it starts on a new page")
+            
+            # Add List of Figures title
+            lof_title_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
+            
+            # LOF Title paragraph properties
+            lof_title_pPr = etree.SubElement(lof_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
+            lof_title_spacing = etree.SubElement(lof_title_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
+            lof_title_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}before', '240')  # Space before LOF title (after TOC)
+            lof_title_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}after', '240')  # Space after LOF title
+            
+            # LOF Title run
+            lof_title_run = etree.SubElement(lof_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+            lof_title_rPr = etree.SubElement(lof_title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
+            lof_title_fonts = etree.SubElement(lof_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
+            lof_title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
+            lof_title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
+            lof_title_sz = etree.SubElement(lof_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
+            lof_title_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '32')  # 16pt
+            lof_title_bold = etree.SubElement(lof_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}b')
+            lof_title_color = etree.SubElement(lof_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color')
+            lof_title_color.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '2F5496')  # Blue color
+            
+            lof_title_text = etree.SubElement(lof_title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
+            lof_title_text.text = "List of Figures"
+            
+            # Insert LOF title
+            if index < len(list(insert_parent)):
+                insert_parent.insert(index, lof_title_para)
+                index += 1
+            else:
+                insert_parent.append(lof_title_para)
+            
+            # Add LOF entries
+            for figure_info in sorted(figures, key=lambda x: x['page']):
+                figure_text = figure_info['text']
+                page_num = figure_info['page']
+                
+                # Create paragraph for LOF entry
+                lof_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
+                
+                # Create paragraph properties
+                lof_pPr = etree.SubElement(lof_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
+                
+                # Line spacing
+                lof_spacing = etree.SubElement(lof_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
+                lof_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}line', '276')  # 1.15 line spacing
+                lof_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lineRule', 'auto')
+                
+                # Explicit indentation for uniform left margin (all entries at same level)
+                lof_ind = etree.SubElement(lof_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ind')
+                lof_ind.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}left', '180')  # Small uniform margin (0.125" = 180 twips)
+                
+                # Tab stops for proper alignment
+                lof_tabs = etree.SubElement(lof_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tabs')
+                lof_tab_stop = etree.SubElement(lof_tabs, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tab')
+                lof_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', 'right')
+                lof_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}leader', 'dot')  # Dotted line
+                lof_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pos', '9360')  # Right align at 6.5"
+                
+                # Create run for figure text
+                lof_run1 = etree.SubElement(lof_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+                lof_run1Pr = etree.SubElement(lof_run1, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
+                lof_rFonts = etree.SubElement(lof_run1Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
+                lof_rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
+                lof_rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
+                lof_sz = etree.SubElement(lof_run1Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
+                lof_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
+                
+                lof_text1 = etree.SubElement(lof_run1, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
+                lof_text1.text = figure_text
+                
+                # Create tab run
+                lof_tab_run = etree.SubElement(lof_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+                lof_tab_run_pr = etree.SubElement(lof_tab_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
+                lof_tab_fonts = etree.SubElement(lof_tab_run_pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
+                lof_tab_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
+                lof_tab_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
+                lof_tab_sz = etree.SubElement(lof_tab_run_pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
+                lof_tab_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
+                
+                lof_tab = etree.SubElement(lof_tab_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tab')
+                
+                # Create run for page number
+                lof_run2 = etree.SubElement(lof_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+                lof_run2Pr = etree.SubElement(lof_run2, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
+                lof_rFonts2 = etree.SubElement(lof_run2Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
+                lof_rFonts2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
+                lof_rFonts2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
+                lof_sz2 = etree.SubElement(lof_run2Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
+                lof_sz2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
+                
+                lof_text2 = etree.SubElement(lof_run2, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
+                lof_text2.text = str(page_num)
+                
+                # Insert paragraph
+                if index < len(list(insert_parent)):
+                    insert_parent.insert(index, lof_para)
+                    index += 1
+                else:
+                    insert_parent.append(lof_para)
+            
+            current_app.logger.info(f"✅ Added List of Figures with {len(figures)} entries (all left-aligned)")
+            # #region agent log
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"toc_service.py:2422","message":"LOF entries created","data":{"figures_count":len(figures)},"timestamp":int(time.time()*1000)}) + '\n')
+            # #endregion
+        
+        # Add List of Tables after LOF
+        if tables:
+            # Add page break before LOT to start it on a new page
+            lot_page_break_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
+            lot_page_break_pPr = etree.SubElement(lot_page_break_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
+            lot_page_break_run = etree.SubElement(lot_page_break_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+            lot_page_break_br = etree.SubElement(lot_page_break_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}br')
+            lot_page_break_br.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type', 'page')
+            
+            # Insert page break
+            if index < len(list(insert_parent)):
+                insert_parent.insert(index, lot_page_break_para)
+                index += 1
+            else:
+                insert_parent.append(lot_page_break_para)
+                index += 1
+            
+            current_app.logger.info("📄 Added page break before LOT to ensure it starts on a new page")
+            
+            # Add List of Tables title
+            lot_title_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
+            
+            # LOT Title paragraph properties
+            lot_title_pPr = etree.SubElement(lot_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
+            lot_title_spacing = etree.SubElement(lot_title_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
+            lot_title_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}before', '240')  # Space before LOT title (after LOF)
+            lot_title_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}after', '240')  # Space after LOT title
+            
+            # LOT Title run
+            lot_title_run = etree.SubElement(lot_title_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+            lot_title_rPr = etree.SubElement(lot_title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
+            lot_title_fonts = etree.SubElement(lot_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
+            lot_title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
+            lot_title_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
+            lot_title_sz = etree.SubElement(lot_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
+            lot_title_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '32')  # 16pt
+            lot_title_bold = etree.SubElement(lot_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}b')
+            lot_title_color = etree.SubElement(lot_title_rPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color')
+            lot_title_color.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '2F5496')  # Blue color
+            
+            lot_title_text = etree.SubElement(lot_title_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
+            lot_title_text.text = "List of Tables"
+            
+            # Insert LOT title
+            if index < len(list(insert_parent)):
+                insert_parent.insert(index, lot_title_para)
+                index += 1
+            else:
+                insert_parent.append(lot_title_para)
+            
+            # Add LOT entries
+            for table_info in sorted(tables, key=lambda x: x['page']):
+                table_text = table_info['text']
+                page_num = table_info['page']
+                
+                # Create paragraph for LOT entry
+                lot_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
+                
+                # Create paragraph properties
+                lot_pPr = etree.SubElement(lot_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
+                
+                # Line spacing
+                lot_spacing = etree.SubElement(lot_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}spacing')
+                lot_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}line', '276')  # 1.15 line spacing
+                lot_spacing.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}lineRule', 'auto')
+                
+                # Explicit indentation for uniform left margin (all entries at same level)
+                lot_ind = etree.SubElement(lot_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ind')
+                lot_ind.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}left', '180')  # Small uniform margin (0.125" = 180 twips)
+                
+                # Tab stops for proper alignment
+                lot_tabs = etree.SubElement(lot_pPr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tabs')
+                lot_tab_stop = etree.SubElement(lot_tabs, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tab')
+                lot_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', 'right')
+                lot_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}leader', 'dot')  # Dotted line
+                lot_tab_stop.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pos', '9360')  # Right align at 6.5"
+                
+                # Create run for table text
+                lot_run1 = etree.SubElement(lot_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+                lot_run1Pr = etree.SubElement(lot_run1, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
+                lot_rFonts = etree.SubElement(lot_run1Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
+                lot_rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
+                lot_rFonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
+                lot_sz = etree.SubElement(lot_run1Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
+                lot_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
+                
+                lot_text1 = etree.SubElement(lot_run1, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
+                lot_text1.text = table_text
+                
+                # Create tab run
+                lot_tab_run = etree.SubElement(lot_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+                lot_tab_run_pr = etree.SubElement(lot_tab_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
+                lot_tab_fonts = etree.SubElement(lot_tab_run_pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
+                lot_tab_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
+                lot_tab_fonts.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
+                lot_tab_sz = etree.SubElement(lot_tab_run_pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
+                lot_tab_sz.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
+                
+                lot_tab = etree.SubElement(lot_tab_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}tab')
+                
+                # Create run for page number
+                lot_run2 = etree.SubElement(lot_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+                lot_run2Pr = etree.SubElement(lot_run2, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr')
+                lot_rFonts2 = etree.SubElement(lot_run2Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rFonts')
+                lot_rFonts2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}ascii', 'Calibri')
+                lot_rFonts2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}hAnsi', 'Calibri')
+                lot_sz2 = etree.SubElement(lot_run2Pr, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}sz')
+                lot_sz2.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', '22')  # 11pt
+                
+                lot_text2 = etree.SubElement(lot_run2, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}t')
+                lot_text2.text = str(page_num)
+                
+                # Insert paragraph
+                if index < len(list(insert_parent)):
+                    insert_parent.insert(index, lot_para)
+                    index += 1
+                else:
+                    insert_parent.append(lot_para)
+            
+            current_app.logger.info(f"✅ Added List of Tables with {len(tables)} entries (all left-aligned)")
+            # #region agent log
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"toc_service.py:2539","message":"LOT entries created","data":{"tables_count":len(tables)},"timestamp":int(time.time()*1000)}) + '\n')
+            # #endregion
+        
+        # Add page break before main content (after all TOC/LOF/LOT) to ensure "About this Report" starts on a new page
+        # This should be added after all TOC/LOF/LOT content is written
+        main_content_page_break_para = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}p')
+        main_content_page_break_pPr = etree.SubElement(main_content_page_break_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr')
+        main_content_page_break_run = etree.SubElement(main_content_page_break_para, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}r')
+        main_content_page_break_br = etree.SubElement(main_content_page_break_run, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}br')
+        main_content_page_break_br.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}type', 'page')
+        
+        # Insert page break after all TOC/LOF/LOT content (before main content)
+        if index < len(list(insert_parent)):
+            insert_parent.insert(index, main_content_page_break_para)
+            index += 1
+        else:
+            insert_parent.append(main_content_page_break_para)
+            index += 1
+        
+        current_app.logger.info("📄 Added page break before main content to ensure 'About this Report' starts on a new page")
+        
+        # Save the modified XML back (FIRST PASS - with estimated page numbers)
         modified_xml = etree.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
         
         with open(doc_xml_path, 'w', encoding='utf-8') as f:
             f.write(modified_xml)
         
-        # Repackage the docx file
+        # Repackage the docx file (FIRST PASS)
         new_docx_path = docx_path + '.tmp'
         with zipfile.ZipFile(new_docx_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
             for root_dir, dirs, files in os.walk(extract_dir):
@@ -2373,94 +3100,206 @@ def force_complete_toc_rebuild(docx_path):
                     arcname = os.path.relpath(file_path, extract_dir)
                     zip_out.write(file_path, arcname)
         
-        # Replace original file
+        # Replace original file (FIRST PASS)
         shutil.move(new_docx_path, docx_path)
+        
+        current_app.logger.info("✅ First pass complete: TOC/LOF/LOT written with estimated page numbers")
+        
+        # SECOND PASS: Re-read document and recalculate actual page numbers
+        current_app.logger.info("🔄 Second pass: Recalculating actual page numbers after TOC/LOF/LOT are written...")
+        
+        # Re-extract the document to get the actual structure
+        with zipfile.ZipFile(docx_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+        
+        # Re-parse document XML
+        with open(doc_xml_path, 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+        
+        root = etree.fromstring(xml_content.encode('utf-8'))
+        
+        # Calculate actual TOC/LOF/LOT page counts from what was written
+        # Count paragraphs in TOC/LOF/LOT sections
+        all_paragraphs_after_write = root.xpath('.//w:p', namespaces=namespaces)
+        
+        # Find where TOC starts and ends, LOF starts and ends, LOT starts and ends
+        toc_start_idx = None
+        toc_end_idx = None
+        lof_start_idx = None
+        lof_end_idx = None
+        lot_start_idx = None
+        lot_end_idx = None
+        
+        in_toc = False
+        in_lof = False
+        in_lot = False
+        
+        for para_idx, para in enumerate(all_paragraphs_after_write):
+            para_text = get_para_text(para)
+            para_lower = para_text.lower()
+            
+            if para_lower in ['table of contents', 'contents', 'toc']:
+                toc_start_idx = para_idx
+                in_toc = True
+                in_lof = False
+                in_lot = False
+            elif para_lower in ['list of figures', 'figures']:
+                if in_toc:
+                    toc_end_idx = para_idx - 1
+                lof_start_idx = para_idx
+                in_toc = False
+                in_lof = True
+                in_lot = False
+            elif para_lower in ['list of tables', 'tables']:
+                if in_lof:
+                    lof_end_idx = para_idx - 1
+                lot_start_idx = para_idx
+                in_toc = False
+                in_lof = False
+                in_lot = True
+            elif in_toc or in_lof or in_lot:
+                # Check if we've reached main content (clear break)
+                if len(para_text) > 80 and not re.search(r'\s+\d{1,3}\s*$', para_text):
+                    # Likely main content
+                    if in_toc and toc_end_idx is None:
+                        toc_end_idx = para_idx - 1
+                        in_toc = False
+                    elif in_lof and lof_end_idx is None:
+                        lof_end_idx = para_idx - 1
+                        in_lof = False
+                    elif in_lot and lot_end_idx is None:
+                        lot_end_idx = para_idx - 1
+                        in_lot = False
+        
+        # If we didn't find end indices, use the start of next section or end of document
+        if toc_end_idx is None:
+            toc_end_idx = lof_start_idx if lof_start_idx else (lof_end_idx if lof_end_idx else (lot_start_idx if lot_start_idx else len(all_paragraphs_after_write) - 1))
+        if lof_end_idx is None:
+            lof_end_idx = lot_start_idx if lot_start_idx else (lot_end_idx if lot_end_idx else len(all_paragraphs_after_write) - 1)
+        if lot_end_idx is None:
+            lot_end_idx = len(all_paragraphs_after_write) - 1
+        
+        # Calculate actual page counts based on paragraphs written
+        # Re-open document to get settings
+        from docx import Document
+        doc_for_recalc = Document(docx_path)
+        doc_settings = get_document_properties(doc_for_recalc)
+        avg_line_height = doc_settings['default_font_size'] * doc_settings['line_spacing']
+        lines_per_page = doc_settings['usable_height'] / avg_line_height
+        
+        # Count lines in TOC section (simple estimation based on paragraph count and text length)
+        toc_lines = 0
+        if toc_start_idx is not None and toc_end_idx is not None:
+            for para_idx in range(toc_start_idx, min(toc_end_idx + 1, len(all_paragraphs_after_write))):
+                para = all_paragraphs_after_write[para_idx]
+                para_text = get_para_text(para)
+                # Simple line estimation: ~80 chars per line, minimum 1 line per paragraph
+                if para_text:
+                    toc_lines += max(1, len(para_text) / 80)
+                else:
+                    toc_lines += 0.2  # Empty paragraphs take minimal space
+        actual_toc_pages = max(1, int(toc_lines / lines_per_page) + (1 if toc_lines % lines_per_page > 0 else 0)) if toc_lines > 0 else 1
+        
+        # Count lines in LOF section
+        lof_lines = 0
+        if lof_start_idx is not None and lof_end_idx is not None:
+            for para_idx in range(lof_start_idx, min(lof_end_idx + 1, len(all_paragraphs_after_write))):
+                para = all_paragraphs_after_write[para_idx]
+                para_text = get_para_text(para)
+                if para_text:
+                    lof_lines += max(1, len(para_text) / 80)
+                else:
+                    lof_lines += 0.2
+        actual_lof_pages = max(1, int(lof_lines / lines_per_page) + (1 if lof_lines % lines_per_page > 0 else 0)) if lof_lines > 0 else 0
+        
+        # Count lines in LOT section
+        lot_lines = 0
+        if lot_start_idx is not None and lot_end_idx is not None:
+            for para_idx in range(lot_start_idx, min(lot_end_idx + 1, len(all_paragraphs_after_write))):
+                para = all_paragraphs_after_write[para_idx]
+                para_text = get_para_text(para)
+                if para_text:
+                    lot_lines += max(1, len(para_text) / 80)
+                else:
+                    lot_lines += 0.2
+        actual_lot_pages = max(1, int(lot_lines / lines_per_page) + (1 if lot_lines % lines_per_page > 0 else 0)) if lot_lines > 0 else 0
+        
+        current_app.logger.info(f"📋 Actual front matter pages: TOC={actual_toc_pages}, LOF={actual_lof_pages}, LOT={actual_lot_pages}")
+        
+        # Recalculate page numbers for all headings with actual TOC/LOF/LOT page counts
+        current_app.logger.info("🔄 Recalculating heading page numbers with actual TOC/LOF/LOT page counts...")
+        updated_heading_pages = calculate_page_numbers_for_headings(docx_path, lof_pages=actual_lof_pages, lot_pages=actual_lot_pages, toc_pages=actual_toc_pages)
+        
+        if updated_heading_pages:
+            # Re-find TOC entry paragraphs in the re-parsed XML
+            # We need to match them by heading text
+            toc_entry_paragraphs_in_xml = []
+            for heading_text, _ in toc_entry_paragraphs:
+                # Extract text without section number for matching
+                heading_text_no_number = re.sub(r'^\d+(\.\d+)*\.?\s+', '', heading_text).strip()
+                
+                # Find the paragraph in the re-parsed XML that contains this heading text
+                for para in all_paragraphs_after_write:
+                    para_text = get_para_text(para)
+                    # Check if this paragraph has a page number (it's a TOC entry)
+                    if re.search(r'\s+\d{1,3}\s*$', para_text):
+                        # Extract text without section number and page number
+                        para_text_no_number = re.sub(r'^\d+(\.\d+)*\.?\s+', '', para_text).strip()
+                        para_text_no_number = re.sub(r'\s+\d{1,3}\s*$', '', para_text_no_number).strip()
+                        
+                        # Match by comparing text without numbers
+                        if (heading_text in para_text or 
+                            heading_text_no_number == para_text_no_number or
+                            heading_text_no_number in para_text or
+                            para_text_no_number in heading_text):
+                            toc_entry_paragraphs_in_xml.append((heading_text, para))
+                            break
+            
+            # Update TOC entry page numbers
+            current_app.logger.info("🔄 Updating TOC entry page numbers with recalculated values...")
+            updated_count = update_toc_page_numbers_in_xml(root, toc_entry_paragraphs_in_xml, updated_heading_pages)
+            
+            if updated_count > 0:
+                current_app.logger.info(f"✅ Updated {updated_count} TOC entry page numbers")
+            
+            # Save the modified XML back (SECOND PASS - with corrected page numbers)
+            modified_xml = etree.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
+            
+            with open(doc_xml_path, 'w', encoding='utf-8') as f:
+                f.write(modified_xml)
+            
+            # Repackage the docx file (SECOND PASS)
+            new_docx_path = docx_path + '.tmp'
+            with zipfile.ZipFile(new_docx_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+                for root_dir, dirs, files in os.walk(extract_dir):
+                    for file in files:
+                        file_path = os.path.join(root_dir, file)
+                        arcname = os.path.relpath(file_path, extract_dir)
+                        zip_out.write(file_path, arcname)
+            
+            # Replace original file (SECOND PASS)
+            shutil.move(new_docx_path, docx_path)
+            current_app.logger.info("✅ Second pass complete: TOC entries updated with correct page numbers")
+        else:
+            current_app.logger.warning("⚠️ Could not recalculate page numbers - using estimated values")
         
         # Cleanup
         shutil.rmtree(temp_dir)
         
-        if fields_rebuilt > 0:
-            current_app.logger.info(f"✅ Completely rebuilt {fields_rebuilt} TOC field(s) with programmatically calculated page numbers")
-            current_app.logger.info("📝 NOTE: TOC now contains static content with calculated page numbers (not a Word field)")
+        if fields_rebuilt > 0 or removed_count > 0:
+            current_app.logger.info(f"✅ Completely rebuilt TOC/LOF/LOT with programmatically calculated page numbers")
+            current_app.logger.info("📝 NOTE: All entries are left-aligned (no hierarchical indentation)")
+            current_app.logger.info("📝 Section numbering is preserved in the text")
         else:
-            current_app.logger.debug("ℹ️ No TOC fields found to rebuild")
+            current_app.logger.debug("ℹ️ No TOC/LOF/LOT content was rebuilt")
         
-        return fields_rebuilt
-        
-        # CRITICAL: Add document-level settings to force field updates on document open
-        settings_xml_path = os.path.join(extract_dir, 'word', 'settings.xml')
-        if os.path.exists(settings_xml_path):
-            try:
-                with open(settings_xml_path, 'r', encoding='utf-8') as f:
-                    settings_content = f.read()
-                
-                settings_root = etree.fromstring(settings_content.encode('utf-8'))
-                
-                # Add updateFields setting to force field updates on open
-                # This ensures Word recalculates ALL fields including TOC page numbers
-                update_fields = settings_root.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}updateFields')
-                if update_fields is None:
-                    update_fields = etree.SubElement(settings_root, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}updateFields')
-                update_fields.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', 'true')
-                
-                # Also ensure trackRevisions is off (revisions can affect page numbering)
-                track_revisions = settings_root.find('.//{http://schemas.openxmlformats.org/wordprocessingml/2006/main}trackRevisions')
-                if track_revisions is not None:
-                    track_revisions.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', 'false')
-                
-                # Save modified settings
-                modified_settings = etree.tostring(settings_root, encoding='utf-8', xml_declaration=True).decode('utf-8')
-                with open(settings_xml_path, 'w', encoding='utf-8') as f:
-                    f.write(modified_settings)
-                
-                current_app.logger.debug("✅ Added updateFields setting to force field updates on document open")
-                
-            except Exception as e:
-                current_app.logger.debug(f"⚠️ Could not modify settings.xml: {e}")
-        else:
-            # Create settings.xml if it doesn't exist
-            try:
-                settings_root = etree.Element('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}settings')
-                update_fields = etree.SubElement(settings_root, '{http://schemas.openxmlformats.org/wordprocessingml/2006/main}updateFields')
-                update_fields.set('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}val', 'true')
-                
-                settings_xml_path = os.path.join(extract_dir, 'word', 'settings.xml')
-                with open(settings_xml_path, 'wb') as f:
-                    f.write(etree.tostring(settings_root, encoding='utf-8', xml_declaration=True))
-                
-                current_app.logger.debug("✅ Created settings.xml with updateFields enabled")
-            except Exception as e:
-                current_app.logger.debug(f"⚠️ Could not create settings.xml: {e}")
-        
-        # Save the modified XML back
-        modified_xml = etree.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
-        
-        with open(doc_xml_path, 'w', encoding='utf-8') as f:
-            f.write(modified_xml)
-        
-        # Repackage the docx file
-        new_docx_path = docx_path + '.tmp'
-        with zipfile.ZipFile(new_docx_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
-            for root_dir, dirs, files in os.walk(extract_dir):
-                for file in files:
-                    file_path = os.path.join(root_dir, file)
-                    arcname = os.path.relpath(file_path, extract_dir)
-                    zip_out.write(file_path, arcname)
-        
-        # Replace original file
-        shutil.move(new_docx_path, docx_path)
-        
-        # Cleanup
-        shutil.rmtree(temp_dir)
-        
-        if fields_rebuilt > 0:
-            current_app.logger.info(f"✅ Completely rebuilt {fields_rebuilt} TOC field(s) from scratch - Word MUST recalculate all page numbers on open")
-            current_app.logger.info("📝 NOTE: Page numbers in TOC are calculated by Word based on final document layout.")
-            current_app.logger.info("📝 When Word opens the document, it will recalculate page numbers for all headings.")
-        else:
-            current_app.logger.debug("ℹ️ No TOC fields found to rebuild")
-        
-        return fields_rebuilt
+        result_value = fields_rebuilt if fields_rebuilt > 0 else 1
+        # #region agent log
+        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+            import json, time
+            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"F","location":"toc_service.py:2549","message":"Function EXIT","data":{"fields_rebuilt":fields_rebuilt,"removed_count":removed_count,"return_value":result_value},"timestamp":int(time.time()*1000)}) + '\n')
+        # #endregion
+        return result_value
         
     except Exception as e:
         current_app.logger.error(f"❌ Error in complete TOC rebuild: {e}")
@@ -2475,6 +3314,294 @@ def force_complete_toc_rebuild(docx_path):
                 pass
         
         return 0
+
+
+def remove_existing_toc_lof_lot(docx_path):
+    """
+    STEP 1: Remove ONLY existing TOC, LOF, and LOT content from the document.
+    
+    This function focuses on cleanly removing all TOC/LOF/LOT sections from pages 2-4
+    without rebuilding anything. It identifies and removes:
+    - "Table of Contents" title and all its entries
+    - "List of Figures" title and all its entries  
+    - "List of Tables" title and all its entries
+    - Any TOC field codes
+    
+    Args:
+        docx_path: Path to the .docx file
+        
+    Returns:
+        dict: Summary with number of paragraphs removed and success status
+    """
+    try:
+        current_app.logger.info("🗑️ STEP 1: Removing existing TOC, LOF, and LOT content...")
+        
+        # Create temporary directory for processing
+        temp_dir = tempfile.mkdtemp()
+        
+        # Extract docx as ZIP
+        extract_dir = os.path.join(temp_dir, 'extracted')
+        with zipfile.ZipFile(docx_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+        
+        # Process document.xml
+        doc_xml_path = os.path.join(extract_dir, 'word', 'document.xml')
+        if not os.path.exists(doc_xml_path):
+            current_app.logger.warning("⚠️ document.xml not found in docx file")
+            shutil.rmtree(temp_dir)
+            return {'success': False, 'error': 'document.xml not found'}
+            
+        # Parse document XML
+        with open(doc_xml_path, 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+            
+        root = etree.fromstring(xml_content.encode('utf-8'))
+        namespaces = {
+            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        }
+        
+        # Get all paragraphs
+        all_paragraphs = root.xpath('.//w:p', namespaces=namespaces)
+        current_app.logger.info(f"📄 Found {len(all_paragraphs)} total paragraphs in document")
+        
+        paragraphs_to_remove = []
+        
+        # Helper function to get paragraph text
+        def get_para_text(para):
+            text_elements = para.xpath('.//w:t', namespaces=namespaces)
+            para_text = ""
+            for text_elem in text_elements:
+                if text_elem.text:
+                    para_text += text_elem.text
+            return para_text.strip()
+        
+        # Helper function to check if paragraph looks like a TOC/LOF/LOT entry
+        def is_toc_lof_lot_content(para_text):
+            if not para_text or len(para_text) < 2:
+                return False
+            
+            para_lower = para_text.lower()
+            
+            # Check if it's a title (exact match)
+            is_title = para_lower in [
+                'table of contents', 'list of figures', 'list of tables', 
+                'contents', 'toc', 'figures', 'tables'
+            ]
+            
+            if is_title:
+                return True
+            
+            # Check for page number at the end (common in TOC entries)
+            has_page_number = bool(re.search(r'\s+\d{1,3}\s*$', para_text))
+            
+            # Check for section numbering (1., 1.1, 1.1.1, etc.)
+            has_section_number = bool(re.search(r'^\d+(\.\d+)*\.?\s+', para_text))
+            
+            # Check for figure/table references
+            has_figure_table = bool(re.search(r'(figure|table)\s*\d+', para_lower))
+            
+            # Check for dotted line pattern (TOC entries often have dots)
+            has_dots = bool(re.search(r'\.{3,}', para_text))
+            
+            # Check for common TOC entry patterns
+            toc_patterns = [
+                r'methodology\s+\d+',
+                r'bnpl definitions\s+\d+', 
+                r'disclaimer\s+\d+',
+                r'india.*buy now pay later.*\d+',
+                r'attractiveness\s+\d+',
+                r'trend analysis\s+\d+',
+                r'transaction volume\s+\d+',
+                r'revenue segments\s+\d+',
+                r'market share\s+\d+'
+            ]
+            
+            has_toc_pattern = any(re.search(pattern, para_lower) for pattern in toc_patterns)
+            
+            # It's TOC/LOF/LOT content if it has page numbers AND (section numbers OR figure/table refs OR dots OR TOC patterns)
+            return has_page_number and (has_section_number or has_figure_table or has_dots or has_toc_pattern)
+        
+        # Helper function to check if paragraph is clearly NOT part of TOC/LOF/LOT
+        def is_clear_document_content(para_text):
+            """Check if this paragraph is clearly main document content (not TOC/LOF/LOT)"""
+            if not para_text or len(para_text) < 10:
+                return False
+            
+            para_lower = para_text.lower()
+            
+            # Check if it starts with common document section patterns (not TOC numbering)
+            main_content_starters = [
+                'about', 'introduction', 'executive', 'summary', 'methodology', 
+                'background', 'overview', 'analysis', 'conclusion', 'recommendations',
+                'this report', 'this study', 'this analysis', 'the purpose',
+                'buy now pay later', 'bnpl', 'the indian', 'india has'
+            ]
+            
+            starts_with_content = any(para_lower.startswith(starter) for starter in main_content_starters)
+            
+            # Check if it's a long paragraph without page numbers (likely main content)
+            is_long_without_page_num = len(para_text) > 80 and not re.search(r'\s+\d{1,3}\s*$', para_text)
+            
+            return starts_with_content or is_long_without_page_num
+        
+        # Scan through paragraphs to identify TOC/LOF/LOT sections
+        in_toc_section = False
+        in_lof_section = False  
+        in_lot_section = False
+        consecutive_non_toc = 0
+        
+        for para_idx, para in enumerate(all_paragraphs):
+            para_text = get_para_text(para)
+            
+            # Log paragraph for debugging (first 50 paragraphs only)
+            if para_idx < 50:
+                current_app.logger.debug(f"Para {para_idx}: '{para_text[:60]}{'...' if len(para_text) > 60 else ''}'")
+            
+            # Check for section titles
+            if para_text.lower() in ['table of contents', 'contents', 'toc']:
+                current_app.logger.info(f"🔍 Found TOC title at paragraph {para_idx}: '{para_text}'")
+                in_toc_section = True
+                in_lof_section = False
+                in_lot_section = False
+                consecutive_non_toc = 0
+                paragraphs_to_remove.append(para)
+                continue
+                
+            elif para_text.lower() in ['list of figures', 'figures']:
+                current_app.logger.info(f"🔍 Found LOF title at paragraph {para_idx}: '{para_text}'")
+                in_toc_section = False
+                in_lof_section = True
+                in_lot_section = False
+                consecutive_non_toc = 0
+                paragraphs_to_remove.append(para)
+                continue
+                
+            elif para_text.lower() in ['list of tables', 'tables']:
+                current_app.logger.info(f"🔍 Found LOT title at paragraph {para_idx}: '{para_text}'")
+                in_toc_section = False
+                in_lof_section = False
+                in_lot_section = True
+                consecutive_non_toc = 0
+                paragraphs_to_remove.append(para)
+                continue
+            
+            # If we're in a TOC/LOF/LOT section, check if this paragraph belongs to it
+            if in_toc_section or in_lof_section or in_lot_section:
+                section_name = "TOC" if in_toc_section else ("LOF" if in_lof_section else "LOT")
+                
+                if is_toc_lof_lot_content(para_text):
+                    # This looks like TOC/LOF/LOT content - remove it
+                    current_app.logger.debug(f"🗑️ Removing {section_name} entry: '{para_text[:50]}{'...' if len(para_text) > 50 else ''}'")
+                    paragraphs_to_remove.append(para)
+                    consecutive_non_toc = 0
+                    
+                elif is_clear_document_content(para_text):
+                    # This is clearly main document content - end the section
+                    current_app.logger.info(f"✅ End of {section_name} section at paragraph {para_idx} (found main content: '{para_text[:50]}{'...' if len(para_text) > 50 else ''}')")
+                    in_toc_section = False
+                    in_lof_section = False
+                    in_lot_section = False
+                    consecutive_non_toc = 0
+                    
+                else:
+                    # Ambiguous paragraph - might be spacing or part of TOC
+                    consecutive_non_toc += 1
+                    
+                    if consecutive_non_toc >= 5:
+                        # Too many ambiguous paragraphs - likely end of section
+                        current_app.logger.info(f"✅ End of {section_name} section at paragraph {para_idx} (5+ consecutive ambiguous paragraphs)")
+                        in_toc_section = False
+                        in_lof_section = False
+                        in_lot_section = False
+                        consecutive_non_toc = 0
+                    else:
+                        # Still might be part of TOC - remove to be safe
+                        if para_text.strip():  # Only remove non-empty paragraphs
+                            current_app.logger.debug(f"🗑️ Removing ambiguous {section_name} paragraph: '{para_text[:50]}{'...' if len(para_text) > 50 else ''}'")
+                            paragraphs_to_remove.append(para)
+            
+            # Also check for TOC field codes (Word fields) anywhere in document
+            instr_texts = para.xpath('.//w:instrText', namespaces=namespaces)
+            for instr_text in instr_texts:
+                if instr_text.text and instr_text.text.strip().upper().startswith('TOC'):
+                    current_app.logger.info(f"🔍 Found TOC field code at paragraph {para_idx}")
+                    paragraphs_to_remove.append(para)
+                    
+                    # Also remove field content (until field end)
+                    for next_idx in range(para_idx + 1, min(para_idx + 20, len(all_paragraphs))):
+                        next_para = all_paragraphs[next_idx]
+                        if next_para in paragraphs_to_remove:
+                            continue
+                        
+                        fld_chars = next_para.xpath('.//w:fldChar', namespaces=namespaces)
+                        field_ended = False
+                        for fld_char in fld_chars:
+                            if fld_char.get('{http://schemas.openxmlformats.org/wordprocessingml/2006/main}fldCharType') == 'end':
+                                field_ended = True
+                                break
+                        
+                        if not field_ended:
+                            paragraphs_to_remove.append(next_para)
+                        else:
+                            break
+                    break
+        
+        # Remove all identified paragraphs
+        removed_count = 0
+        for para in paragraphs_to_remove:
+            parent = para.getparent()
+            if parent is not None:
+                parent.remove(para)
+                removed_count += 1
+        
+        current_app.logger.info(f"🗑️ Removed {removed_count} paragraphs (TOC/LOF/LOT titles + entries + field codes)")
+        
+        # Save the modified XML
+        modified_xml = etree.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
+        with open(doc_xml_path, 'w', encoding='utf-8') as f:
+            f.write(modified_xml)
+        
+        # Repackage the docx file
+        new_docx_path = docx_path + '.tmp'
+        with zipfile.ZipFile(new_docx_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+            for root_dir, dirs, files in os.walk(extract_dir):
+                for file in files:
+                    file_path = os.path.join(root_dir, file)
+                    arcname = os.path.relpath(file_path, extract_dir)
+                    zip_out.write(file_path, arcname)
+        
+        # Replace original file
+        shutil.move(new_docx_path, docx_path)
+        
+        # Cleanup
+        shutil.rmtree(temp_dir)
+        
+        result = {
+            'success': True,
+            'paragraphs_removed': removed_count,
+            'message': f'Successfully removed {removed_count} TOC/LOF/LOT paragraphs'
+        }
+        
+        current_app.logger.info(f"✅ STEP 1 Complete: {result['message']}")
+        return result
+        
+    except Exception as e:
+        current_app.logger.error(f"❌ Error removing TOC/LOF/LOT content: {e}")
+        import traceback
+        current_app.logger.error(traceback.format_exc())
+        
+        # Cleanup on error
+        if 'temp_dir' in locals():
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass
+        
+        return {
+            'success': False,
+            'error': str(e),
+            'paragraphs_removed': 0
+        }
 
 
 def update_toc(doc, docx_path=None, flat_data_map=None):
@@ -2551,6 +3678,233 @@ def update_toc(doc, docx_path=None, flat_data_map=None):
         current_app.logger.error(f"❌ Error in TOC update: {e}")
         import traceback
         current_app.logger.error(traceback.format_exc())
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+def clean_pages_2_3_4_completely(docx_path):
+    """
+    AGGRESSIVE APPROACH: Completely clean pages 2, 3, and 4 of the Word document.
+    
+    This function removes ALL content from pages 2-4 where TOC/LOF/LOT typically reside.
+    It uses page break detection to identify page boundaries and removes everything
+    between the first page break (start of page 2) and the third page break (end of page 4).
+    
+    Args:
+        docx_path: Path to the .docx file
+        
+    Returns:
+        dict: Summary with number of paragraphs removed and success status
+    """
+    try:
+        current_app.logger.info("🗑️ AGGRESSIVE CLEANING: Removing ALL content from pages 2, 3, and 4...")
+        
+        # Create temporary directory for processing
+        temp_dir = tempfile.mkdtemp()
+        
+        # Extract docx as ZIP
+        extract_dir = os.path.join(temp_dir, 'extracted')
+        with zipfile.ZipFile(docx_path, 'r') as zip_ref:
+            zip_ref.extractall(extract_dir)
+        
+        # Process document.xml
+        doc_xml_path = os.path.join(extract_dir, 'word', 'document.xml')
+        if not os.path.exists(doc_xml_path):
+            current_app.logger.warning("⚠️ document.xml not found in docx file")
+            shutil.rmtree(temp_dir)
+            return {'success': False, 'error': 'document.xml not found'}
+            
+        # Parse document XML
+        with open(doc_xml_path, 'r', encoding='utf-8') as f:
+            xml_content = f.read()
+            
+        root = etree.fromstring(xml_content.encode('utf-8'))
+        namespaces = {
+            'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'
+        }
+        
+        # Get all paragraphs
+        all_paragraphs = root.xpath('.//w:p', namespaces=namespaces)
+        current_app.logger.info(f"📄 Found {len(all_paragraphs)} total paragraphs in document")
+        
+        paragraphs_to_remove = []
+        page_breaks_found = 0
+        in_pages_2_to_4 = False
+        
+        # Helper function to check if paragraph has a page break
+        def has_page_break(para):
+            page_breaks = para.xpath('.//w:br[@w:type="page"]', namespaces=namespaces)
+            return len(page_breaks) > 0
+        
+        # Helper function to get paragraph text for debugging
+        def get_para_text(para):
+            text_elements = para.xpath('.//w:t', namespaces=namespaces)
+            para_text = ""
+            for text_elem in text_elements:
+                if text_elem.text:
+                    para_text += text_elem.text
+            return para_text.strip()
+        
+        current_app.logger.info("🔍 Scanning for page breaks to identify pages 2-4...")
+        
+        for para_idx, para in enumerate(all_paragraphs):
+            para_text = get_para_text(para)
+            
+            # Check if this paragraph has a page break
+            if has_page_break(para):
+                page_breaks_found += 1
+                current_app.logger.info(f"📄 Found page break #{page_breaks_found} at paragraph {para_idx}: '{para_text[:50]}{'...' if len(para_text) > 50 else ''}'")
+                
+                if page_breaks_found == 1:
+                    # This is the start of page 2
+                    in_pages_2_to_4 = True
+                    current_app.logger.info("🎯 Starting to remove content from page 2...")
+                elif page_breaks_found == 4:
+                    # This is the start of page 5 - stop removing
+                    in_pages_2_to_4 = False
+                    current_app.logger.info("✅ Reached page 5 - stopping removal")
+                    break
+            
+            # If we're in pages 2-4, mark this paragraph for removal
+            if in_pages_2_to_4:
+                paragraphs_to_remove.append(para)
+                if para_text:  # Only log non-empty paragraphs
+                    current_app.logger.debug(f"🗑️ Marking for removal (page {2 if page_breaks_found <= 1 else 3 if page_breaks_found <= 2 else 4}): '{para_text[:60]}{'...' if len(para_text) > 60 else ''}'")
+        
+        # If we didn't find enough page breaks, use a different strategy
+        if page_breaks_found < 1:
+            current_app.logger.warning("⚠️ No page breaks found. Using content-based detection...")
+            
+            # Alternative strategy: Look for TOC/LOF/LOT content patterns
+            toc_start_found = False
+            content_start_found = False
+            
+            for para_idx, para in enumerate(all_paragraphs):
+                para_text = get_para_text(para)
+                para_lower = para_text.lower()
+                
+                # Look for TOC start
+                if not toc_start_found and ('table of contents' in para_lower or 
+                                          'contents' in para_lower or
+                                          para_text.strip() in ['1.2', '1.3', '1.4'] or
+                                          'methodology' in para_lower):
+                    toc_start_found = True
+                    current_app.logger.info(f"🎯 Found TOC start at paragraph {para_idx}: '{para_text}'")
+                
+                # Look for main content start (after TOC/LOF/LOT)
+                if toc_start_found and not content_start_found:
+                    # Check if this looks like main content (not TOC entries)
+                    is_main_content = (
+                        len(para_text) > 100 or  # Long paragraphs are usually main content
+                        ('buy now pay later' in para_lower and len(para_text) > 50) or
+                        para_text.startswith('This report') or
+                        para_text.startswith('The purpose') or
+                        ('analysis' in para_lower and len(para_text) > 50)
+                    )
+                    
+                    if is_main_content:
+                        content_start_found = True
+                        current_app.logger.info(f"✅ Found main content start at paragraph {para_idx}: '{para_text[:50]}...'")
+                        break
+                
+                # If we're between TOC start and main content start, remove it
+                if toc_start_found and not content_start_found:
+                    paragraphs_to_remove.append(para)
+                    if para_text:
+                        current_app.logger.debug(f"🗑️ Marking TOC content for removal: '{para_text[:60]}{'...' if len(para_text) > 60 else ''}'")
+        
+        # Remove all identified paragraphs
+        removed_count = 0
+        for para in paragraphs_to_remove:
+            parent = para.getparent()
+            if parent is not None:
+                parent.remove(para)
+                removed_count += 1
+        
+        current_app.logger.info(f"🗑️ Removed {removed_count} paragraphs from pages 2-4")
+        
+        # Save the modified XML
+        modified_xml = etree.tostring(root, encoding='utf-8', xml_declaration=True).decode('utf-8')
+        with open(doc_xml_path, 'w', encoding='utf-8') as f:
+            f.write(modified_xml)
+        
+        # Repackage the docx file
+        new_docx_path = docx_path + '.tmp'
+        with zipfile.ZipFile(new_docx_path, 'w', zipfile.ZIP_DEFLATED) as zip_out:
+            for root_dir, dirs, files in os.walk(extract_dir):
+                for file in files:
+                    file_path = os.path.join(root_dir, file)
+                    arcname = os.path.relpath(file_path, extract_dir)
+                    zip_out.write(file_path, arcname)
+        
+        # Replace original file
+        shutil.move(new_docx_path, docx_path)
+        
+        # Cleanup
+        shutil.rmtree(temp_dir)
+        
+        result = {
+            'success': True,
+            'paragraphs_removed': removed_count,
+            'page_breaks_found': page_breaks_found,
+            'message': f'Successfully removed {removed_count} paragraphs from pages 2-4'
+        }
+        
+        current_app.logger.info(f"✅ AGGRESSIVE CLEANING Complete: {result['message']}")
+        return result
+        
+    except Exception as e:
+        current_app.logger.error(f"❌ Error cleaning pages 2-4: {e}")
+        import traceback
+        current_app.logger.error(traceback.format_exc())
+        
+        # Cleanup on error
+        if 'temp_dir' in locals():
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass
+        
+        return {
+            'success': False,
+            'error': str(e),
+            'paragraphs_removed': 0
+        }
+
+
+def test_remove_toc_lof_lot(docx_path):
+    """
+    Test function to completely clean pages 2-4 from a Word document.
+    
+    Args:
+        docx_path: Path to the .docx file to process
+        
+    Returns:
+        dict: Result of the cleaning operation
+    """
+    try:
+        current_app.logger.info(f"🧪 Testing aggressive page 2-4 cleaning on: {docx_path}")
+        
+        if not os.path.exists(docx_path):
+            return {
+                'success': False,
+                'error': f'File not found: {docx_path}'
+            }
+        
+        # Call the aggressive cleaning function
+        result = clean_pages_2_3_4_completely(docx_path)
+        
+        if result['success']:
+            current_app.logger.info(f"✅ Test successful: {result['message']}")
+        else:
+            current_app.logger.error(f"❌ Test failed: {result.get('error', 'Unknown error')}")
+        
+        return result
+        
+    except Exception as e:
+        current_app.logger.error(f"❌ Test error: {e}")
         return {
             'success': False,
             'error': str(e)

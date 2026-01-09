@@ -24,7 +24,7 @@ import squarify
 import re
 
 # Import TOC service
-from utils.toc_service import update_toc
+from utils.toc_service import update_toc, test_remove_toc_lof_lot, clean_pages_2_3_4_completely
 
 # Define a constant for the section1_chart attribut
 
@@ -10678,3 +10678,40 @@ def get_project(project_id):
     del project['_id']
     
     return jsonify({'project': project})
+
+
+@projects_bp.route('/api/test-remove-toc', methods=['POST'])
+@login_required
+def test_remove_toc_endpoint():
+    """
+    Test endpoint to remove TOC/LOF/LOT content from a Word document.
+    
+    Expects JSON with:
+    {
+        "docx_path": "/path/to/document.docx"
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data or 'docx_path' not in data:
+            return jsonify({
+                'success': False,
+                'error': 'docx_path is required'
+            }), 400
+        
+        docx_path = data['docx_path']
+        
+        # Test the aggressive cleaning function
+        result = clean_pages_2_3_4_completely(docx_path)
+        
+        if result['success']:
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        current_app.logger.error(f"❌ Test endpoint error: {e}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
