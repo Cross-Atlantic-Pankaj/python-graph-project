@@ -44,7 +44,7 @@ def login():
     user_doc = current_app.mongo.db.users.find_one({'username': data['username']})
     if user_doc and user_doc['password'] == data['password']:  # Direct password comparison
         user = User(user_doc)
-        login_user(user)
+        login_user(user, remember=True)  # remember=True helps with session persistence
         return jsonify({'message': 'Login successful', 'user': {
             'id': user.id,
             'username': user.username,

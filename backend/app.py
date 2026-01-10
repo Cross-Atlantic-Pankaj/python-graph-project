@@ -64,7 +64,12 @@ def create_app():
     # Configure cookies to work over HTTP on AWS. When you move to HTTPS, set
     # SESSION_COOKIE_SECURE=True and SESSION_COOKIE_SAMESITE='None'.
     app.config['SESSION_COOKIE_SECURE'] = False
-    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    # For cross-origin on HTTP: Try 'None' as string (some browsers may accept it even without Secure)
+    # If this doesn't work, the browser is blocking it and you'll need HTTPS
+    # Alternative: Set to None (Python None) to omit SameSite attribute entirely
+    app.config['SESSION_COOKIE_SAMESITE'] = 'None'  # String 'None' - may work on some browsers even without Secure
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_DOMAIN'] = None
     CORS(
         app,
         origins=[
@@ -73,9 +78,7 @@ def create_app():
             "http://localhost:3002",
             "http://13.201.16.204:3002",
             "http://3.111.213.47:3002",
-            "https://python-graph-project-fall-ss1cuw632.vercel.app",
-            "https://python-graph-project-fall.vercel.app",
-            "https://python-graph-project.onrender.com",
+            "http://13.235.141.55:3002",
             "http://localhost:3000",
             "http://localhost:3001"
         ],
@@ -88,12 +91,21 @@ def create_app():
     app.mongo = mongo # Explicitly attach the mongo instance to the app object
 
     login_manager.init_app(app)
+    login_manager.session_protection = "basic"  # Use basic session protection for cross-origin
     
     # Import blueprints and User model AFTER mongo and login_manager are initialized
     from routes.auth import auth_bp, User 
     from routes.projects import projects_bp
     app.register_blueprint(auth_bp)
     app.register_blueprint(projects_bp)
+    
+    # Add after_request handler to ensure CORS headers are always set
+    @app.after_request
+    def after_request(response):
+        # Ensure Access-Control-Allow-Credentials is set for all responses
+        if 'Access-Control-Allow-Credentials' not in response.headers:
+            response.headers['Access-Control-Allow-Credentials'] = 'true'
+        return response
 
     @login_manager.user_loader
     def load_user(user_id):
