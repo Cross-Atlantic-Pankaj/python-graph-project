@@ -57,7 +57,7 @@ function Register() {
     setError('');
     
     try {
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/register`, formData);
+      const response = await axios.post('/api/register', formData);
       if (response.data.message === 'Registration successful') {
         setAlert({
           open: true,

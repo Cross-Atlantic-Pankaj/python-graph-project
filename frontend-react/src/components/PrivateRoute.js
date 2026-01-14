@@ -11,7 +11,7 @@ function PrivateRoute({ children }) {
   React.useEffect(() => {
     const checkAuth = async () => {
       try {
-        await axios.get(`${process.env.REACT_APP_API_URL}/api/user`);
+        await axios.get('/api/user');
         setIsAuthenticated(true);
       } catch (error) {
         setIsAuthenticated(false);

@@ -54,7 +54,7 @@ function Login() {
     setError('');
     
     try {
-      const response = await axios.post(`${process.env.REACT_APP_API_URL}/api/login`, formData);
+      const response = await axios.post('/api/login', formData);
       if (response.data.message === 'Login successful') {
         navigate('/dashboard');
       }

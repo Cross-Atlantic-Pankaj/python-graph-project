@@ -70,18 +70,24 @@ def create_app():
     app.config['SESSION_COOKIE_SAMESITE'] = 'None'  # String 'None' - may work on some browsers even without Secure
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_DOMAIN'] = None
+    # Get allowed origins from environment variable or use defaults
+    # For deployment, set CORS_ORIGINS env var with comma-separated origins
+    # Example: CORS_ORIGINS=http://localhost:3000,http://localhost:3001
+    cors_origins_env = os.environ.get('CORS_ORIGINS', '')
+    if cors_origins_env:
+        # Split by comma and strip whitespace
+        allowed_origins = [origin.strip() for origin in cors_origins_env.split(',') if origin.strip()]
+    else:
+        # Default origins for development (can be removed if not needed)
+        allowed_origins = [
+            "http://localhost:3000",
+            "http://localhost:3001",
+            "http://localhost:3002"
+        ]
+    
     CORS(
         app,
-        origins=[
-            "http://52.66.214.215:3000",
-            "http://13.234.17.200:3000",
-            "http://localhost:3002",
-            "http://13.201.16.204:3002",
-            "http://3.111.213.47:3002",
-            "http://13.235.141.55:3002",
-            "http://localhost:3000",
-            "http://localhost:3001"
-        ],
+        origins=allowed_origins,
         supports_credentials=True,
         allow_headers=["Content-Type", "Authorization"],
         methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]

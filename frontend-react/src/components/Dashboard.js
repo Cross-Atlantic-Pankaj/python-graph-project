@@ -131,7 +131,7 @@ function Dashboard() {
 
   const loadUser = async () => {
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/user`);
+      const response = await axios.get('/api/user');
       setUser(response.data.user);
     } catch (error) {
       navigate('/login');
@@ -141,7 +141,7 @@ function Dashboard() {
   const loadProjects = async () => {
     setIsLoading(true);
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/projects`);
+      const response = await axios.get('/api/projects');
       setProjects(response.data.projects);
       
       // Calculate stats
@@ -252,7 +252,7 @@ function Dashboard() {
         formData.append('file', newProject.file);
       }
   
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/projects`, formData, {
+      await axios.post('/api/projects', formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -287,7 +287,7 @@ function Dashboard() {
         formData.append('file', editingProject.file);
       }
 
-      await axios.put(`${process.env.REACT_APP_API_URL}/api/projects/${editingProject.id}`, formData, {
+      await axios.put(`/api/projects/${editingProject.id}`, formData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -309,7 +309,7 @@ function Dashboard() {
     }
 
     try {
-      await axios.delete(`${process.env.REACT_APP_API_URL}/api/projects/${projectId}`);
+      await axios.delete(`/api/projects/${projectId}`);
       loadProjects();
       showAlert('Success!', 'Project deleted successfully.', 'success');
     } catch (error) {
@@ -343,7 +343,7 @@ function Dashboard() {
   const handleShowChartErrors = async (project) => {
     setSelectedProjectForErrors(project);
     try {
-      const response = await axios.get(`${process.env.REACT_APP_API_URL}/api/projects/${project.id}/chart_errors`);
+      const response = await axios.get(`/api/projects/${project.id}/chart_errors`);
       console.log('Chart errors response:', response.data);
       setChartErrors(response.data);
       setShowErrorDialog(true);
@@ -357,7 +357,7 @@ function Dashboard() {
   const clearProjectErrors = async (projectId) => {
     try {
       // Clear errors by making a request to reset them
-      await axios.post(`${process.env.REACT_APP_API_URL}/api/projects/${projectId}/clear_errors`);
+      await axios.post(`/api/projects/${projectId}/clear_errors`);
     } catch (error) {
       console.error('Error clearing project errors:', error);
     }
@@ -398,7 +398,7 @@ function Dashboard() {
       setBatchProgress({ current: 0, total: 0, message: 'Processing ZIP file...', percentage: 20 });
       
         const response = await axios.post(
-          `${process.env.REACT_APP_API_URL}/api/projects/${selectedProjectForReport.id}/upload_zip`,
+          `/api/projects/${selectedProjectForReport.id}/upload_zip`,
           formData,
           {
             headers: { 'Content-Type': 'multipart/form-data' },
@@ -433,7 +433,7 @@ function Dashboard() {
       
       try {
         const downloadResponse = await axios.get(
-          `${process.env.REACT_APP_API_URL}/api/reports/batch_reports_${selectedProjectForReport.id}.zip`,
+          `/api/reports/batch_reports_${selectedProjectForReport.id}.zip`,
           { responseType: 'blob' }
         );
 
@@ -507,7 +507,7 @@ function Dashboard() {
       setSingleProgress({ message: 'Processing Excel data...', percentage: 40 });
 
       await axios.post(
-        `${process.env.REACT_APP_API_URL}/api/projects/${selectedProjectForReport.id}/upload_report`,
+        `/api/projects/${selectedProjectForReport.id}/upload_report`,
         formData,
         {
           headers: { 'Content-Type': 'multipart/form-data' },
@@ -517,7 +517,7 @@ function Dashboard() {
       setSingleProgress({ message: 'Generating charts and report...', percentage: 70 });
       
       try {
-        const errorResponse = await axios.get(`${process.env.REACT_APP_API_URL}/api/projects/${selectedProjectForReport.id}/chart_errors`);
+        const errorResponse = await axios.get(`/api/projects/${selectedProjectForReport.id}/chart_errors`);
         const errors = errorResponse.data;
         
         const chartErrorCount = Object.keys(errors.chart_generation_errors || {}).length;
@@ -556,7 +556,7 @@ function Dashboard() {
 
       try {
         const downloadResponse = await axios.get(
-          `${process.env.REACT_APP_API_URL}/api/reports/${selectedProjectForReport.id}/download`,
+          `/api/reports/${selectedProjectForReport.id}/download`,
           {
             responseType: 'blob',
             withCredentials: true,
@@ -607,7 +607,7 @@ function Dashboard() {
 
   const handleLogout = async () => {
     try {
-      await axios.get(`${process.env.REACT_APP_API_URL}/api/logout`);
+      await axios.get('/api/logout');
       navigate('/login');
     } catch (error) {
       console.error('Error logging out:', error);
