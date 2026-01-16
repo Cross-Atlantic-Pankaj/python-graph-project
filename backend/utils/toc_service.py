@@ -2121,9 +2121,12 @@ def force_complete_toc_rebuild(docx_path):
     """
     try:
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"toc_service.py:1751","message":"force_complete_toc_rebuild ENTRY","data":{"docx_path":docx_path},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"toc_service.py:1751","message":"force_complete_toc_rebuild ENTRY","data":{"docx_path":docx_path},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         fields_rebuilt = 0
         
@@ -2131,8 +2134,11 @@ def force_complete_toc_rebuild(docx_path):
         current_app.logger.info("🔄 Step 1: Aggressively cleaning pages 2-4 to remove ALL existing TOC/LOF/LOT content...")
         clean_result = clean_pages_2_3_4_completely(docx_path)
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"toc_service.py:1756","message":"After aggressive cleaning","data":{"success":clean_result.get('success'),"removed":clean_result.get('paragraphs_removed',0)},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"A","location":"toc_service.py:1756","message":"After aggressive cleaning","data":{"success":clean_result.get('success'),"removed":clean_result.get('paragraphs_removed',0)},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         if clean_result.get('success'):
             current_app.logger.info(f"✅ Aggressive cleaning complete: Removed {clean_result.get('paragraphs_removed', 0)} paragraphs from pages 2-4")
@@ -2450,25 +2456,34 @@ def force_complete_toc_rebuild(docx_path):
         current_app.logger.info("🔄 Step 3b: Finding figures and tables with correct page numbers...")
         figures, tables = find_all_figures_and_tables(doc_for_figures, cover_page_end_idx=cover_page_end_idx, toc_pages=toc_pages, lof_pages=lof_pages, lot_pages=lot_pages)
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"toc_service.py:2065","message":"Figures and tables found with correct page numbers","data":{"figures_count":len(figures),"tables_count":len(tables)},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"toc_service.py:2065","message":"Figures and tables found with correct page numbers","data":{"figures_count":len(figures),"tables_count":len(tables)},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         
         # STEP 4: Calculate page numbers for all headings (AFTER finding figures/tables and calculating page counts)
         current_app.logger.info("🔄 Step 4: Calculating page numbers for all headings...")
         heading_pages = calculate_page_numbers_for_headings(docx_path, lof_pages=lof_pages, lot_pages=lot_pages, toc_pages=toc_pages)
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"toc_service.py:2017","message":"After page number calculation","data":{"headings_found":len(heading_pages) if heading_pages else 0},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"toc_service.py:2017","message":"After page number calculation","data":{"headings_found":len(heading_pages) if heading_pages else 0},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         
         if not heading_pages:
             current_app.logger.warning("⚠️ No headings found for TOC")
             # #region agent log
-            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"toc_service.py:2020","message":"EARLY RETURN - No headings","data":{},"timestamp":int(time.time()*1000)}) + '\n')
+            try:
+                with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"B","location":"toc_service.py:2020","message":"EARLY RETURN - No headings","data":{},"timestamp":int(time.time()*1000)}) + '\n')
+            except (FileNotFoundError, PermissionError, OSError):
+                pass  # Debug log file not available on server - skip silently
             # #endregion
             shutil.rmtree(temp_dir)
             return 0
@@ -2549,9 +2564,12 @@ def force_complete_toc_rebuild(docx_path):
         if page_break_already_exists:
             current_app.logger.info("📄 Page break already exists - TOC will start on page 2 without adding another page break")
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"toc_service.py:2088","message":"Insertion point determined","data":{"insertion_index":insertion_index,"total_paragraphs":len(all_paragraphs_after_cleanup)},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"toc_service.py:2088","message":"Insertion point determined","data":{"insertion_index":insertion_index,"total_paragraphs":len(all_paragraphs_after_cleanup)},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         
         # Always proceed with insertion
@@ -2620,9 +2638,12 @@ def force_complete_toc_rebuild(docx_path):
                     'original_text': original_text
                 })
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"toc_service.py:2116","message":"Clean headings prepared","data":{"clean_headings_count":len(clean_headings)},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"toc_service.py:2116","message":"Clean headings prepared","data":{"clean_headings_count":len(clean_headings)},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         
         # Get the target paragraph for insertion
@@ -2649,9 +2670,12 @@ def force_complete_toc_rebuild(docx_path):
         
         current_app.logger.debug(f"📍 Inserting TOC at parent index {insert_index}")
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"toc_service.py:2167","message":"Insert parent determined","data":{"insert_index":insert_index,"parent_children_count":len(list(insert_parent)) if insert_parent else 0},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"C","location":"toc_service.py:2167","message":"Insert parent determined","data":{"insert_index":insert_index,"parent_children_count":len(list(insert_parent)) if insert_parent else 0},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         
         # Create TOC paragraphs
@@ -2703,34 +2727,46 @@ def force_complete_toc_rebuild(docx_path):
         
         # Insert title
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            parent_list = list(insert_parent)
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2168","message":"Title insertion decision","data":{"index":index,"parent_length":len(parent_list),"will_insert":index < len(parent_list)},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                parent_list = list(insert_parent)
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2168","message":"Title insertion decision","data":{"index":index,"parent_length":len(parent_list),"will_insert":index < len(parent_list)},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         if index < len(list(insert_parent)):
             insert_parent.insert(index, toc_title_para)
             index += 1
             # #region agent log
-            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2208","message":"Title INSERTED","data":{"index":index},"timestamp":int(time.time()*1000)}) + '\n')
+            try:
+                with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2208","message":"Title INSERTED","data":{"index":index},"timestamp":int(time.time()*1000)}) + '\n')
+            except (FileNotFoundError, PermissionError, OSError):
+                pass  # Debug log file not available on server - skip silently
             # #endregion
         else:
             insert_parent.append(toc_title_para)
             # #region agent log
-            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2215","message":"Title APPENDED","data":{},"timestamp":int(time.time()*1000)}) + '\n')
+            try:
+                with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2215","message":"Title APPENDED","data":{},"timestamp":int(time.time()*1000)}) + '\n')
+            except (FileNotFoundError, PermissionError, OSError):
+                pass  # Debug log file not available on server - skip silently
             # #endregion
         
         # Create TOC entries - ALL LEFT-ALIGNED (no indentation based on level)
         # Store references to TOC entry paragraphs for later page number updates
         toc_entry_paragraphs = []  # List of (heading_text, paragraph_element) tuples
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2221","message":"Creating TOC entries","data":{"clean_headings_count":len(clean_headings)},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2221","message":"Creating TOC entries","data":{"clean_headings_count":len(clean_headings)},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
-        for heading_info in clean_headings:
+            for heading_info in clean_headings:
                 heading_text = heading_info['text']
                 page_num = heading_info['page']
                 
@@ -2803,17 +2839,23 @@ def force_complete_toc_rebuild(docx_path):
         
         current_app.logger.info(f"✅ Wrote formatted TOC with {len(clean_headings)} entries (all left-aligned)")
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2295","message":"TOC entries created","data":{"entries_count":len(clean_headings)},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"D","location":"toc_service.py:2295","message":"TOC entries created","data":{"entries_count":len(clean_headings)},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         
         # Add List of Figures after TOC
         # Use figures and tables already found in Step 3 (no need to re-find them)
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"toc_service.py:2305","message":"Using previously found figures and tables","data":{"figures_count":len(figures),"tables_count":len(tables)},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"toc_service.py:2305","message":"Using previously found figures and tables","data":{"figures_count":len(figures),"tables_count":len(tables)},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         
         if figures:
@@ -2936,9 +2978,12 @@ def force_complete_toc_rebuild(docx_path):
             
             current_app.logger.info(f"✅ Added List of Figures with {len(figures)} entries (all left-aligned)")
             # #region agent log
-            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-                import json, time
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"toc_service.py:2422","message":"LOF entries created","data":{"figures_count":len(figures)},"timestamp":int(time.time()*1000)}) + '\n')
+            try:
+                with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                    import json, time
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"toc_service.py:2422","message":"LOF entries created","data":{"figures_count":len(figures)},"timestamp":int(time.time()*1000)}) + '\n')
+            except (FileNotFoundError, PermissionError, OSError):
+                pass  # Debug log file not available on server - skip silently
             # #endregion
         
         # Add List of Tables after LOF
@@ -3062,9 +3107,12 @@ def force_complete_toc_rebuild(docx_path):
             
             current_app.logger.info(f"✅ Added List of Tables with {len(tables)} entries (all left-aligned)")
             # #region agent log
-            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-                import json, time
-                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"toc_service.py:2539","message":"LOT entries created","data":{"tables_count":len(tables)},"timestamp":int(time.time()*1000)}) + '\n')
+            try:
+                with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                    import json, time
+                    f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"E","location":"toc_service.py:2539","message":"LOT entries created","data":{"tables_count":len(tables)},"timestamp":int(time.time()*1000)}) + '\n')
+            except (FileNotFoundError, PermissionError, OSError):
+                pass  # Debug log file not available on server - skip silently
             # #endregion
         
         # Add page break before main content (after all TOC/LOF/LOT) to ensure "About this Report" starts on a new page
@@ -3295,9 +3343,12 @@ def force_complete_toc_rebuild(docx_path):
         
         result_value = fields_rebuilt if fields_rebuilt > 0 else 1
         # #region agent log
-        with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
-            import json, time
-            f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"F","location":"toc_service.py:2549","message":"Function EXIT","data":{"fields_rebuilt":fields_rebuilt,"removed_count":removed_count,"return_value":result_value},"timestamp":int(time.time()*1000)}) + '\n')
+        try:
+            with open('/Users/macbookpro/Documents/GitHub/Python Graph Project/.cursor/debug.log', 'a') as f:
+                import json, time
+                f.write(json.dumps({"sessionId":"debug-session","runId":"run1","hypothesisId":"F","location":"toc_service.py:2549","message":"Function EXIT","data":{"fields_rebuilt":fields_rebuilt,"removed_count":removed_count,"return_value":result_value},"timestamp":int(time.time()*1000)}) + '\n')
+        except (FileNotFoundError, PermissionError, OSError):
+            pass  # Debug log file not available on server - skip silently
         # #endregion
         return result_value
         
