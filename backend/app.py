@@ -76,10 +76,12 @@ def create_app():
     cors_origins_env = os.environ.get('CORS_ORIGINS', '')
     if cors_origins_env:
         # Split by comma and strip whitespace
-        allowed_origins = [origin.strip() for origin in cors_origins_env.split(',') if origin.strip()]
+        allowed_origins = [
+            origin.strip() for origin in cors_origins_env.split(',') if origin.strip()]
     else:
         # Default origins for development (can be removed if not needed)
         allowed_origins = [
+            "http://13.235.141.55:3002",
             "http://localhost:3000",
             "http://localhost:3001",
             "http://localhost:3002"
@@ -87,10 +89,13 @@ def create_app():
     
     CORS(
         app,
-        origins=allowed_origins,
-        supports_credentials=True,
-        allow_headers=["Content-Type", "Authorization"],
-        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+        resources={r"/*": {
+            "origins": "*",
+            "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+            "supports_credentials": False,
+            "expose_headers": ["Content-Type", "Authorization"]
+        }}
     )
 
     mongo.init_app(app) # Initialize the global mongo instance with the app instance
@@ -138,3 +143,6 @@ def create_app():
 if __name__ == '__main__':
     app = create_app()
     app.run(debug=True, host='0.0.0.0', port=5001)
+
+# Create app instance for Gunicorn
+app = create_app()

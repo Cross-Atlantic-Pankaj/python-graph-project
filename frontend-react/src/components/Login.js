@@ -15,7 +15,7 @@ import {
   CircularProgress,
 } from '@mui/material';
 import Alert from './Alert';
-import axios from 'axios';
+import api from '../api';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import VisibilityIcon from '@mui/icons-material/Visibility';
 import VisibilityOffIcon from '@mui/icons-material/VisibilityOff';
@@ -23,7 +23,7 @@ import EmailIcon from '@mui/icons-material/Email';
 import PersonIcon from '@mui/icons-material/Person';
 
 // Ensure cookies are included for session-based auth
-axios.defaults.withCredentials = true;
+api.defaults.withCredentials = true;
 
 function Login() {
   const navigate = useNavigate();
@@ -54,7 +54,7 @@ function Login() {
     setError('');
     
     try {
-      const response = await axios.post('/api/login', formData);
+      const response = await api.post('/login', formData);
       if (response.data.message === 'Login successful') {
         navigate('/dashboard');
       }
